@@ -280,6 +280,7 @@ dependencies = [
  "htmlang-core",
  "notify",
  "rustls-pemfile",
+ "serde_json",
  "tokio",
  "tokio-rustls",
  "tower-lsp",

@@ -1,5 +1,7 @@
 use tower_lsp::lsp_types::*;
 
+use crate::completion::collect_theme_tokens;
+
 pub(crate) fn hover_at(text: &str, position: Position) -> Option<Hover> {
     let lines: Vec<&str> = text.lines().collect();
     let line = lines.get(position.line as usize)?;
@@ -7,7 +9,7 @@ pub(crate) fn hover_at(text: &str, position: Position) -> Option<Hover> {
     let word = word_at(line, col)?;
 
     let doc = if let Some(var_name) = word.strip_prefix('$') {
-        hover_variable(text, var_name)
+        hover_theme_token(text, var_name).or_else(|| hover_variable(text, var_name))
     } else if let Some(fn_name) = word.strip_prefix('@') {
         hover_user_fn(text, fn_name).or_else(|| hover_builtin(&word))
     } else {
@@ -41,6 +43,15 @@ pub(crate) fn word_at(line: &str, col: usize) -> Option<String> {
 
 pub(crate) fn is_word_byte(c: u8) -> bool {
     c.is_ascii_alphanumeric() || c == b'@' || c == b'$' || c == b'-' || c == b'_' || c == b':'
+}
+
+fn hover_theme_token(text: &str, name: &str) -> Option<String> {
+    let tokens = collect_theme_tokens(text);
+    let (token_name, value) = tokens.iter().find(|(n, _)| n == name)?;
+    Some(format!(
+        "**${}** \u{2014} `@theme` token\n\nValue: `{}`\n\nAlso available as the CSS custom property `--{}`.",
+        token_name, value, token_name
+    ))
 }
 
 fn hover_variable(text: &str, name: &str) -> Option<String> {

@@ -57,12 +57,18 @@ pub(crate) fn completions(text: &str, position: Position) -> Vec<CompletionItem>
             }
         }
 
-        // Color value completions after color-related attributes
+        // Attribute-value enums for `attr <value>` patterns (e.g. type, cursor).
+        if let Some(values) = attr_value_completions(before, edit_range) {
+            return values;
+        }
+
+        // Color value completions after color-related attributes.
         if let Some(colors) = color_value_completions(before, edit_range) {
             return colors;
         }
 
-        return attr_completions(edit_range);
+        let element = owning_element(text, position);
+        return attr_completions(edit_range, element.as_deref());
     }
 
     // $ variable reference outside brackets
@@ -114,6 +120,45 @@ pub(crate) fn in_brackets(text: &str) -> bool {
         }
     }
     depth > 0
+}
+
+/// Extract design tokens from any `@theme` blocks in the source.
+///
+/// `@theme` opens a block whose indented children are `name value` pairs.
+/// Each pair becomes both a `$variable` reference and a CSS custom property
+/// at codegen time. We surface them as completions and hover targets.
+pub(crate) fn collect_theme_tokens(text: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let lines: Vec<&str> = text.lines().collect();
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i];
+        let trimmed = line.trim_start();
+        if trimmed == "@theme" || trimmed.starts_with("@theme ") {
+            let header_indent = line.len() - trimmed.len();
+            let mut j = i + 1;
+            while j < lines.len() {
+                let l = lines[j];
+                if l.trim().is_empty() {
+                    j += 1;
+                    continue;
+                }
+                let indent = l.len() - l.trim_start().len();
+                if indent <= header_indent {
+                    break;
+                }
+                let body = l.trim();
+                if let Some((name, value)) = body.split_once(char::is_whitespace) {
+                    out.push((name.trim().to_string(), value.trim().to_string()));
+                }
+                j += 1;
+            }
+            i = j;
+        } else {
+            i += 1;
+        }
+    }
+    out
 }
 
 fn item(
@@ -637,7 +682,431 @@ pub(crate) fn use_symbol_completions(
     items
 }
 
-fn attr_completions(range: Range) -> Vec<CompletionItem> {
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pos(line: u32, ch: u32) -> Position {
+        Position::new(line, ch)
+    }
+
+    #[test]
+    fn owning_element_finds_element_on_same_line() {
+        let text = "@input [type text, ";
+        // Cursor at end of line — inside the unclosed `[`.
+        assert_eq!(
+            owning_element(text, pos(0, text.len() as u32)),
+            Some("input".to_string())
+        );
+    }
+
+    #[test]
+    fn owning_element_finds_element_across_lines() {
+        let text = "@button [\n  padding 10,\n  ";
+        assert_eq!(
+            owning_element(text, pos(2, 2)),
+            Some("button".to_string())
+        );
+    }
+
+    #[test]
+    fn owning_element_returns_none_when_not_in_brackets() {
+        let text = "@row\n";
+        assert_eq!(owning_element(text, pos(0, 4)), None);
+    }
+
+    #[test]
+    fn owning_element_skips_nested_brackets() {
+        let text = "@el [transform translate(10, [20, 30]), ";
+        // Cursor sits inside the outermost bracket after the inner one closed.
+        assert_eq!(
+            owning_element(text, pos(0, text.len() as u32)),
+            Some("el".to_string())
+        );
+    }
+
+    #[test]
+    fn theme_tokens_extracted_from_block() {
+        let text = "@theme\n  primary #3b82f6\n  spacing-md 16\n@row\n";
+        let tokens = collect_theme_tokens(text);
+        assert_eq!(
+            tokens,
+            vec![
+                ("primary".into(), "#3b82f6".into()),
+                ("spacing-md".into(), "16".into()),
+            ]
+        );
+    }
+}
+
+/// Walk back from `position` to find the element directive that opened the
+/// nearest unmatched `[`. Returns the bare name without the leading `@`
+/// (e.g. `"input"`).
+pub(crate) fn owning_element(text: &str, position: Position) -> Option<String> {
+    let lines: Vec<&str> = text.lines().collect();
+    // First, locate the line that contains the unmatched `[`. We scan from
+    // the cursor back, tracking depth.
+    let cursor_line = position.line as usize;
+    let cursor_col = (position.character as usize)
+        .min(lines.get(cursor_line).map(|l| l.len()).unwrap_or(0));
+    let mut depth: i32 = 0;
+    let mut bracket_line: Option<usize> = None;
+    let mut bracket_col: usize = 0;
+    'outer: for line_idx in (0..=cursor_line).rev() {
+        let line = lines[line_idx];
+        let last = if line_idx == cursor_line {
+            cursor_col
+        } else {
+            line.len()
+        };
+        for (col, ch) in line[..last].char_indices().rev() {
+            match ch {
+                ']' => depth += 1,
+                '[' => {
+                    if depth == 0 {
+                        bracket_line = Some(line_idx);
+                        bracket_col = col;
+                        break 'outer;
+                    }
+                    depth -= 1;
+                }
+                _ => {}
+            }
+        }
+    }
+    let line_idx = bracket_line?;
+    let line = lines[line_idx];
+    // The owning element should appear on the same line as the `[`. Look
+    // backwards for an `@name` token before the bracket. Anything else
+    // (e.g. `$bundle [...]`) doesn't bind to a builtin element.
+    let prefix = &line[..bracket_col];
+    let at_pos = prefix.rfind('@')?;
+    let after_at = &prefix[at_pos + 1..];
+    let name_end = after_at
+        .find(|c: char| !c.is_ascii_alphanumeric() && c != '-' && c != '_')
+        .unwrap_or(after_at.len());
+    let name = &after_at[..name_end];
+    if name.is_empty() {
+        return None;
+    }
+    Some(name.to_string())
+}
+
+/// Attributes the LSP knows are specifically meaningful for a given element.
+/// Universal styling attributes (padding, color, etc.) aren't listed here —
+/// they remain available to every element via `attr_completions`.
+fn element_specific_attrs(element: &str) -> &'static [&'static str] {
+    match element {
+        "input" => &[
+            "type",
+            "name",
+            "value",
+            "placeholder",
+            "required",
+            "disabled",
+            "checked",
+            "readonly",
+            "pattern",
+            "min",
+            "max",
+            "step",
+            "multiple",
+            "maxlength",
+            "minlength",
+            "autofocus",
+            "autocomplete",
+            "inputmode",
+            "spellcheck",
+            "list",
+            "accept",
+        ],
+        "button" | "btn" => &[
+            "type",
+            "disabled",
+            "name",
+            "value",
+            "autofocus",
+            "popovertarget",
+            "popovertargetaction",
+        ],
+        "select" => &["name", "multiple", "required", "disabled", "size", "autofocus"],
+        "textarea" => &[
+            "name",
+            "rows",
+            "cols",
+            "placeholder",
+            "required",
+            "disabled",
+            "readonly",
+            "maxlength",
+            "minlength",
+            "wrap",
+            "autofocus",
+            "spellcheck",
+        ],
+        "option" | "opt" => &["value", "selected", "disabled", "label"],
+        "form" => &[
+            "action",
+            "method",
+            "novalidate",
+            "target",
+            "autocomplete",
+            "enctype",
+            "name",
+        ],
+        "image" | "img" => &[
+            "src",
+            "alt",
+            "width",
+            "height",
+            "loading",
+            "decoding",
+            "fetchpriority",
+            "srcset",
+            "sizes",
+        ],
+        "link" => &["href", "target", "rel", "download", "referrerpolicy", "type"],
+        "video" => &[
+            "src",
+            "controls",
+            "autoplay",
+            "loop",
+            "muted",
+            "poster",
+            "preload",
+            "width",
+            "height",
+            "playsinline",
+        ],
+        "audio" => &["src", "controls", "autoplay", "loop", "muted", "preload"],
+        "iframe" => &[
+            "src",
+            "width",
+            "height",
+            "sandbox",
+            "allow",
+            "allowfullscreen",
+            "loading",
+            "referrerpolicy",
+        ],
+        "td" | "th" => &["colspan", "rowspan", "scope"],
+        "meter" => &["value", "min", "max", "low", "high", "optimum"],
+        "progress" => &["value", "max"],
+        "details" => &["open"],
+        "dialog" => &["open"],
+        "list" => &["ordered", "type", "start"],
+        "time" => &["datetime"],
+        "abbr" => &["title"],
+        "label" => &["for"],
+        "picture" | "source" => &["src", "srcset", "sizes", "media", "type"],
+        "meta" => &["name", "content", "charset"],
+        _ => &[],
+    }
+}
+
+/// Attributes whose value is a closed enum (e.g. `cursor`, `text-align`).
+/// Returns the list of valid values when `before` ends with the attribute
+/// name plus a single space and no value yet typed.
+fn attr_value_completions(before: &str, range: Range) -> Option<Vec<CompletionItem>> {
+    let bracket_content = before.rsplit('[').next()?;
+    let segment = bracket_content.rsplit(',').next()?.trim_start();
+    let attr_end = segment
+        .find(|c: char| c.is_whitespace())
+        .unwrap_or(segment.len());
+    let attr = &segment[..attr_end];
+    let after_attr = &segment[attr_end..];
+    if !after_attr.starts_with(' ') {
+        return None;
+    }
+    // Only fire when no value has been started yet.
+    let typed = after_attr.trim_start();
+    if !typed.is_empty() {
+        return None;
+    }
+
+    // Strip state prefix to find the base attribute.
+    let base_attr = if let Some(pos) = attr.rfind(':') {
+        &attr[pos + 1..]
+    } else {
+        attr
+    };
+
+    let values: &[&str] = match base_attr {
+        "type" => &[
+            "text",
+            "email",
+            "password",
+            "submit",
+            "button",
+            "reset",
+            "checkbox",
+            "radio",
+            "file",
+            "hidden",
+            "number",
+            "range",
+            "search",
+            "tel",
+            "url",
+            "date",
+            "datetime-local",
+            "month",
+            "time",
+            "week",
+            "color",
+        ],
+        "cursor" => &[
+            "auto",
+            "default",
+            "pointer",
+            "text",
+            "wait",
+            "help",
+            "not-allowed",
+            "crosshair",
+            "move",
+            "grab",
+            "grabbing",
+            "zoom-in",
+            "zoom-out",
+            "ew-resize",
+            "ns-resize",
+            "nesw-resize",
+            "nwse-resize",
+        ],
+        "text-align" => &["left", "center", "right", "justify", "start", "end"],
+        "text-transform" => &["uppercase", "lowercase", "capitalize", "none"],
+        "white-space" => &["normal", "nowrap", "pre", "pre-line", "pre-wrap", "break-spaces"],
+        "overflow" | "overflow-x" | "overflow-y" => {
+            &["visible", "hidden", "scroll", "auto", "clip"]
+        }
+        "position" => &["static", "relative", "absolute", "fixed", "sticky"],
+        "display" => &[
+            "block",
+            "inline",
+            "inline-block",
+            "flex",
+            "inline-flex",
+            "grid",
+            "inline-grid",
+            "none",
+            "contents",
+            "list-item",
+            "table",
+        ],
+        "visibility" => &["visible", "hidden", "collapse"],
+        "justify-content" => &[
+            "flex-start",
+            "center",
+            "flex-end",
+            "space-between",
+            "space-around",
+            "space-evenly",
+            "start",
+            "end",
+        ],
+        "align-items" => &[
+            "stretch",
+            "flex-start",
+            "center",
+            "flex-end",
+            "baseline",
+            "start",
+            "end",
+        ],
+        "align-self" => &[
+            "auto",
+            "stretch",
+            "flex-start",
+            "center",
+            "flex-end",
+            "baseline",
+        ],
+        "object-fit" => &["fill", "contain", "cover", "none", "scale-down"],
+        "loading" => &["lazy", "eager"],
+        "decoding" => &["async", "sync", "auto"],
+        "preload" => &["auto", "metadata", "none"],
+        "method" => &["get", "post", "dialog"],
+        "target" => &["_self", "_blank", "_parent", "_top"],
+        "scope" => &["row", "col", "rowgroup", "colgroup"],
+        "wrap" => &["soft", "hard", "off"],
+        "inputmode" => &[
+            "text",
+            "numeric",
+            "decimal",
+            "email",
+            "search",
+            "tel",
+            "url",
+            "none",
+        ],
+        "enterkeyhint" => &["enter", "done", "go", "next", "previous", "search", "send"],
+        "fetchpriority" => &["high", "low", "auto"],
+        "spellcheck" | "translate" => &["true", "false"],
+        "color-scheme" => &["light", "dark", "light dark", "normal"],
+        "appearance" => &["none", "auto"],
+        "autocomplete" => &["on", "off", "name", "email", "username", "current-password", "new-password"],
+        "scroll-behavior" => &["smooth", "auto"],
+        "resize" => &["none", "both", "horizontal", "vertical", "block", "inline"],
+        "writing-mode" => &["horizontal-tb", "vertical-rl", "vertical-lr"],
+        "direction" => &["ltr", "rtl"],
+        "list-style" => &["disc", "circle", "square", "decimal", "none"],
+        "border-collapse" => &["collapse", "separate"],
+        "text-decoration" => &["none", "underline", "overline", "line-through"],
+        "text-decoration-style" => &["solid", "double", "dotted", "dashed", "wavy"],
+        "text-wrap" => &["wrap", "nowrap", "balance", "pretty", "stable"],
+        "font-style" => &["normal", "italic", "oblique"],
+        "font-weight" => &[
+            "100", "200", "300", "400", "500", "600", "700", "800", "900", "normal", "bold",
+            "lighter", "bolder",
+        ],
+        "vertical-align" => &[
+            "baseline",
+            "top",
+            "middle",
+            "bottom",
+            "text-top",
+            "text-bottom",
+            "sub",
+            "super",
+        ],
+        "user-select" => &["none", "auto", "text", "all", "contain"],
+        "pointer-events" => &["none", "auto"],
+        "popovertargetaction" => &["toggle", "show", "hide"],
+        "popover" => &["auto", "manual"],
+        "hyphens" => &["none", "manual", "auto"],
+        "isolation" => &["auto", "isolate"],
+        "touch-action" => &[
+            "none",
+            "pan-x",
+            "pan-y",
+            "manipulation",
+            "auto",
+            "pinch-zoom",
+        ],
+        "contain" => &["none", "strict", "content", "size", "layout", "style", "paint"],
+        "content-visibility" => &["visible", "auto", "hidden"],
+        _ => return None,
+    };
+
+    Some(
+        values
+            .iter()
+            .map(|v| CompletionItem {
+                label: v.to_string(),
+                kind: Some(CompletionItemKind::ENUM_MEMBER),
+                detail: Some(format!("value for {}", base_attr)),
+                text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                    range,
+                    new_text: v.to_string(),
+                })),
+                ..Default::default()
+            })
+            .collect(),
+    )
+}
+
+fn attr_completions(range: Range, element: Option<&str>) -> Vec<CompletionItem> {
     [
         // Layout
         ("spacing", "Gap between children (supports CSS units)", true),
@@ -1217,7 +1686,20 @@ fn attr_completions(range: Range) -> Vec<CompletionItem> {
         } else {
             name.to_string()
         };
-        item(name, CompletionItemKind::PROPERTY, detail, &insert, range)
+        let mut completion = item(name, CompletionItemKind::PROPERTY, detail, &insert, range);
+        // Boost element-specific attributes to the top of the list when we
+        // know which element owns the brackets. The default sort prefix is
+        // "5_" so unboosted entries land below the prioritized ones, while
+        // staying above snippets (which use "zz_").
+        let boosted = element
+            .map(|e| element_specific_attrs(e).contains(name))
+            .unwrap_or(false);
+        completion.sort_text = Some(if boosted {
+            format!("0_{}", name)
+        } else {
+            format!("5_{}", name)
+        });
+        completion
     })
     .collect()
 }
@@ -1377,6 +1859,16 @@ fn color_value_completions(before: &str, range: Range) -> Option<Vec<CompletionI
 
 fn variable_completions(text: &str, range: Range) -> Vec<CompletionItem> {
     let mut items = Vec::new();
+
+    for (name, value) in collect_theme_tokens(text) {
+        items.push(item(
+            &format!("${}", name),
+            CompletionItemKind::COLOR,
+            &format!("@theme \u{2014} {}", value),
+            &format!("${}", name),
+            range,
+        ));
+    }
 
     for line in text.lines() {
         let trimmed = line.trim();

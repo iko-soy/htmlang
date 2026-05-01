@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use htmlang::parser::ParseResult;
 use tower_lsp::lsp_types::*;
 
 use crate::completion::in_brackets;
@@ -759,6 +760,15 @@ pub(crate) fn find_colors(text: &str) -> Vec<ColorInformation> {
     colors
 }
 
+/// Find a CSS named color whose RGB triple matches exactly. Used by the
+/// color presentation handler to offer "red" alongside "#ff0000".
+pub(crate) fn named_color_for(r: u8, g: u8, b: u8) -> Option<&'static str> {
+    NAMED_CSS_COLORS
+        .iter()
+        .find(|&&(_, nr, ng, nb)| nr == r && ng == g && nb == b)
+        .map(|&(name, _, _, _)| name)
+}
+
 /// Named CSS colors: (name, r, g, b)
 const NAMED_CSS_COLORS: &[(&str, u8, u8, u8)] = &[
     ("red", 255, 0, 0),
@@ -945,6 +955,34 @@ pub(crate) fn folding_ranges(text: &str) -> Vec<FoldingRange> {
         }
         i += 1;
     }
+
+    // Fold any multi-line `[...]` attribute list. We track bracket depth
+    // across lines so nested brackets and brackets that close later in the
+    // file are handled the same way.
+    let mut stack: Vec<(u32, u32)> = Vec::new(); // (line, col) of each unmatched `[`
+    for (line_idx, line) in lines.iter().enumerate() {
+        for (col, ch) in line.char_indices() {
+            match ch {
+                '[' => stack.push((line_idx as u32, col as u32)),
+                ']' => {
+                    if let Some((start_line, start_col)) = stack.pop()
+                        && start_line as usize != line_idx
+                    {
+                        ranges.push(FoldingRange {
+                            start_line,
+                            start_character: Some(start_col),
+                            end_line: line_idx as u32,
+                            end_character: Some(col as u32 + 1),
+                            kind: Some(FoldingRangeKind::Region),
+                            collapsed_text: None,
+                        });
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     ranges
 }
 
@@ -952,13 +990,12 @@ pub(crate) fn folding_ranges(text: &str) -> Vec<FoldingRange> {
 // Semantic tokens
 // ---------------------------------------------------------------------------
 
-pub(crate) fn semantic_tokens(text: &str) -> Vec<SemanticToken> {
+pub(crate) fn semantic_tokens(text: &str, result: &ParseResult) -> Vec<SemanticToken> {
     let mut tokens = Vec::new();
     let mut prev_line: u32 = 0;
     let mut prev_start: u32 = 0;
 
     // Build set of unused variables by parsing diagnostics
-    let result = htmlang::parser::parse(text);
     let mut unused_vars: std::collections::HashSet<String> = std::collections::HashSet::new();
     for d in &result.diagnostics {
         if d.message.contains("unused variable '$")

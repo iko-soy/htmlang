@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use tower_lsp::lsp_types::*;
 
 use crate::hover::{is_word_byte, word_at};
+use crate::state::WorkspaceIndex;
 
 // ---------------------------------------------------------------------------
 // Go to definition
@@ -398,6 +399,100 @@ pub(crate) fn linked_editing_ranges(text: &str, position: Position) -> Option<Li
         ranges,
         word_pattern: None,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Cross-file lookups (workspace-aware)
+// ---------------------------------------------------------------------------
+
+/// Identify the symbol token (e.g. `@card` or `$primary`) under the cursor.
+/// Returns `None` for plain words that aren't a directive or variable
+/// reference.
+pub(crate) fn symbol_at(text: &str, position: Position) -> Option<String> {
+    let lines: Vec<&str> = text.lines().collect();
+    let line = lines.get(position.line as usize)?;
+    let col = (position.character as usize).min(line.len());
+    let bytes = line.as_bytes();
+    let mut start = col;
+    while start > 0 && is_word_byte(bytes[start - 1]) {
+        start -= 1;
+    }
+    let mut end = col;
+    while end < bytes.len() && is_word_byte(bytes[end]) {
+        end += 1;
+    }
+    if start == end {
+        return None;
+    }
+    let word = &line[start..end];
+    if word.starts_with('$') || word.starts_with('@') {
+        return Some(word.to_string());
+    }
+    // Cursor on the bare name part (e.g. inside "card" of "@card") — synthesize
+    // the prefix from the preceding byte if it's `@` or `$`.
+    if start > 0 {
+        let prev = bytes[start - 1];
+        if prev == b'@' {
+            return Some(format!("@{}", word));
+        }
+        if prev == b'$' {
+            return Some(format!("${}", word));
+        }
+    }
+    None
+}
+
+/// Resolve a definition by consulting every other file in the workspace
+/// index. Returns the first match (deterministic by HashMap iteration order
+/// is not guaranteed, but typical projects only define a name once).
+pub(crate) fn cross_file_definition(
+    text: &str,
+    position: Position,
+    index: &WorkspaceIndex,
+) -> Option<GotoDefinitionResponse> {
+    let symbol = symbol_at(text, position)?;
+    let mut hits = index.find_symbol(&symbol);
+    if hits.is_empty() {
+        return None;
+    }
+    if hits.len() == 1 {
+        return Some(GotoDefinitionResponse::Scalar(hits.remove(0)));
+    }
+    Some(GotoDefinitionResponse::Array(hits))
+}
+
+/// Scan `text` for occurrences of `symbol` (a `$name` or `@name` token) and
+/// emit one `Location` per word-boundary match. Used to extend the local
+/// `find_references` result across the workspace.
+pub(crate) fn find_references_for_symbol(text: &str, symbol: &str, uri: &Url) -> Vec<Location> {
+    let mut out = Vec::new();
+    for (line_idx, line) in text.lines().enumerate() {
+        let mut offset = 0;
+        while let Some(pos) = line[offset..].find(symbol) {
+            let abs_pos = offset + pos;
+            let after = abs_pos + symbol.len();
+            let bytes = line.as_bytes();
+            let before_ok = abs_pos == 0 || {
+                let c = bytes[abs_pos - 1];
+                !c.is_ascii_alphanumeric() && c != b'_' && c != b'-'
+            };
+            let after_ok = after >= line.len() || {
+                let c = bytes[after];
+                !c.is_ascii_alphanumeric() && c != b'_' && c != b'-'
+            };
+            if before_ok && after_ok {
+                out.push(Location {
+                    uri: uri.clone(),
+                    range: Range::new(
+                        Position::new(line_idx as u32, abs_pos as u32),
+                        Position::new(line_idx as u32, after as u32),
+                    ),
+                });
+            }
+            offset = after;
+        }
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------

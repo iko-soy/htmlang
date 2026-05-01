@@ -11,7 +11,10 @@
   "categories": [
     "Programming Languages"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onLanguage:htmlang",
+    "workspaceContains:**/*.hl"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "languages": [
@@ -39,6 +42,16 @@
         "path": "./snippets/htmlang.json"
       }
     ],
+    "commands": [
+      {
+        "command": "htmlang.restartServer",
+        "title": "htmlang: Restart Language Server"
+      },
+      {
+        "command": "htmlang.showOutput",
+        "title": "htmlang: Show Language Server Output"
+      }
+    ],
     "configuration": {
       "title": "htmlang",
       "properties": {
@@ -46,6 +59,25 @@
           "type": "string",
           "default": "htmlang-lsp",
           "description": "Path to the htmlang-lsp binary"
+        },
+        "htmlang.server.args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Arguments passed to the htmlang-lsp binary"
+        },
+        "htmlang.trace.server": {
+          "type": "string",
+          "scope": "window",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Trace LSP protocol messages between VS Code and the htmlang language server."
         }
       }
     }
