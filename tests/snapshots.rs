@@ -2551,6 +2551,84 @@ fn element_stack() {
     );
 }
 
+// --- @in-front / @behind overlay layers ---
+
+#[test]
+fn element_in_front() {
+    let output = compile(
+        "@page T\n@el [width 200, height 200]\n  Main\n  @in-front\n    @text Overlay",
+    );
+    assert!(
+        output.contains("position:absolute"),
+        "@in-front should have position:absolute: {}",
+        output
+    );
+    assert!(
+        output.contains("inset:0"),
+        "@in-front should have inset:0: {}",
+        output
+    );
+}
+
+#[test]
+fn element_behind() {
+    let output =
+        compile("@page T\n@el [width 200, height 200]\n  @behind\n    @text Bg\n  Foreground");
+    assert!(
+        output.contains("z-index:-1"),
+        "@behind should have z-index:-1: {}",
+        output
+    );
+    assert!(
+        output.contains("position:absolute"),
+        "@behind should have position:absolute: {}",
+        output
+    );
+}
+
+#[test]
+fn in_front_makes_parent_positioning_context() {
+    let output =
+        compile("@page T\n@el [width 200, height 200]\n  Main\n  @in-front\n    Overlay");
+    assert!(
+        output.contains("position:relative"),
+        "parent of @in-front should be position:relative: {}",
+        output
+    );
+    assert!(
+        output.contains("isolation:isolate"),
+        "parent of @in-front should isolate stacking context: {}",
+        output
+    );
+}
+
+#[test]
+fn in_front_does_not_override_explicit_position() {
+    let output = compile(
+        "@page T\n@el [position absolute, top 0, left 0]\n  Main\n  @in-front\n    Overlay",
+    );
+    assert!(
+        !output.contains("position:relative"),
+        "explicit position:absolute should win over auto position:relative: {}",
+        output
+    );
+    assert!(
+        output.contains("position:absolute"),
+        "explicit position:absolute should be present: {}",
+        output
+    );
+}
+
+#[test]
+fn parent_without_overlay_children_stays_static() {
+    let output = compile("@page T\n@el [width 200, height 200]\n  Main");
+    assert!(
+        !output.contains("isolation:isolate"),
+        "elements without @in-front/@behind children should not get isolation: {}",
+        output
+    );
+}
+
 // --- Spacer element ---
 
 #[test]

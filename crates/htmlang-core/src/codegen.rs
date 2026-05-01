@@ -1571,6 +1571,18 @@ fn strip_string_quotes(val: &str) -> &str {
     val
 }
 
+// True if any direct child is `@in-front` or `@behind`. Such children render
+// as absolutely positioned overlays, so the parent automatically becomes a
+// positioning context (position:relative + isolation:isolate).
+fn has_overlay_children(elem: &Element) -> bool {
+    elem.children.iter().any(|child| {
+        matches!(
+            child,
+            Node::Element(e) if matches!(e.kind, ElementKind::InFront | ElementKind::Behind)
+        )
+    })
+}
+
 fn generate_element(
     elem: &Element,
     parent_kind: Option<&ElementKind>,
@@ -1641,7 +1653,7 @@ fn generate_element(
     }
     // @breadcrumb generates semantic <nav aria-label="breadcrumb"><ol>...</ol></nav>
     if elem.kind == ElementKind::Breadcrumb {
-        let gen_class = compute_class(&elem.attrs, &elem.kind, parent_kind, styles);
+        let gen_class = compute_class(&elem.attrs, &elem.kind, parent_kind, styles, false);
         let (id, user_class) = extract_id_class(&elem.attrs);
         out.push_str(&ctx.indent());
         out.push_str("<nav aria-label=\"breadcrumb\"");
@@ -1696,7 +1708,9 @@ fn generate_element(
         | ElementKind::Column
         | ElementKind::El
         | ElementKind::Grid
-        | ElementKind::Stack => "div",
+        | ElementKind::Stack
+        | ElementKind::InFront
+        | ElementKind::Behind => "div",
         ElementKind::Text => "span",
         ElementKind::Paragraph => "p",
         ElementKind::Link => "a",
@@ -1853,6 +1867,8 @@ fn generate_element(
         ElementKind::Noscript => "noscript",
         ElementKind::Address => "address",
         ElementKind::Search => "search",
+        ElementKind::InFront => "in-front",
+        ElementKind::Behind => "behind",
         ElementKind::H1 => "h1",
         ElementKind::H2 => "h2",
         ElementKind::H3 => "h3",
@@ -1875,7 +1891,14 @@ fn generate_element(
     }
 
     // Compute CSS for each state and get a class name
-    let gen_class = compute_class(&elem.attrs, &elem.kind, parent_kind, styles);
+    let overlay_children = has_overlay_children(elem);
+    let gen_class = compute_class(
+        &elem.attrs,
+        &elem.kind,
+        parent_kind,
+        styles,
+        overlay_children,
+    );
     let (id, user_class) = extract_id_class(&elem.attrs);
 
     if ctx.dev && elem.line_num > 0 {
@@ -1953,7 +1976,7 @@ fn generate_element(
     // Critical CSS: inline styles directly instead of using a class
     let is_critical = elem.attrs.iter().any(|a| a.key == "critical");
     if is_critical {
-        let inline_css = attrs_to_css(&elem.attrs, "", &elem.kind, parent_kind);
+        let inline_css = attrs_to_css(&elem.attrs, "", &elem.kind, parent_kind, overlay_children);
         if !inline_css.is_empty() {
             out.push_str(" style=\"");
             out.push_str(&html_escape(&inline_css));
@@ -2059,7 +2082,7 @@ fn generate_self_closing(
     styles: &mut StyleCollector,
     ctx: &mut GenContext,
 ) {
-    let gen_class = compute_class(&elem.attrs, &elem.kind, parent_kind, styles);
+    let gen_class = compute_class(&elem.attrs, &elem.kind, parent_kind, styles, false);
     let (id, user_class) = extract_id_class(&elem.attrs);
 
     let (tag, kind_label) = match elem.kind {
@@ -2255,13 +2278,14 @@ fn compute_class(
     kind: &ElementKind,
     parent_kind: Option<&ElementKind>,
     styles: &mut StyleCollector,
+    has_overlay_children: bool,
 ) -> Option<String> {
-    let base = attrs_to_css(attrs, "", kind, parent_kind);
+    let base = attrs_to_css(attrs, "", kind, parent_kind, has_overlay_children);
 
     // Collect pseudo-state overrides
     let mut pseudo = Vec::new();
     for &(prefix, selector) in PSEUDO_PREFIXES {
-        let css = attrs_to_css(attrs, prefix, kind, parent_kind);
+        let css = attrs_to_css(attrs, prefix, kind, parent_kind, has_overlay_children);
         if !css.is_empty() {
             pseudo.push((selector.to_string(), css));
         }
@@ -2291,7 +2315,7 @@ fn compute_class(
     for prefix in &nth_prefixes {
         let expr = &prefix[4..prefix.len() - 1];
         let selector = format!(":nth-child({})", expr);
-        let css = attrs_to_css(attrs, prefix, kind, parent_kind);
+        let css = attrs_to_css(attrs, prefix, kind, parent_kind, has_overlay_children);
         if !css.is_empty() {
             pseudo.push((selector, css));
         }
@@ -2312,7 +2336,7 @@ fn compute_class(
     for prefix in &has_prefixes {
         let inner = &prefix[4..prefix.len() - 2]; // extract selector from has(selector):
         let selector = format!(":has({})", inner);
-        let css = attrs_to_css(attrs, prefix, kind, parent_kind);
+        let css = attrs_to_css(attrs, prefix, kind, parent_kind, has_overlay_children);
         if !css.is_empty() {
             pseudo.push((selector, css));
         }
@@ -2322,7 +2346,7 @@ fn compute_class(
     let mut responsive = Vec::new();
     for &(bp_name, _) in BREAKPOINTS {
         let prefix = format!("{}:", bp_name);
-        let css = attrs_to_css(attrs, &prefix, kind, parent_kind);
+        let css = attrs_to_css(attrs, &prefix, kind, parent_kind, has_overlay_children);
         if !css.is_empty() {
             responsive.push((bp_name.to_string(), css));
         }
@@ -2332,18 +2356,19 @@ fn compute_class(
     let mut container = Vec::new();
     for &(bp_name, _) in BREAKPOINTS {
         let prefix = format!("cq-{}:", bp_name);
-        let css = attrs_to_css(attrs, &prefix, kind, parent_kind);
+        let css = attrs_to_css(attrs, &prefix, kind, parent_kind, has_overlay_children);
         if !css.is_empty() {
             container.push((bp_name.to_string(), css));
         }
     }
 
-    let dark = attrs_to_css(attrs, "dark:", kind, parent_kind);
-    let print = attrs_to_css(attrs, "print:", kind, parent_kind);
-    let motion_safe = attrs_to_css(attrs, "motion-safe:", kind, parent_kind);
-    let motion_reduce = attrs_to_css(attrs, "motion-reduce:", kind, parent_kind);
-    let landscape = attrs_to_css(attrs, "landscape:", kind, parent_kind);
-    let portrait = attrs_to_css(attrs, "portrait:", kind, parent_kind);
+    let dark = attrs_to_css(attrs, "dark:", kind, parent_kind, has_overlay_children);
+    let print = attrs_to_css(attrs, "print:", kind, parent_kind, has_overlay_children);
+    let motion_safe = attrs_to_css(attrs, "motion-safe:", kind, parent_kind, has_overlay_children);
+    let motion_reduce =
+        attrs_to_css(attrs, "motion-reduce:", kind, parent_kind, has_overlay_children);
+    let landscape = attrs_to_css(attrs, "landscape:", kind, parent_kind, has_overlay_children);
+    let portrait = attrs_to_css(attrs, "portrait:", kind, parent_kind, has_overlay_children);
 
     // Dedupe: if a property is declared twice within a single rule, keep only
     // the last occurrence (element-kind defaults are written before
@@ -2545,11 +2570,18 @@ fn attrs_to_css(
     state_prefix: &str,
     kind: &ElementKind,
     parent_kind: Option<&ElementKind>,
+    has_overlay_children: bool,
 ) -> String {
     let mut css = String::new();
 
     // Base element styles only for the default (non-state) pass
     if state_prefix.is_empty() {
+        // Elements with @in-front / @behind children become positioning
+        // contexts. Pushed before user attrs so an explicit `position` wins
+        // via dedupe (only the last declaration of a property is kept).
+        if has_overlay_children {
+            css.push_str("position:relative;isolation:isolate;");
+        }
         match kind {
             ElementKind::Row => css.push_str("display:flex;flex-direction:row;"),
             ElementKind::Column
@@ -2613,6 +2645,16 @@ fn attrs_to_css(
             ElementKind::Avatar => css.push_str("display:inline-flex;align-items:center;justify-content:center;border-radius:9999px;overflow:hidden;flex-shrink:0;"),
             ElementKind::Carousel => css.push_str("display:flex;flex-direction:row;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none;"),
             ElementKind::Chip => css.push_str("display:inline-flex;align-items:center;gap:4px;padding:4px 12px;border-radius:9999px;font-size:0.875rem;border:1px solid currentColor;"),
+            // Overlay layers fill the parent. Parent gets position:relative
+            // applied automatically (see has_overlay_children check below).
+            ElementKind::InFront => {
+                css.push_str(FLEX_COLUMN);
+                css.push_str("position:absolute;inset:0;");
+            }
+            ElementKind::Behind => {
+                css.push_str(FLEX_COLUMN);
+                css.push_str("position:absolute;inset:0;z-index:-1;");
+            }
             _ => {}
         }
         // Children of @carousel get scroll-snap-align and flex-shrink

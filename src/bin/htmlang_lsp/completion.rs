@@ -236,6 +236,15 @@ fn element_completions(range: Range) -> Vec<CompletionItem> {
         ("@address", "Contact information (address)"),
         ("@search", "Search section (search)"),
         ("@breadcrumb", "Breadcrumb navigation (nav with aria)"),
+        // Overlay positioning
+        (
+            "@in-front",
+            "Overlay layer rendered on top of the parent (absolute, inset 0)",
+        ),
+        (
+            "@behind",
+            "Background layer rendered behind the parent's content (absolute, inset 0, z-index -1)",
+        ),
     ]
     .iter()
     .map(|(name, detail)| item(name, CompletionItemKind::KEYWORD, detail, name, range))

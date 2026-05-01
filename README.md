@@ -109,6 +109,8 @@ A VS Code extension with syntax highlighting and LSP integration is available in
 | `@figcaption`| Caption for `@figure`        |
 | `@progress`  | Progress bar                 |
 | `@meter`     | Meter/gauge                  |
+| `@in-front`  | Overlay layer on top of parent |
+| `@behind`    | Layer behind parent content  |
 
 ### Layout attributes
 
@@ -137,6 +139,18 @@ A VS Code extension with syntax highlighting and LSP integration is available in
 @el [position relative]
   @el [position absolute, z-index 10]
     Overlay content
+```
+
+For overlays, prefer `@in-front` and `@behind` — they make the parent a
+positioning context and stretch to its bounds automatically:
+
+```
+@el [width 200, height 200, background blue]
+  @text [color white] Main content
+  @in-front
+    @text [color yellow] Top layer
+  @behind
+    @el [background red, width fill, height fill]
 ```
 
 ### Pseudo-states and media prefixes

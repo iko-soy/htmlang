@@ -59,6 +59,8 @@ A minimalist layout language inspired by elm-ui that compiles to static HTML.
 | `@address` | address          | Contact information             |
 | `@search`  | search           | Search landmark (HTML5)         |
 | `@breadcrumb` | nav>ol        | Semantic breadcrumb navigation  |
+| `@in-front` | div (absolute) | Overlay layer painted on top of parent |
+| `@behind`   | div (absolute) | Layer painted behind the parent's content |
 
 Bare lines (not starting with `@` or `[`) are text nodes.
 
@@ -476,6 +478,30 @@ Progress bar and meter elements. Use `value`, `max`, `min` attributes.
 @progress [value 70, max 100]
 @meter [value 6, min 0, max 10, low 3, high 8]
 ```
+
+### `@in-front` / `@behind`
+
+Overlay layers, inspired by elm-ui's `inFront` and `behind`. Children of these
+directives are absolutely positioned to fill the parent's bounds; the parent
+automatically becomes a positioning context (`position: relative` and
+`isolation: isolate`).
+
+```
+@el [width 200, height 200, background blue]
+  @text [color white] Main content
+  @in-front
+    @text [color yellow] Painted on top
+  @behind
+    @el [background red, width fill, height fill]
+```
+
+`@in-front` paints on top of the parent's content (DOM order ensures it
+overlays static siblings). `@behind` paints behind (`z-index: -1` keeps it
+under the siblings, while `isolation: isolate` on the parent prevents it from
+slipping behind the parent's own background).
+
+If you set `position` explicitly on the parent (e.g., `position absolute` for a
+popup), that wins over the auto-applied `position: relative`.
 
 ## `@each` destructuring
 

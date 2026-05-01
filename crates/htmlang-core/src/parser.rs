@@ -3321,6 +3321,8 @@ const KNOWN_ELEMENTS: &[&str] = &[
     "address",
     "search",
     "breadcrumb",
+    "in-front",
+    "behind",
 ];
 
 const KNOWN_DIRECTIVES: &[&str] = &[
@@ -3454,6 +3456,8 @@ fn parse_element_kind(s: &str, line_num: usize) -> Result<ElementKind, ParseErro
         "address" => Ok(ElementKind::Address),
         "search" => Ok(ElementKind::Search),
         "breadcrumb" => Ok(ElementKind::Breadcrumb),
+        "in-front" => Ok(ElementKind::InFront),
+        "behind" => Ok(ElementKind::Behind),
         _ => {
             let all_known: Vec<&str> = KNOWN_ELEMENTS
                 .iter()
@@ -5025,6 +5029,8 @@ fn element_kind_name(kind: &ElementKind) -> &'static str {
         ElementKind::Address => "@address",
         ElementKind::Search => "@search",
         ElementKind::Breadcrumb => "@breadcrumb",
+        ElementKind::InFront => "@in-front",
+        ElementKind::Behind => "@behind",
     }
 }
 
@@ -5062,6 +5068,8 @@ fn is_container(kind: &ElementKind) -> bool {
             | ElementKind::Address
             | ElementKind::Search
             | ElementKind::Breadcrumb
+            | ElementKind::InFront
+            | ElementKind::Behind
     )
 }
 

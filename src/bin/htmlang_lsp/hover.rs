@@ -908,6 +908,12 @@ fn hover_builtin(word: &str) -> Option<String> {
         "@stack" => {
             "**@stack** \u{2014} Stack container\n\nRenders as `<div>` with `position: relative`. Children can be absolutely positioned on top of each other."
         }
+        "@in-front" => {
+            "**@in-front** \u{2014} Overlay layer\n\nRenders as `<div>` with `position: absolute; inset: 0`, painted on top of the parent's content. The parent automatically becomes a positioning context (`position: relative; isolation: isolate`).\n\nUsage:\n```\n@el [width 200, height 200, background blue]\n  Main content\n  @in-front\n    @text [color white] Overlay\n```"
+        }
+        "@behind" => {
+            "**@behind** \u{2014} Background layer\n\nRenders as `<div>` with `position: absolute; inset: 0; z-index: -1`, painted behind the parent's content. The parent automatically becomes a positioning context (`position: relative; isolation: isolate`).\n\nUsage:\n```\n@el [padding 40]\n  @behind\n    @el [background #fef3c7, width fill, height fill]\n  Foreground text\n```"
+        }
         "@spacer" => {
             "**@spacer** \u{2014} Flexible spacer\n\nRenders as `<div>` with `flex: 1`. Pushes siblings apart in flex containers."
         }

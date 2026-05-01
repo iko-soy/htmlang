@@ -155,6 +155,9 @@ pub enum ElementKind {
     Carousel,
     Chip,
     Tag,
+    // Overlay positioning (elm-ui inspired)
+    InFront,
+    Behind,
     // HTML5 elements
     Script,
     Noscript,
