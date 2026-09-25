@@ -120,10 +120,6 @@ struct ParseContext {
     manifest: Option<crate::ast::ManifestConfig>,
     /// Track @import paths for circular dependency detection
     import_stack: Vec<PathBuf>,
-    /// i18n translations: locale -> (key -> value)
-    translations: HashMap<String, HashMap<String, String>>,
-    /// Current active locale for translations
-    active_locale: Option<String>,
 }
 
 struct Parser {
@@ -222,8 +218,6 @@ pub fn parse_with_base(input: &str, base_path: Option<&Path>) -> ParseResult {
         json_ld_blocks: Vec::new(),
         manifest: None,
         import_stack: Vec::new(),
-        translations: HashMap::new(),
-        active_locale: None,
     };
     load_prelude(&mut ctx);
     let nodes = parser.parse_children(0, &mut ctx);
@@ -1159,113 +1153,6 @@ impl Parser {
             return Ok(Some(included_nodes));
         }
 
-        // --- @env (compile-time environment variables) ---
-
-        if let Some(rest) = content.strip_prefix("@env ") {
-            let rest = rest.trim();
-            // @env VAR_NAME default_value  OR  @env VAR_NAME
-            let (var_name, default_val) = if let Some((name, default)) = rest.split_once(' ') {
-                (name.trim(), Some(default.trim()))
-            } else {
-                (rest, None)
-            };
-            let env_val = std::env::var(var_name)
-                .ok()
-                .or_else(|| default_val.map(|d| substitute_vars(d, &ctx.variables)));
-            match env_val {
-                Some(val) => {
-                    // Store as variable with lowercase name
-                    let key = var_name.to_lowercase().replace('-', "_");
-                    ctx.variables.insert(key, val);
-                }
-                None => {
-                    ctx.diagnostics.push(Diagnostic {
-                        line: line_num,
-                        column: None,
-                        message: format!(
-                            "environment variable '{}' is not set and no default provided",
-                            var_name
-                        ),
-                        severity: Severity::Warning,
-                        source_line: Some(content.clone()),
-                    });
-                }
-            }
-            return Ok(None);
-        }
-
-        // --- @fetch (compile-time HTTP data fetching) ---
-
-        if let Some(rest) = content.strip_prefix("@fetch ") {
-            let rest = rest.trim();
-            // @fetch $prefix https://url  OR  @fetch https://url
-            let (prefix, url) = if rest.starts_with('$') {
-                if let Some((p, u)) = rest.split_once(' ') {
-                    (
-                        p.strip_prefix('$').unwrap_or(p).to_string(),
-                        u.trim().to_string(),
-                    )
-                } else {
-                    return Err(ParseError {
-                        line: line_num,
-                        message: "@fetch requires: @fetch $prefix url or @fetch url".to_string(),
-                    });
-                }
-            } else {
-                (String::new(), rest.to_string())
-            };
-
-            let url = substitute_vars(&url, &ctx.variables);
-
-            // Synchronous HTTP GET using std::net
-            match fetch_url_blocking(&url) {
-                Ok(body) => {
-                    // Try to parse as JSON
-                    match parse_json(&body) {
-                        Some(json) => {
-                            if prefix.is_empty() {
-                                if let JsonValue::Object(pairs) = &json {
-                                    for (key, val) in pairs {
-                                        let mut sub = HashMap::new();
-                                        flatten_json(key, val, &mut sub);
-                                        for (k, v) in sub {
-                                            ctx.variables.insert(k, v);
-                                        }
-                                    }
-                                } else {
-                                    // Store the raw body as a single variable
-                                    ctx.variables.insert("__fetch_body".to_string(), body);
-                                }
-                            } else {
-                                let mut sub = HashMap::new();
-                                flatten_json(&prefix, &json, &mut sub);
-                                for (k, v) in sub {
-                                    ctx.variables.insert(k, v);
-                                }
-                            }
-                        }
-                        None => {
-                            // Not JSON — store raw body
-                            if prefix.is_empty() {
-                                ctx.variables.insert("__fetch_body".to_string(), body);
-                            } else {
-                                ctx.variables.insert(prefix, body);
-                            }
-                        }
-                    }
-                }
-                Err(e) => {
-                    ctx.diagnostics.push(Diagnostic {
-                        line: line_num,
-                        column: None,
-                        message: format!("@fetch failed for '{}': {}", url, e),
-                        severity: Severity::Error,
-                        source_line: Some(content.clone()),
-                    });
-                }
-            }
-            return Ok(None);
-        }
 
         // --- @svg (inline SVG from file) ---
 
@@ -1345,25 +1232,68 @@ impl Parser {
 
         // --- @data (load JSON file into variables) ---
 
+        // @data file.json               top-level keys become variables
+        // @data $name file.json         values as $name.key
+        // @data $name dir/*.json        each file as $name.STEM.key; $name
+        //                               lists the stems, $name._count counts them
+        // @data $name env:NAME [DEFAULT] an environment variable
         if let Some(rest) = content.strip_prefix("@data ") {
             let rest = rest.trim();
-            // @data $prefix file.json  OR  @data file.json (no prefix, top-level keys become vars)
-            let (prefix, filename) = if rest.starts_with('$') {
-                if let Some((p, f)) = rest.split_once(' ') {
-                    (
-                        p.strip_prefix('$').unwrap_or(p).to_string(),
-                        f.trim().to_string(),
-                    )
-                } else {
+            let (prefix, filename) = match rest.strip_prefix('$') {
+                Some(named) => match named.split_once(char::is_whitespace) {
+                    Some((name, source)) => (name.to_string(), source.trim().to_string()),
+                    None => {
+                        return Err(ParseError {
+                            line: line_num,
+                            message: "@data requires: @data $name SOURCE or @data file.json"
+                                .to_string(),
+                        });
+                    }
+                },
+                None => (String::new(), rest.to_string()),
+            };
+
+            if let Some(env) = filename.strip_prefix("env:") {
+                let (var, default) = match env.split_once(char::is_whitespace) {
+                    Some((var, default)) => (var, Some(default.trim())),
+                    None => (env, None),
+                };
+                if prefix.is_empty() {
                     return Err(ParseError {
                         line: line_num,
-                        message: "@data requires: @data $prefix file.json or @data file.json"
-                            .to_string(),
+                        message: format!("@data env:{} needs a name: @data $name env:{}", var, var),
                     });
                 }
-            } else {
-                (String::new(), rest.to_string())
-            };
+                let value = std::env::var(var)
+                    .ok()
+                    .or_else(|| default.map(|d| substitute_vars(d, &ctx.variables)));
+                if value.is_none() {
+                    ctx.diagnostics.push(Diagnostic {
+                        line: line_num,
+                        column: None,
+                        message: format!(
+                            "environment variable '{}' is not set and has no default",
+                            var
+                        ),
+                        severity: Severity::Warning,
+                        source_line: Some(content.clone()),
+                    });
+                }
+                ctx.variables.insert(prefix, value.unwrap_or_default());
+                return Ok(None);
+            }
+
+            let filename = substitute_vars(&filename, &ctx.variables);
+            if filename.contains('*') {
+                if prefix.is_empty() {
+                    return Err(ParseError {
+                        line: line_num,
+                        message: format!("@data {} needs a name: @data $name {}", filename, filename),
+                    });
+                }
+                self.load_data_glob(&prefix, &filename, line_num, &content, ctx);
+                return Ok(None);
+            }
 
             let filename = substitute_vars(&filename, &ctx.variables);
             let resolved = match &ctx.base_path {
@@ -1430,96 +1360,6 @@ impl Parser {
             return Ok(None);
         }
 
-
-        // --- @collection (load multiple JSON files matching a glob pattern) ---
-
-        if let Some(rest) = content.strip_prefix("@collection ") {
-            let rest = rest.trim();
-            // @collection $varname "pattern" OR @collection "pattern" as varname
-            let (var_name, pattern) = if rest.starts_with('$') {
-                let parts: Vec<&str> = rest.splitn(2, ' ').collect();
-                if parts.len() == 2 {
-                    let name = parts[0].strip_prefix('$').unwrap_or(parts[0]);
-                    let pat = parts[1].trim().trim_matches('"');
-                    (name.to_string(), pat.to_string())
-                } else {
-                    return Err(ParseError {
-                        line: line_num,
-                        message: "@collection requires: @collection $var \"pattern\"".to_string(),
-                    });
-                }
-            } else {
-                let pat = rest.trim_matches('"');
-                ("_items".to_string(), pat.to_string())
-            };
-
-            let pattern = substitute_vars(&pattern, &ctx.variables);
-            let base = ctx.base_path.clone().unwrap_or_else(|| PathBuf::from("."));
-            let glob_pattern = base.join(&pattern);
-
-            // Simple glob: support * in filename part
-            let parent = glob_pattern.parent().unwrap_or(Path::new("."));
-            let file_pattern = glob_pattern
-                .file_name()
-                .map(|f| f.to_string_lossy().to_string())
-                .unwrap_or_default();
-
-            let mut items = Vec::new();
-            if let Ok(entries) = std::fs::read_dir(parent) {
-                let mut paths: Vec<PathBuf> = entries
-                    .flatten()
-                    .map(|e| e.path())
-                    .filter(|p| {
-                        if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
-                            if file_pattern.contains('*') {
-                                let parts: Vec<&str> = file_pattern.split('*').collect();
-                                if parts.len() == 2 {
-                                    name.starts_with(parts[0]) && name.ends_with(parts[1])
-                                } else {
-                                    true
-                                }
-                            } else {
-                                name == file_pattern
-                            }
-                        } else {
-                            false
-                        }
-                    })
-                    .collect();
-                paths.sort();
-                for path in &paths {
-                    if let Ok(text) = std::fs::read_to_string(path) {
-                        // Store the file content as a JSON string for each item
-                        let stem = path
-                            .file_stem()
-                            .and_then(|s| s.to_str())
-                            .unwrap_or("")
-                            .to_string();
-                        items.push((stem, text));
-                    }
-                }
-            }
-
-            // Store item count and serialized data as variables
-            ctx.variables
-                .insert(format!("{}_count", var_name), items.len().to_string());
-            // Store as space-separated list of stems for @each
-            let stems: Vec<String> = items.iter().map(|(stem, _)| stem.clone()).collect();
-            ctx.variables.insert(var_name.clone(), stems.join(" "));
-            // Also parse each JSON file and store keys as prefix_stem_key
-            for (stem, text) in &items {
-                if let Some(json) = parse_json(text.trim())
-                    && let JsonValue::Object(ref obj) = json
-                {
-                    for (key, val) in obj {
-                        let var_key = format!("{}_{}", stem, key);
-                        ctx.variables.insert(var_key, json_value_to_string(val));
-                    }
-                }
-            }
-
-            return Ok(None);
-        }
 
         // --- @if / @else ---
 
@@ -2016,58 +1856,6 @@ impl Parser {
             return Ok(None);
         }
 
-        // --- @translations (i18n) ---
-
-        if content.trim() == "@translations" || content.starts_with("@translations ") {
-            let locale = content
-                .strip_prefix("@translations")
-                .unwrap_or("")
-                .trim()
-                .to_string();
-            let active_locale = if locale.is_empty() {
-                ctx.lang.clone().unwrap_or_else(|| "en".to_string())
-            } else {
-                locale
-            };
-
-            // Collect indented body: key value pairs, grouped by locale headers
-            let mut current_locale = active_locale.clone();
-            let mut first_locale_indent: Option<usize> = None;
-            while self.pos < self.lines.len() && self.lines[self.pos].indent > current_indent {
-                if let LineContent::Normal(ref s) = self.lines[self.pos].content {
-                    let trimmed = s.trim();
-                    // Check for locale sub-header: e.g., "en:" or "fr:" or "es:"
-                    if trimmed.ends_with(':') && trimmed.len() <= 10 && !trimmed.contains(' ') {
-                        current_locale = trimmed[..trimmed.len() - 1].to_string();
-                        first_locale_indent = Some(self.lines[self.pos].indent);
-                        self.pos += 1;
-                        continue;
-                    }
-                    // key value pair
-                    if let Some((key, value)) = trimmed.split_once(' ') {
-                        let key = key.trim().to_string();
-                        let value = substitute_vars(value.trim(), &ctx.variables);
-                        ctx.translations
-                            .entry(current_locale.clone())
-                            .or_default()
-                            .insert(key, value);
-                    }
-                }
-                self.pos += 1;
-            }
-            // Set the active locale
-            if ctx.active_locale.is_none() {
-                ctx.active_locale = Some(active_locale.clone());
-            }
-            let _ = first_locale_indent; // suppress unused
-            // Inject active locale's translations as $t.key variables
-            if let Some(strings) = ctx.translations.get(&active_locale) {
-                for (key, value) in strings {
-                    ctx.variables.insert(format!("t.{}", key), value.clone());
-                }
-            }
-            return Ok(None);
-        }
 
         // --- @deprecated annotation ---
 
@@ -2256,6 +2044,90 @@ impl Parser {
         track_var_refs(&content, &mut ctx.used_variables);
         let segments = parse_text_segments(&content, ctx);
         Ok(Some(vec![Node::Text(segments)]))
+    }
+
+    /// `@data $name dir/*.json`: load every matching file as
+    /// `$name.STEM.key`, list the stems in `$name` and count them.
+    fn load_data_glob(
+        &mut self,
+        name: &str,
+        pattern: &str,
+        line_num: usize,
+        content: &str,
+        ctx: &mut ParseContext,
+    ) {
+        let base = ctx.base_path.clone().unwrap_or_else(|| PathBuf::from("."));
+        let pattern_path = Path::new(pattern);
+        let dir = match pattern_path.parent() {
+            Some(dir) if !dir.as_os_str().is_empty() => base.join(dir),
+            _ => base,
+        };
+        let file_pattern = pattern_path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        let mut files: Vec<PathBuf> = match std::fs::read_dir(&dir) {
+            Ok(entries) => entries
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| {
+                    p.file_name()
+                        .is_some_and(|n| glob_match(&file_pattern, &n.to_string_lossy()))
+                })
+                .collect(),
+            Err(e) => {
+                ctx.diagnostics.push(Diagnostic {
+                    line: line_num,
+                    column: None,
+                    message: format!("cannot read directory for '{}': {}", pattern, e),
+                    severity: Severity::Error,
+                    source_line: Some(content.to_string()),
+                });
+                return;
+            }
+        };
+        files.sort();
+        let mut stems = Vec::new();
+        for file in files {
+            let stem = file
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+            let text = match std::fs::read_to_string(&file) {
+                Ok(text) => text,
+                Err(e) => {
+                    ctx.diagnostics.push(Diagnostic {
+                        line: line_num,
+                        column: None,
+                        message: format!("cannot load data '{}': {}", file.display(), e),
+                        severity: Severity::Error,
+                        source_line: Some(content.to_string()),
+                    });
+                    continue;
+                }
+            };
+            match parse_json_with_error(&text) {
+                Ok(json) => {
+                    let mut vars = HashMap::new();
+                    flatten_json(&format!("{}.{}", name, stem), &json, &mut vars);
+                    ctx.variables.extend(vars);
+                    stems.push(stem);
+                }
+                Err(detail) => ctx.diagnostics.push(Diagnostic {
+                    line: line_num,
+                    column: None,
+                    message: format!("invalid JSON in '{}': {}", file.display(), detail),
+                    severity: Severity::Error,
+                    source_line: Some(content.to_string()),
+                }),
+            }
+            ctx.included_files.push(file);
+        }
+        ctx.variables
+            .insert(format!("{}._count", name), stems.len().to_string());
+        ctx.variables.insert(name.to_string(), stems.join(", "));
     }
 
     fn expand_fn_call(
@@ -2663,9 +2535,7 @@ const KNOWN_DIRECTIVES: &[&str] = &[
     "json-ld",
     "assert",
     "markdown",
-    "collection",
     "manifest",
-    "translations",
 ];
 
 fn parse_element_kind(s: &str, line_num: usize) -> Result<ElementKind, ParseError> {
@@ -2726,6 +2596,19 @@ const REMOVED_SYNTAX: &[(&str, &str)] = &[
     ("@base", "use `@page [base ...] Title`"),
     ("@og", "use `@meta og:NAME VALUE`"),
     ("@debug", "use `@warn`"),
+    (
+        "@collection",
+        "use `@data $name dir/*.json` (each file becomes `$name.STEM.key`)",
+    ),
+    ("@env", "use `@data $name env:NAME [default]`"),
+    (
+        "@fetch",
+        "download the data before building and use `@data $name file.json`",
+    ),
+    (
+        "@translations",
+        "put each locale's strings in a JSON file and use `@data $t locales/$lang.json`",
+    ),
     ("@defer", "remove it: the content is already in the page"),
     ("@log", "use `@warn`"),
     (
@@ -4461,13 +4344,6 @@ enum JsonValue {
     Object(Vec<(String, JsonValue)>),
 }
 
-fn parse_json(input: &str) -> Option<JsonValue> {
-    let trimmed = input.trim();
-    let chars: Vec<char> = trimmed.chars().collect();
-    let (val, _) = parse_json_value(&chars, 0)?;
-    Some(val)
-}
-
 /// Parse JSON with an error message indicating where parsing failed.
 fn parse_json_with_error(input: &str) -> Result<JsonValue, String> {
     let trimmed = input.trim();
@@ -4807,109 +4683,6 @@ fn json_value_to_string(v: &JsonValue) -> String {
         JsonValue::Null => String::new(),
         JsonValue::Array(_) | JsonValue::Object(_) => String::new(),
     }
-}
-
-// ---------------------------------------------------------------------------
-// HTTP fetch helper (blocking, minimal, no dependencies)
-// ---------------------------------------------------------------------------
-
-fn fetch_url_blocking(url: &str) -> Result<String, String> {
-    use std::io::{Read, Write};
-    use std::net::TcpStream;
-
-    let is_https = url.starts_with("https://");
-    let url_without_scheme = url
-        .strip_prefix("https://")
-        .or_else(|| url.strip_prefix("http://"))
-        .ok_or_else(|| "URL must start with http:// or https://".to_string())?;
-
-    let (host_port, path) = match url_without_scheme.find('/') {
-        Some(pos) => (&url_without_scheme[..pos], &url_without_scheme[pos..]),
-        None => (url_without_scheme, "/"),
-    };
-
-    let (host, port) = match host_port.find(':') {
-        Some(pos) => (
-            &host_port[..pos],
-            host_port[pos + 1..]
-                .parse::<u16>()
-                .map_err(|e| format!("invalid port: {}", e))?,
-        ),
-        None => (host_port, if is_https { 443 } else { 80 }),
-    };
-
-    if is_https {
-        return Err("@fetch does not support https:// (no TLS in std). Use @data with a local JSON file, or set up a build script to fetch data before compilation.".to_string());
-    }
-
-    let addr = format!("{}:{}", host, port);
-    let mut stream = TcpStream::connect(&addr).map_err(|e| format!("connection failed: {}", e))?;
-    stream
-        .set_read_timeout(Some(std::time::Duration::from_secs(10)))
-        .ok();
-
-    let request = format!(
-        "GET {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nAccept: application/json, text/plain, */*\r\n\r\n",
-        path, host
-    );
-    stream
-        .write_all(request.as_bytes())
-        .map_err(|e| format!("write failed: {}", e))?;
-
-    let mut response = Vec::new();
-    stream
-        .read_to_end(&mut response)
-        .map_err(|e| format!("read failed: {}", e))?;
-
-    // Split headers and body (on bytes, so chunk sizes stay byte counts)
-    if let Some(body_start) = response.windows(4).position(|w| w == b"\r\n\r\n") {
-        let headers = String::from_utf8_lossy(&response[..body_start]);
-        let body = &response[body_start + 4..];
-
-        // Check status code
-        if let Some(first_line) = headers.lines().next()
-            && let Some(code_str) = first_line.split_whitespace().nth(1)
-        {
-            let code: u16 = code_str.parse().unwrap_or(0);
-            if code >= 400 {
-                return Err(format!("HTTP {}", code));
-            }
-        }
-
-        // Handle chunked transfer encoding
-        if headers
-            .to_lowercase()
-            .contains("transfer-encoding: chunked")
-        {
-            return Ok(String::from_utf8_lossy(&decode_chunked(body)).into_owned());
-        }
-
-        Ok(String::from_utf8_lossy(body).into_owned())
-    } else {
-        Err("malformed HTTP response".to_string())
-    }
-}
-
-fn decode_chunked(body: &[u8]) -> Vec<u8> {
-    let mut result = Vec::new();
-    let mut rest = body;
-    while let Some(size_end) = rest.windows(2).position(|w| w == b"\r\n") {
-        let size_line = String::from_utf8_lossy(&rest[..size_end]);
-        // Chunk extensions (`;name=value`) may follow the size.
-        let size_str = size_line.split(';').next().unwrap_or("").trim();
-        let size = usize::from_str_radix(size_str, 16).unwrap_or(0);
-        if size == 0 {
-            break;
-        }
-        let chunk = &rest[size_end + 2..];
-        if size > chunk.len() {
-            result.extend_from_slice(chunk);
-            break;
-        }
-        result.extend_from_slice(&chunk[..size]);
-        rest = chunk[size..].strip_prefix(b"\r\n").unwrap_or(&chunk[size..]);
-    }
-    result
 }
 
 // ---------------------------------------------------------------------------
@@ -5329,16 +5102,5 @@ mod tests {
         // Guards the `op.trim().chars().next().unwrap()` fix.
         let r = parse("@let x = 1 + 2\n");
         assert_eq!(r.document.variables.get("x").map(|s| s.as_str()), Some("3"));
-    }
-
-    #[test]
-    fn decode_chunked_handles_bytes_and_malformed_input() {
-        // Chunk sizes are byte counts: "é" is 2 bytes.
-        let body = "3\r\naé\r\n2\r\nbc\r\n0\r\n\r\n".as_bytes();
-        assert_eq!(decode_chunked(body), "aébc".as_bytes());
-        // No CRLF after the size line — must not panic.
-        assert_eq!(decode_chunked(b"5"), b"");
-        // Declared size larger than the data — take what's there.
-        assert_eq!(decode_chunked(b"a\r\nabc"), b"abc");
     }
 }

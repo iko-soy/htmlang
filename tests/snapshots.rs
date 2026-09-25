@@ -4690,13 +4690,12 @@ fn snapshot_responsive_images() {
 // --- Inline tests for batch 2 ---
 
 #[test]
-fn translations_inject_variables() {
-    let output =
-        compile("@translations\n  en:\n    hello Hi\n    world Earth\n@text $t.hello $t.world");
-    assert!(output.contains("Hi"), "should inject translation for hello");
+fn translations_point_to_data_files() {
+    let diags = parse_diagnostics("@translations\n  en:\n    hello Hi");
     assert!(
-        output.contains("Earth"),
-        "should inject translation for world"
+        diags.iter().any(|d| d.message.contains("@data $t locales/$lang.json")),
+        "{:?}",
+        diags
     );
 }
 
@@ -4771,10 +4770,10 @@ fn repeat_with_index() {
 #[test]
 fn env_directive_with_default() {
     let output =
-        compile("@env HTMLANG_TEST_NONEXISTENT fallback_value\n@text $htmlang_test_nonexistent");
+        compile("@data $fallback env:HTMLANG_TEST_NONEXISTENT fallback_value\n@text $fallback");
     assert!(
         output.contains("fallback_value"),
-        "@env should use default when var is not set, got: {}",
+        "env: data should use the default when unset, got: {}",
         output
     );
 }
@@ -4785,10 +4784,10 @@ fn env_directive_from_environment() {
     unsafe {
         std::env::set_var("HTMLANG_TEST_VAR", "hello_world");
     }
-    let output = compile("@env HTMLANG_TEST_VAR\n@text $htmlang_test_var");
+    let output = compile("@data $var env:HTMLANG_TEST_VAR\n@text $var");
     assert!(
         output.contains("hello_world"),
-        "@env should read env var, got: {}",
+        "env: data should read the variable, got: {}",
         output
     );
     unsafe {
@@ -4798,7 +4797,7 @@ fn env_directive_from_environment() {
 
 #[test]
 fn env_directive_warning_when_missing() {
-    let result = htmlang::parser::parse("@env HTMLANG_DEFINITELY_NOT_SET_12345");
+    let result = htmlang::parser::parse("@data $x env:HTMLANG_DEFINITELY_NOT_SET_12345");
     let warnings: Vec<_> = result
         .diagnostics
         .iter()
@@ -4808,39 +4807,18 @@ fn env_directive_warning_when_missing() {
         .collect();
     assert!(
         !warnings.is_empty(),
-        "@env should warn when var is not set, got: {:?}",
+        "env: data should warn when unset, got: {:?}",
         result.diagnostics
     );
 }
 
 #[test]
-fn fetch_directive_error_on_https() {
-    // @fetch with https should produce an error (no TLS support)
-    let result = htmlang::parser::parse("@fetch $data https://example.com/api");
-    let errors: Vec<_> = result
-        .diagnostics
-        .iter()
-        .filter(|d| d.severity == htmlang::parser::Severity::Error && d.message.contains("https"))
-        .collect();
+fn fetch_was_removed() {
+    let diags = parse_diagnostics("@fetch $data https://example.com/api");
     assert!(
-        !errors.is_empty(),
-        "@fetch https should error, got: {:?}",
-        result.diagnostics
-    );
-}
-
-#[test]
-fn fetch_directive_error_on_bad_url() {
-    let result = htmlang::parser::parse("@fetch $data http://127.0.0.1:1/nonexistent");
-    let errors: Vec<_> = result
-        .diagnostics
-        .iter()
-        .filter(|d| d.severity == htmlang::parser::Severity::Error)
-        .collect();
-    assert!(
-        !errors.is_empty(),
-        "@fetch should error on unreachable URL, got: {:?}",
-        result.diagnostics
+        diags.iter().any(|d| d.message.contains("`@fetch` was removed")),
+        "{:?}",
+        diags
     );
 }
 

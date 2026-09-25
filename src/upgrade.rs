@@ -242,6 +242,58 @@ fn rewrite_block(
         return Some(Block { lines: out, end });
     }
 
+    // @translations [LOCALE] with `locale:` sections of `key value` lines →
+    // `@let t.key value` for the active locale
+    if trimmed == "@translations" || trimmed.starts_with("@translations ") {
+        let explicit = trimmed["@translations".len()..].trim();
+        let page_lang = lines.iter().find_map(|l| {
+            let rest = l.trim().strip_prefix("@page [")?;
+            let attrs = rest.split(']').next()?;
+            attrs
+                .split(',')
+                .find_map(|a| a.trim().strip_prefix("lang "))
+                .map(|v| v.trim().to_string())
+        });
+        let active = if !explicit.is_empty() {
+            explicit.to_string()
+        } else {
+            page_lang.unwrap_or_else(|| "en".to_string())
+        };
+        let mut locale = active.clone();
+        let mut out = Vec::new();
+        let mut others = Vec::new();
+        for l in body {
+            let t = l.trim();
+            if t.is_empty() {
+                continue;
+            }
+            if let Some(name) = t.strip_suffix(':').filter(|n| !n.contains(' ')) {
+                locale = name.to_string();
+                if locale != active && !others.contains(&locale) {
+                    others.push(locale.clone());
+                }
+                continue;
+            }
+            if locale == active
+                && let Some((key, value)) = t.split_once(' ')
+            {
+                out.push(format!("{pad}@let t.{} {}", key, value.trim()));
+            }
+        }
+        if !others.is_empty() {
+            manual.push((
+                i + 1,
+                format!(
+                    "kept the '{}' strings; move the other locales ({}) to JSON files and load \
+                     them with `@data $t locales/$lang.json`",
+                    active,
+                    others.join(", ")
+                ),
+            ));
+        }
+        return Some(Block { lines: out, end });
+    }
+
     // @defer → its body, dedented
     if trimmed == "@defer" || trimmed.starts_with("@defer ") {
         return Some(Block {
@@ -446,6 +498,45 @@ fn rewrite_directive_line(
         && is_old_arithmetic(value.trim())
     {
         return format!("{pad}@let {} = {}", name, value.trim());
+    }
+    if let Some(rest) = trimmed.strip_prefix("@env ") {
+        let rest = rest.trim();
+        let (var, default) = match rest.split_once(char::is_whitespace) {
+            Some((var, default)) => (var, format!(" {}", default.trim())),
+            None => (rest, String::new()),
+        };
+        let name = var.to_lowercase().replace('-', "_");
+        return format!("{pad}@data ${} env:{}{}", name, var, default);
+    }
+    if let Some(rest) = trimmed.strip_prefix("@collection ") {
+        let rest = rest.trim();
+        let parsed = match rest.strip_prefix('$') {
+            Some(named) => named
+                .split_once(char::is_whitespace)
+                .map(|(n, p)| (n.to_string(), p.trim().trim_matches('"').to_string())),
+            None => rest
+                .rsplit_once(" as ")
+                .map(|(p, n)| (n.trim().to_string(), p.trim().trim_matches('"').to_string())),
+        };
+        if let Some((name, pattern)) = parsed {
+            manual.push((
+                idx + 1,
+                format!(
+                    "collection values are now `${name}.STEM.key` (they were `${name}_STEM_key`), \
+                     and `${name}` lists the stems separated by commas"
+                ),
+            ));
+            return format!("{pad}@data ${} {}", name, pattern);
+        }
+    }
+    if trimmed.starts_with("@fetch ") {
+        manual.push((
+            idx + 1,
+            "@fetch was removed: download the data before building and load it with \
+             `@data $name file.json`"
+                .to_string(),
+        ));
+        return line.to_string();
     }
     if let Some(rest) = trimmed.strip_prefix("@import ") {
         return format!("{pad}@include {}", rest);
@@ -990,6 +1081,18 @@ mod tests {
         assert_eq!(up("@let x = 1 + 2"), "@let x = 1 + 2");
         assert_eq!(up("@let area 1 / span 2"), "@let area 1 / span 2");
         assert_eq!(up("@let card $title $tone=primary\n  @text $title"), "@let card $title $tone=primary\n  @text $title");
+    }
+
+    #[test]
+    fn data_directives() {
+        assert_eq!(up("@env API_URL http://x"), "@data $api_url env:API_URL http://x");
+        assert_eq!(up("@collection $posts \"posts/*.json\""), "@data $posts posts/*.json");
+        assert_eq!(
+            up("@page [lang fr] T\n@translations\n  en:\n    hi Hello\n  fr:\n    hi Bonjour\n@text $t.hi"),
+            "@page [lang fr] T\n@let t.hi Bonjour\n@text $t.hi"
+        );
+        assert_eq!(upgrade("@translations\n  en:\n    hi Hello\n  fr:\n    hi Salut").manual.len(), 1);
+        assert_eq!(upgrade("@fetch $d http://x").manual.len(), 1);
     }
 
     #[test]

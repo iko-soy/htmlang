@@ -1,3 +1,3 @@
 @page Env Test
-@env HTMLANG_TEST_MISSING default_val
+@data $htmlang_test_missing env:HTMLANG_TEST_MISSING default_val
 @text $htmlang_test_missing
