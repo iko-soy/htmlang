@@ -1013,6 +1013,27 @@ fn rewrite_attr_regions(
 }
 
 /// Rewrite one attribute list's contents (without the brackets).
+/// Split `key value if condition` at its ` if ` (outside parentheses and
+/// quotes).
+fn split_trailing_if(attr: &str) -> Option<(&str, &str)> {
+    let mut depth = 0;
+    let mut quote = None;
+    for (i, c) in attr.char_indices() {
+        match c {
+            '"' | '\'' if quote == Some(c) => quote = None,
+            '"' | '\'' if quote.is_none() => quote = Some(c),
+            _ if quote.is_some() => {}
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            _ if depth == 0 && attr[i..].starts_with(" if ") => {
+                return Some((&attr[..i], attr[i + 4..].trim()));
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 fn rewrite_attr_list(list: &str, element_attrs: bool) -> String {
     if list.is_empty() {
         return String::new();
@@ -1035,6 +1056,16 @@ fn rewrite_attr_list(list: &str, element_attrs: bool) -> String {
             out.push_str(ws);
         }
         first = false;
+        // `key if cond` → `if(cond, key)`
+        if let Some((attr, condition)) = split_trailing_if(body.trim_end()) {
+            out.push_str(&format!(
+                "if({}, {})",
+                condition,
+                rewrite_attr_list(attr, element_attrs)
+            ));
+            out.push_str(&body[body.trim_end().len()..]);
+            continue;
+        }
         // `...$bundle` spread → `$bundle`
         let body = body.strip_prefix("...$").map_or(body.to_string(), |b| format!("${b}"));
         // Built-in style attributes that became standard-library bundles
@@ -1547,6 +1578,15 @@ mod tests {
             up("@svg [width 24, color red, class icon] a.svg"),
             "@image [inline, width 24, color red, class=icon] a.svg"
         );
+    }
+
+    #[test]
+    fn conditional_attributes_become_if() {
+        assert_eq!(
+            up("@button [padding 10 if $big, disabled if $x == \"a b\", color if($on, red, blue)] Go\n"),
+            "@button [if($big, padding 10), if($x == \"a b\", disabled), color if($on, red, blue)] Go\n"
+        );
+        assert_eq!(up("@el [shadow if $on]\n"), "@el [if($on, box-shadow)]\n");
     }
 
     #[test]

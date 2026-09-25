@@ -3833,26 +3833,53 @@ fn for_with_variable_bounds() {
 
 #[test]
 fn conditional_attr_true() {
-    let html = compile("@let show true\n@el [padding 10 if $show]\n  test\n");
+    let html = compile("@let show true\n@el [if($show, padding 10)]\n  test\n");
     assert!(html.contains("padding:10px"));
 }
 
 #[test]
 fn conditional_attr_false() {
-    let html = compile("@let show false\n@el [padding 10 if $show]\n  test\n");
+    let html = compile("@let show false\n@el [if($show, padding 10)]\n  test\n");
     assert!(!html.contains("padding:10px"));
 }
 
 #[test]
 fn conditional_attr_boolean_true() {
-    let html = compile("@let loading true\n@button [disabled if $loading] Click\n");
+    let html = compile("@let loading true\n@button [if($loading, disabled)] Click\n");
     assert!(html.contains("disabled"));
 }
 
 #[test]
 fn conditional_attr_boolean_false() {
-    let html = compile("@let loading false\n@button [disabled if $loading] Click\n");
+    let html = compile("@let loading false\n@button [if($loading, disabled)] Click\n");
     assert!(!html.contains("disabled"));
+}
+
+#[test]
+fn conditional_value_without_else_drops_the_attribute() {
+    let html = compile("@let on false\n@el [padding if($on, 10), margin if($on, 4, 8)]\n  test\n");
+    assert!(!html.contains("padding"), "{}", html);
+    assert!(html.contains("margin:8px"), "{}", html);
+}
+
+#[test]
+fn conditional_attribute_can_pick_a_bundle() {
+    let html = compile("@let on false\n@el [if($on, bold, $truncate)]\n  test\n");
+    assert!(html.contains("text-overflow:ellipsis"), "{}", html);
+    assert!(!html.contains("bold"), "{}", html);
+}
+
+#[test]
+fn key_if_condition_was_removed() {
+    let result = htmlang::parser::parse("@let on true\n@el [bold if $on]\n  test\n");
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("was removed") && d.message.contains("if($on, bold)")),
+        "{:?}",
+        result.diagnostics
+    );
 }
 
 // -----------------------------------------------------------------------

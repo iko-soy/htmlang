@@ -2766,6 +2766,15 @@ fn parse_attr_list(
 
     for part in split_commas(input) {
         let part = part.trim();
+        // A whole attribute `if(cond, a, b)` is the chosen branch's text.
+        let chosen;
+        let part = match choose_if(part, ctx, line_num) {
+            Some(branch) => {
+                chosen = branch;
+                chosen.as_str()
+            }
+            None => part,
+        };
         if part.is_empty() {
             continue;
         }
@@ -2781,19 +2790,24 @@ fn parse_attr_list(
 
         track_var_refs(part, &mut ctx.used_variables);
 
-        // Conditional attribute: `key if condition` or `key value if condition`.
-        // Conditions are evaluated on the source text, before substitution.
-        let part = match split_trailing_if(part) {
-            (attr, Some(condition)) => {
-                if !ctx.condition(condition, line_num) {
-                    continue;
-                }
-                attr
-            }
-            (attr, None) => attr,
+        if let Some((attr, condition)) = split_trailing_if(part) {
+            ctx.diagnostics.push(Diagnostic {
+                line: line_num,
+                column: None,
+                message: format!(
+                    "`KEY if CONDITION` was removed: write `if({}, {})`",
+                    condition, attr
+                ),
+                severity: Severity::Error,
+                source_line: None,
+            });
+            continue;
+        }
+        // A value `if(cond, a, b)` picks `a` or `b` (free text) by `cond`;
+        // an empty choice leaves the attribute out.
+        let Some(part) = choose_if_value(part, ctx, line_num) else {
+            continue;
         };
-        // A value `if(cond, a, b)` picks `a` or `b` (free text) by `cond`.
-        let part = choose_if_value(part, ctx, line_num);
         let part = substitute_vars(&part, &ctx.variables);
 
         let attr = if let Some((key, value)) = split_html_attribute(&part) {
@@ -3108,53 +3122,92 @@ fn numeric_range(start: i64, end: i64, step: i64) -> Vec<String> {
 
 
 
-/// Evaluate `if(condition, true_val, false_val)` expressions in attribute values.
-/// Split `key value if condition` into the attribute and its condition
-/// (ignoring ` if ` inside parentheses).
-fn split_trailing_if(part: &str) -> (&str, Option<&str>) {
+/// Find a leftover `key if condition` (ignoring ` if ` inside parentheses
+/// or quotes), to point at `if()`.
+fn split_trailing_if(part: &str) -> Option<(&str, &str)> {
     let mut depth = 0;
+    let mut quote = None;
     for (i, c) in part.char_indices() {
         match c {
+            '"' | '\'' if quote == Some(c) => quote = None,
+            '"' | '\'' if quote.is_none() => quote = Some(c),
+            _ if quote.is_some() => {}
             '(' => depth += 1,
             ')' => depth -= 1,
             _ if depth == 0 && part[i..].starts_with(" if ") => {
-                return (&part[..i], Some(part[i + 4..].trim()));
+                return Some((&part[..i], part[i + 4..].trim()));
             }
             _ => {}
         }
     }
-    (part, None)
+    None
 }
 
-/// Resolve a value written `if(cond, a, b)`: evaluate `cond` and keep the
-/// chosen branch's text. Other attributes are returned unchanged.
-fn choose_if_value(part: &str, ctx: &mut ParseContext, line: usize) -> String {
-    let (head, value) = match part.find(['=', ' ']) {
-        Some(pos) => part.split_at(pos + 1),
-        None => return part.to_string(),
-    };
-    let value = value.trim();
-    let Some(inner) = value.strip_prefix("if(").and_then(|v| v.strip_suffix(')')) else {
-        return part.to_string();
-    };
+/// Evaluate `if(cond, a)` or `if(cond, a, b)` when it is all of `text`,
+/// returning the chosen branch (empty when `cond` fails and there is no `b`).
+fn choose_if(text: &str, ctx: &mut ParseContext, line: usize) -> Option<String> {
+    let inner = text.strip_prefix("if(")?.strip_suffix(')')?;
     let args = split_if_args(inner);
-    if args.len() != 3 {
-        return part.to_string();
+    // `if(a) (b)` isn't one call
+    if split_trailing_paren(inner) || !(2..=3).contains(&args.len()) {
+        return None;
     }
     let branch = if ctx.condition(args[0].trim(), line) {
         args[1]
     } else {
-        args[2]
+        args.get(2).copied().unwrap_or("")
     };
-    format!("{}{}", head, branch.trim())
+    Some(branch.trim().to_string())
+}
+
+/// Whether the parentheses in `inner` close before its end, as in the
+/// inside of `if(a)(b)`.
+fn split_trailing_paren(inner: &str) -> bool {
+    let mut depth = 0i32;
+    let mut quote = None;
+    for c in inner.chars() {
+        match c {
+            '"' | '\'' if quote == Some(c) => quote = None,
+            '"' | '\'' if quote.is_none() => quote = Some(c),
+            _ if quote.is_some() => {}
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth < 0 {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+/// Resolve a value written `if(cond, a, b)`: evaluate `cond` and keep the
+/// chosen branch's text, or `None` when the choice is empty. Other
+/// attributes are returned unchanged.
+fn choose_if_value(part: &str, ctx: &mut ParseContext, line: usize) -> Option<String> {
+    let Some(pos) = part.find(['=', ' ']) else {
+        return Some(part.to_string());
+    };
+    let (head, value) = part.split_at(pos + 1);
+    match choose_if(value.trim(), ctx, line) {
+        Some(branch) if branch.is_empty() => None,
+        Some(branch) => Some(format!("{}{}", head, branch)),
+        None => Some(part.to_string()),
+    }
 }
 
 fn split_if_args(input: &str) -> Vec<&str> {
     let mut parts = Vec::new();
     let mut start = 0;
     let mut depth = 0;
+    let mut quote = None;
     for (i, c) in input.char_indices() {
         match c {
+            '"' | '\'' if quote == Some(c) => quote = None,
+            '"' | '\'' if quote.is_none() => quote = Some(c),
+            _ if quote.is_some() => {}
             '(' => depth += 1,
             ')' => depth -= 1,
             ',' if depth == 0 => {

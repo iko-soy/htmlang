@@ -255,12 +255,13 @@ Prefix a style attribute to apply it conditionally:
 
 ### Conditional attributes
 
-`key if CONDITION` includes an attribute only when the condition holds;
-`if(CONDITION, A, B)` picks a value.
+`if(CONDITION, A, B)` picks `A` or `B` by the condition. It works as a value or
+as a whole attribute, and an empty choice (the `B` can be left out) leaves the
+attribute out.
 
 ```
 @let active true
-@el [background if($active, blue, gray), bold if $active]
+@el [background if($active, blue, gray), if($active, bold), padding if($active, 12)]
   Conditionally styled
 ```
 
@@ -489,6 +490,7 @@ removed form with its replacement.
 | `@tooltip TEXT` | `@tooltip [tip TEXT] TEXT` |
 | `@let x $a + 1` (computed without `=`) | `@let x = $a + 1` |
 | `COND ? A : B` | `if(COND, A, B)` |
+| `key if COND` (in attributes) | `if(COND, key)` |
 | `$a ~ " " ~ $b` | `"$a $b"` |
 | `@each $x in LIST [page N]` | Split the list, or filter it with `@if` |
 | `...$bundle` | `$bundle` |
