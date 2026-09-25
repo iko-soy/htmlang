@@ -406,7 +406,7 @@ fn each_loop_expansion() {
 
 #[test]
 fn aria_data_attrs_accepted() {
-    let diags = parse_diagnostics("@el [aria-label Test, data-id 42]");
+    let diags = parse_diagnostics("@el [aria-label=Test, data-id=42]");
     assert!(
         !diags
             .iter()
@@ -518,7 +518,7 @@ fn no_warning_spacing_on_row() {
 
 #[test]
 fn warning_placeholder_on_row() {
-    let diags = parse_diagnostics("@row [placeholder test]");
+    let diags = parse_diagnostics("@row [placeholder=test]");
     assert!(
         diags
             .iter()
@@ -530,7 +530,7 @@ fn warning_placeholder_on_row() {
 
 #[test]
 fn warning_for_on_non_label() {
-    let diags = parse_diagnostics("@el [for email]");
+    let diags = parse_diagnostics("@el [for=email]");
     assert!(
         diags
             .iter()
@@ -583,7 +583,7 @@ fn named_slot_default_content() {
 #[test]
 fn style_block_output() {
     let output = compile(
-        "@page Test\n@style\n  .custom { color: red; }\n@el [class custom]\n  @text styled",
+        "@page Test\n@style\n  .custom { color: red; }\n@el [class=custom]\n  @text styled",
     );
     assert!(output.contains(".custom{color:red;}") || output.contains(".custom { color: red; }"));
     assert!(output.contains("styled"));
@@ -965,7 +965,7 @@ fn image_auto_lazy_loading() {
 
 #[test]
 fn image_explicit_loading_not_doubled() {
-    let output = compile("@page T\n@image [loading eager] https://example.com/photo.jpg");
+    let output = compile("@page T\n@image [loading=eager] https://example.com/photo.jpg");
     assert!(output.contains("loading=\"eager\""));
     assert!(!output.contains("loading=\"lazy\""));
 }
@@ -1102,22 +1102,18 @@ fn theme_color_meta_from_theme() {
 
 #[test]
 fn aria_live_passthrough() {
-    let output = compile("@page T\n@el [aria-live polite]\n  updating");
+    let output = compile("@page T\n@el [aria-live=polite]\n  updating");
     assert!(output.contains("aria-live=\"polite\""));
 }
 
 #[test]
-fn defer_directive() {
-    let result = htmlang::parser::parse("@page T\n@defer\n  @el\n    Lazy content");
+fn defer_directive_was_removed() {
+    let diags = parse_diagnostics("@page T\n@defer\n  @el\n    Lazy content");
     assert!(
-        result
-            .diagnostics
-            .iter()
-            .all(|d| d.severity != htmlang::parser::Severity::Error)
+        diags.iter().any(|d| d.message.contains("`@defer` was removed")),
+        "{:?}",
+        diags
     );
-    let html = htmlang::codegen::generate(&result.document);
-    assert!(html.contains("data-hl-defer"));
-    assert!(html.contains("IntersectionObserver"));
 }
 
 #[test]
@@ -1245,7 +1241,7 @@ fn snapshot_each_destructuring() {
 
 #[test]
 fn form_renders_form_tag() {
-    let output = compile("@page T\n@form [method post] /submit\n  @input [type text]");
+    let output = compile("@page T\n@form [method=post] /submit\n  @input [type=text]");
     assert!(output.contains("<form"));
     assert!(output.contains("action=\"/submit\""));
     assert!(output.contains("method=\"post\""));
@@ -1290,7 +1286,7 @@ fn hr_renders_self_closing() {
 
 #[test]
 fn figure_figcaption_renders() {
-    let output = compile("@page T\n@figure\n  @image [alt test] photo.jpg\n  @figcaption Caption");
+    let output = compile("@page T\n@figure\n  @image [alt=test] photo.jpg\n  @figcaption Caption");
     assert!(output.contains("<figure"));
     assert!(output.contains("<figcaption"));
     assert!(output.contains("Caption"));
@@ -1298,7 +1294,7 @@ fn figure_figcaption_renders() {
 
 #[test]
 fn progress_renders() {
-    let output = compile("@page T\n@progress [value 70, max 100]");
+    let output = compile("@page T\n@progress [value=70, max=100]");
     assert!(output.contains("<progress"));
     assert!(output.contains("value=\"70\""));
     assert!(output.contains("max=\"100\""));
@@ -1306,7 +1302,7 @@ fn progress_renders() {
 
 #[test]
 fn meter_renders() {
-    let output = compile("@page T\n@meter [value 6, min 0, max 10]");
+    let output = compile("@page T\n@meter [value=6, min=0, max=10]");
     assert!(output.contains("<meter"));
     assert!(output.contains("value=\"6\""));
 }
@@ -1464,7 +1460,7 @@ fn warning_missing_alt_on_image() {
 
 #[test]
 fn no_warning_with_alt_on_image() {
-    let diags = parse_diagnostics("@image [alt A photo] photo.jpg");
+    let diags = parse_diagnostics("@image [alt=A photo] photo.jpg");
     assert!(
         !diags
             .iter()
@@ -1621,7 +1617,7 @@ fn checked_generates_pseudo() {
 
 #[test]
 fn placeholder_generates_pseudo() {
-    let output = compile("@page T\n@input [type text, placeholder:color #999]");
+    let output = compile("@page T\n@input [type=text, placeholder:color #999]");
     assert!(output.contains("::placeholder"));
     assert!(output.contains("color:#999"));
 }
@@ -1692,13 +1688,13 @@ fn css_inset() {
 
 #[test]
 fn css_accent_color() {
-    let output = compile("@page T\n@input [type checkbox, accent-color blue]");
+    let output = compile("@page T\n@input [type=checkbox, accent-color blue]");
     assert!(output.contains("accent-color:blue"));
 }
 
 #[test]
 fn css_caret_color() {
-    let output = compile("@page T\n@input [type text, caret-color red]");
+    let output = compile("@page T\n@input [type=text, caret-color red]");
     assert!(output.contains("caret-color:red"));
 }
 
@@ -1876,7 +1872,7 @@ fn snapshot_arithmetic() {
 
 #[test]
 fn element_dialog() {
-    let output = compile("@page T\n@dialog [id modal, open]\n  @text Hello");
+    let output = compile("@page T\n@dialog [id=modal, open]\n  @text Hello");
     assert!(output.contains("<dialog"));
     assert!(output.contains("id=\"modal\""));
     assert!(output.contains("open"));
@@ -1894,7 +1890,7 @@ fn element_definition_list() {
 
 #[test]
 fn element_fieldset_legend() {
-    let output = compile("@page T\n@fieldset\n  @legend Info\n  @input [type text, name n]");
+    let output = compile("@page T\n@fieldset\n  @legend Info\n  @input [type=text, name=n]");
     assert!(output.contains("<fieldset"));
     assert!(output.contains("<legend>Info</legend>"));
     assert!(output.contains("</fieldset>"));
@@ -1903,7 +1899,7 @@ fn element_fieldset_legend() {
 #[test]
 fn element_picture_source() {
     let output = compile(
-        "@page T\n@picture\n  @source [srcset wide.jpg, media (min-width: 800px)]\n  @image [alt Photo] photo.jpg",
+        "@page T\n@picture\n  @source [srcset=wide.jpg, media=(min-width: 800px)]\n  @image [alt=Photo] photo.jpg",
     );
     assert!(output.contains("<picture"));
     assert!(output.contains("<source"));
@@ -1913,7 +1909,7 @@ fn element_picture_source() {
 
 #[test]
 fn element_time() {
-    let output = compile("@page T\n@time [datetime 2026-04-15] April 15");
+    let output = compile("@page T\n@time [datetime=2026-04-15] April 15");
     assert!(output.contains("<time"));
     assert!(output.contains("datetime=\"2026-04-15\""));
     assert!(output.contains("April 15"));
@@ -1935,7 +1931,7 @@ fn element_kbd() {
 
 #[test]
 fn element_abbr() {
-    let output = compile("@page T\n@abbr [title HyperText Markup Language] HTML");
+    let output = compile("@page T\n@abbr [title=HyperText Markup Language] HTML");
     assert!(output.contains("<abbr"));
     assert!(output.contains("title=\"HyperText Markup Language\""));
     assert!(output.contains("HTML"));
@@ -1943,7 +1939,7 @@ fn element_abbr() {
 
 #[test]
 fn element_datalist() {
-    let output = compile("@page T\n@datalist [id browsers]\n  @option Chrome\n  @option Firefox");
+    let output = compile("@page T\n@datalist [id=browsers]\n  @option Chrome\n  @option Firefox");
     assert!(output.contains("<datalist"));
     assert!(output.contains("id=\"browsers\""));
     assert!(output.contains("</datalist>"));
@@ -2135,7 +2131,7 @@ fn let_arithmetic_divide() {
 
 #[test]
 fn warning_missing_input_type() {
-    let diags = parse_diagnostics("@input [name email]");
+    let diags = parse_diagnostics("@input [name=email]");
     assert!(
         diags.iter().any(|d| d.message.contains("missing 'type'")),
         "should warn about missing type on @input, got: {:?}",
@@ -2300,7 +2296,7 @@ fn convert_image() {
     let hl = htmlang::convert::convert("<img src=\"photo.jpg\" alt=\"A photo\">");
     assert!(hl.contains("@image"), "img should become @image: {}", hl);
     assert!(hl.contains("photo.jpg"), "src preserved: {}", hl);
-    assert!(hl.contains("alt A photo"), "alt preserved: {}", hl);
+    assert!(hl.contains("alt=A photo"), "alt preserved: {}", hl);
 }
 
 #[test]
@@ -2531,7 +2527,7 @@ fn element_iframe() {
 
 #[test]
 fn element_canvas() {
-    let output = compile("@canvas [width 400, height 300, id myCanvas]");
+    let output = compile("@canvas [width 400, height 300, id=myCanvas]");
     assert!(
         output.contains("<canvas"),
         "should generate canvas tag: {}",
@@ -2546,7 +2542,7 @@ fn element_canvas() {
 
 #[test]
 fn element_output() {
-    let output = compile("@output [for a b]\n  42");
+    let output = compile("@output [for=a b]\n  42");
     assert!(
         output.contains("<output"),
         "should generate output tag: {}",
@@ -3329,7 +3325,7 @@ fn test_color_filter_mix() {
 
 #[test]
 fn test_autofocus_attribute() {
-    let result = htmlang::parser::parse("@input [type text, autofocus]");
+    let result = htmlang::parser::parse("@input [type=text, autofocus]");
     let html = htmlang::codegen::generate(&result.document);
     assert!(
         html.contains("autofocus"),
@@ -3588,7 +3584,7 @@ fn snapshot_new_css_properties_4() {
 
 #[test]
 fn script_element_with_src() {
-    let output = compile("@script [src app.js, defer]");
+    let output = compile("@script [src=app.js, defer]");
     assert!(
         output.contains("<script src=\"app.js\" defer>"),
         "script src: {}",
@@ -3622,7 +3618,7 @@ fn address_element() {
 
 #[test]
 fn search_element() {
-    let output = compile("@search\n  @input [type search]");
+    let output = compile("@search\n  @input [type=search]");
     assert!(output.contains("<search>"), "search: {}", output);
 }
 
@@ -3699,7 +3695,7 @@ fn target_pseudo() {
 
 #[test]
 fn valid_invalid_pseudo() {
-    let output = compile("@input [type email, valid:border 2 green]");
+    let output = compile("@input [type=email, valid:border 2 green]");
     assert!(output.contains(":valid"), "valid pseudo: {}", output);
 }
 
@@ -3750,7 +3746,7 @@ fn no_warning_new_attrs_batch7() {
 #[test]
 fn no_warning_script_attrs() {
     let diags = parse_diagnostics(
-        "@script [src app.js, defer, async, crossorigin anonymous, integrity sha384-abc, nomodule]",
+        "@script [src=app.js, defer, async, crossorigin anonymous, integrity sha384-abc, nomodule]",
     );
     assert!(
         !diags
@@ -4031,7 +4027,7 @@ fn conditional_attr_boolean_false() {
 #[test]
 fn function_with_style_is_scoped() {
     let html = compile(
-        "@let card $title\n  @style\n    .t { color: red; }\n  @text [class t] $title\n@card [title Hello]\n",
+        "@let card $title\n  @style\n    .t { color: red; }\n  @text [class=t] $title\n@card [title Hello]\n",
     );
     assert!(html.contains("hl-card\"><span class=\"t\">Hello"), "{}", html);
     assert!(html.contains(".hl-card .t { color: red; }"), "{}", html);
@@ -4125,7 +4121,7 @@ fn critical_attr_inlines_styles() {
 
 #[test]
 fn warning_input_without_label() {
-    let diags = parse_diagnostics("@input [type text]\n");
+    let diags = parse_diagnostics("@input [type=text]\n");
     let has_label_warning = diags
         .iter()
         .any(|d| d.message.contains("aria-label") || d.message.contains("@label"));
@@ -4156,14 +4152,14 @@ fn warning_button_without_text() {
 
 #[test]
 fn warning_positive_tabindex() {
-    let diags = parse_diagnostics("@el [tabindex 5]\n  test\n");
+    let diags = parse_diagnostics("@el [tabindex=5]\n  test\n");
     let has_warning = diags.iter().any(|d| d.message.contains("tabindex"));
     assert!(has_warning, "should warn about positive tabindex");
 }
 
 #[test]
 fn no_warning_input_with_aria_label() {
-    let diags = parse_diagnostics("@input [type text, aria-label Search]\n");
+    let diags = parse_diagnostics("@input [type=text, aria-label=Search]\n");
     let has_label_warning = diags
         .iter()
         .any(|d| d.message.contains("should have an") && d.message.contains("@label"));
@@ -4175,7 +4171,7 @@ fn no_warning_input_with_aria_label() {
 
 #[test]
 fn no_warning_input_in_label() {
-    let diags = parse_diagnostics("@label\n  @input [type text]\n");
+    let diags = parse_diagnostics("@label\n  @input [type=text]\n");
     let has_label_warning = diags
         .iter()
         .any(|d| d.message.contains("should have an") && d.message.contains("@label"));
@@ -4210,7 +4206,7 @@ fn snapshot_data_directive() {
 #[test]
 fn test_popover_in_output() {
     let html = compile(
-        "@button [popovertarget my-pop] Open\n@el [popover, id my-pop, padding 10]\n  Hello",
+        "@button [popovertarget=my-pop] Open\n@el [popover, id=my-pop, padding 10]\n  Hello",
     );
     assert!(
         html.contains("popovertarget=\"my-pop\""),
@@ -4242,7 +4238,7 @@ fn test_appearance_css() {
 
 #[test]
 fn test_inputmode_attr() {
-    let html = compile("@input [type search, inputmode search]");
+    let html = compile("@input [type=search, inputmode=search]");
     assert!(
         html.contains("inputmode=\"search\""),
         "should pass through inputmode"
@@ -4251,7 +4247,7 @@ fn test_inputmode_attr() {
 
 #[test]
 fn test_fetchpriority_attr() {
-    let html = compile("@image [fetchpriority high, width 100] hero.jpg");
+    let html = compile("@image [fetchpriority=high, width 100] hero.jpg");
     assert!(
         html.contains("fetchpriority=\"high\""),
         "should pass through fetchpriority"
@@ -5010,7 +5006,7 @@ fn partial_output_dev() {
 
 #[test]
 fn responsive_srcset_on_image() {
-    let output = compile("@image [responsive 400 800 1200, alt Photo] photo.jpg");
+    let output = compile("@image [responsive 400 800 1200, alt=Photo] photo.jpg");
     assert!(
         output.contains("srcset=\""),
         "should generate srcset, got: {}",
@@ -5063,7 +5059,7 @@ fn auto_image_dimensions_png() {
     ];
     std::fs::write(&png_path, &png_data).unwrap();
 
-    let input = format!("@image [alt test] {}", png_path.display());
+    let input = format!("@image [alt=test] {}", png_path.display());
     let result = htmlang::parser::parse(&input);
     let html = htmlang::codegen::generate(&result.document);
     assert!(
@@ -5083,7 +5079,7 @@ fn auto_image_dimensions_png() {
 #[test]
 fn auto_image_dimensions_not_for_urls() {
     // Remote URLs should not trigger dimension detection
-    let output = compile("@image [alt test] https://example.com/photo.png");
+    let output = compile("@image [alt=test] https://example.com/photo.png");
     // Should not crash or add dimensions for remote URLs
     assert!(
         output.contains("src=\"https://example.com/photo.png\""),
@@ -5108,7 +5104,7 @@ fn auto_image_dimensions_respects_explicit() {
     std::fs::write(&png_path, &png_data).unwrap();
 
     let input = format!(
-        "@image [width 100, height 100, alt test] {}",
+        "@image [width 100, height 100, alt=test] {}",
         png_path.display()
     );
     let result = htmlang::parser::parse(&input);

@@ -1,6 +1,6 @@
 @page New Elements 2
 
-@dialog [id modal, open]
+@dialog [id=modal, open]
   @text [bold] Dialog Title
   @text Dialog content here
   @button Close
@@ -13,23 +13,23 @@
 
 @fieldset
   @legend Personal Info
-  @label [for name] Name
-  @input [type text, name name]
+  @label [for=name] Name
+  @input [type=text, name=name]
 
 @picture
-  @source [srcset photo-wide.jpg, media (min-width: 800px)]
-  @image [alt A photo] photo.jpg
+  @source [srcset=photo-wide.jpg, media=(min-width: 800px)]
+  @image [alt=A photo] photo.jpg
 
-@time [datetime 2026-04-15] April 15, 2026
+@time [datetime=2026-04-15] April 15, 2026
 
 @text This is {@mark highlighted} text
 
 @text Press {@kbd Ctrl+C} to copy
 
-@abbr [title HyperText Markup Language] HTML
+@abbr [title=HyperText Markup Language] HTML
 
-@input [type text, name browser, list browsers]
-@datalist [id browsers]
+@input [type=text, name=browser, list=browsers]
+@datalist [id=browsers]
   @option Chrome
   @option Firefox
   @option Safari

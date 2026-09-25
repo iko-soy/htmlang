@@ -84,7 +84,7 @@
           A minimalist layout language that compiles to
           {@text [bold, color $primary] static HTML} — no JS, no build step.
           Visit the {@link [color $primary, underline] https://github.com repo} for more.
-      @image [width 72, height 72, rounded 36, alt "Avatar"] https://picsum.photos/72
+      @image [width 72, height 72, rounded 36, alt="Avatar"] https://picsum.photos/72
 
   @hr [border-top 1 #e5e7eb]
 
@@ -141,7 +141,7 @@
     @each $x in $nothing
       @text $x
     @else
-      @text [color $muted, italic, data-state $nothing] (Nothing — @each ... @else fallback)
+      @text [color $muted, italic, data-state=$nothing] (Nothing — @each ... @else fallback)
 
     -- repeat N times
     @row [spacing 6]
@@ -195,24 +195,24 @@
   -- Forms + pseudo-states
   @titled [title Forms]
     @form [spacing 10, max-width 420] /subscribe
-      @label [bold, size 13, for email] Email
+      @label [bold, size 13, for=email] Email
       @input [
-        id email, type email, name email,
-        placeholder you@example.com, required,
+        id=email, type=email, name=email,
+        placeholder=you@example.com, required,
         padding 10, border 1 #e5e7eb, rounded 6,
         focus:border 1 $primary,
         valid:border 1 #10b981,
         invalid:border 1 #ef4444,
         transition border 0.15s ease
       ]
-      @label [bold, size 13, for role] Role
-      @select [id role, name role, padding 10, border 1 #e5e7eb, rounded 6]
-        @option [value dev] Developer
-        @option [value designer] Designer
-        @option [value other] Other
-      @label [bold, size 13, for msg] Message
+      @label [bold, size 13, for=role] Role
+      @select [id=role, name=role, padding 10, border 1 #e5e7eb, rounded 6]
+        @option [value=dev] Developer
+        @option [value=designer] Designer
+        @option [value=other] Other
+      @label [bold, size 13, for=msg] Message
       @textarea [
-        id msg, name msg, rows 3,
+        id=msg, name=msg, rows=3,
         padding 10, border 1 #e5e7eb, rounded 6
       ]
       @row [spacing 8]
@@ -230,7 +230,7 @@
           padding 10 16, background white,
           border 1 #e5e7eb, rounded 6, cursor pointer
         ] Reset
-      @progress [value 60, max 100]
+      @progress [value=60, max=100]
 
   -- Lists and tables
   @titled [title Data]
@@ -263,7 +263,7 @@
               @td [padding 8, border-top 1 #e5e7eb, text-align right] 7
 
     @figure [spacing 6]
-      @image [alt "A random placeholder", rounded 8] https://picsum.photos/640/200
+      @image [alt="A random placeholder", rounded 8] https://picsum.photos/640/200
       @figcaption [color $muted, size 13, text-align center]
         A placeholder image.
 
@@ -300,10 +300,10 @@
       @link [color $primary] mailto:hi@htmlang.dev hi@htmlang.dev
     @row [spacing 10, align-items center]
       @text [size 13, color $muted] Published
-      @time [datetime 2026-04-16, size 13] April 16 2026
+      @time [datetime=2026-04-16, size 13] April 16 2026
     @row [spacing 10, align-items center]
       @text [size 13, color $muted] Confidence
-      @meter [value 8, min 0, max 10, low 3, high 7] 8/10
+      @meter [value=8, min=0, max=10, low=3, high=7] 8/10
 
   -- Footer: hover/active button, visited link, print-hidden
   @footer [

@@ -4,5 +4,5 @@
 
 @audio [controls, autoplay, loop] music.mp3
 
-@video [controls, muted, poster poster.jpg, width 640]
+@video [controls, muted, poster=poster.jpg, width 640]
   @text Your browser does not support video

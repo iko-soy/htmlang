@@ -50,6 +50,9 @@ pub fn upgrade(input: &str) -> Upgrade {
     let lines: Vec<&str> = folded.lines().collect();
     let mut out: Vec<String> = Vec::with_capacity(lines.len());
     let mut attr_depth = 0i32;
+    // Whether the attribute list being rewritten belongs to an element (or
+    // a bundle for elements), where HTML attributes now need `key=value`.
+    let mut element_attrs = false;
     let mut i = 0;
     // A file may define its own function named like an old alias (e.g.
     // `@let divider`); calls to it must not be renamed.
@@ -71,8 +74,15 @@ pub fn upgrade(input: &str) -> Upgrade {
             continue;
         }
         if attr_depth == 0 && VERBATIM_BODIES.iter().any(|d| starts_directive(trimmed, d)) {
+            // The directive line is upgraded like any other; its body is not.
             let end = block_end(&lines, i);
-            out.extend(lines[i..end].iter().map(|l| l.to_string()));
+            let mut header = rewrite_attr_regions(line, &mut attr_depth, true);
+            header = rename_filters(&header);
+            if header != line {
+                changes += 1;
+            }
+            out.push(header);
+            out.extend(lines[i + 1..end].iter().map(|l| l.to_string()));
             i = end;
             continue;
         }
@@ -93,7 +103,10 @@ pub fn upgrade(input: &str) -> Upgrade {
             new_line = rewrite_directive_line(&new_line, indent, i, &mut manual);
             new_line = rename_elements(&new_line, &user_defined);
         }
-        new_line = rewrite_attr_regions(&new_line, &mut attr_depth);
+        if attr_depth == 0 {
+            element_attrs = takes_element_attributes(new_line.trim_start(), &user_defined);
+        }
+        new_line = rewrite_attr_regions(&new_line, &mut attr_depth, element_attrs);
         new_line = rename_filters(&new_line);
         if new_line != line {
             changes += 1;
@@ -214,6 +227,14 @@ fn rewrite_block(
             j += 1;
         }
         return Some(Block { lines: out, end });
+    }
+
+    // @defer → its body, dedented
+    if trimmed == "@defer" || trimmed.starts_with("@defer ") {
+        return Some(Block {
+            lines: dedent_block(body, indent),
+            end,
+        });
     }
 
     // @with $x as y → @let y $x, body dedented
@@ -466,7 +487,50 @@ fn rename_elements(line: &str, user_defined: &[&str]) -> String {
 
 /// Apply attribute-level rewrites inside `[...]` regions. `depth` carries an
 /// unclosed bracket over to the following (continuation) lines.
-fn rewrite_attr_regions(line: &str, depth: &mut i32) -> String {
+/// Attributes that became HTML when written `key value`, or were meant as
+/// HTML but dropped; they are now written `key=value`.
+const HTML_ATTRIBUTES: &[&str] = &[
+    "accept", "action", "allow", "alt", "autocomplete", "blocking", "class", "cols", "colspan",
+    "datetime", "decoding", "dir", "download", "enctype", "enterkeyhint", "fetchpriority", "for",
+    "formaction", "formmethod", "formtarget", "headers", "high", "href", "hreflang", "id",
+    "inputmode", "label", "lang", "list", "loading", "low", "max", "maxlength", "media", "method",
+    "min", "name", "optimum", "pattern", "placeholder", "popover", "popovertarget",
+    "popovertargetaction", "poster", "preload", "referrerpolicy", "rel", "role", "rows",
+    "rowspan", "sandbox", "scope", "sizes", "span", "spellcheck", "src", "srcset", "start",
+    "step", "tabindex", "target", "title", "translate", "type", "value",
+];
+
+/// Standard-library components, which forward attributes to an element.
+const STD_COMPONENTS: &[&str] = &[
+    "badge", "tag", "chip", "avatar", "spacer", "tooltip", "carousel", "breadcrumb",
+];
+
+/// Does this line's attribute list style an element (as opposed to passing
+/// function parameters or directive options)?
+fn takes_element_attributes(trimmed: &str, user_defined: &[&str]) -> bool {
+    if trimmed.starts_with('[') {
+        return true; // implicit @el
+    }
+    let Some(rest) = trimmed.strip_prefix('@') else {
+        return false;
+    };
+    let name_end = rest
+        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+        .unwrap_or(rest.len());
+    let name = &rest[..name_end];
+    if name == "let" {
+        // An attribute bundle: `@let card [...]`
+        return rest[name_end..]
+            .trim_start()
+            .split_once(' ')
+            .is_some_and(|(_, v)| v.trim_start().starts_with('['));
+    }
+    !user_defined.contains(&name)
+        && (htmlang_core::ast::ElementKind::from_name(name).is_some()
+            || STD_COMPONENTS.contains(&name))
+}
+
+fn rewrite_attr_regions(line: &str, depth: &mut i32, element_attrs: bool) -> String {
     let trimmed = line.trim_start();
     if *depth == 0 && !trimmed.starts_with('@') && !trimmed.starts_with('[') {
         return line.to_string();
@@ -481,7 +545,7 @@ fn rewrite_attr_regions(line: &str, depth: &mut i32) -> String {
                 _ => {}
             }
             if *depth == 0 {
-                out.push_str(&rewrite_attr_list(&region));
+                out.push_str(&rewrite_attr_list(&region, element_attrs));
                 region.clear();
                 out.push(ch);
             } else {
@@ -494,12 +558,12 @@ fn rewrite_attr_regions(line: &str, depth: &mut i32) -> String {
             }
         }
     }
-    out.push_str(&rewrite_attr_list(&region));
+    out.push_str(&rewrite_attr_list(&region, element_attrs));
     out
 }
 
 /// Rewrite one attribute list's contents (without the brackets).
-fn rewrite_attr_list(list: &str) -> String {
+fn rewrite_attr_list(list: &str, element_attrs: bool) -> String {
     if list.is_empty() {
         return String::new();
     }
@@ -546,6 +610,20 @@ fn rewrite_attr_list(list: &str) -> String {
                 None => body,
             },
             None => body,
+        };
+        // HTML attributes with a value: `type email` → `type=email`
+        // (already-converted `key=value` attributes are left alone)
+        let body = match body.split_once(' ') {
+            Some((key, value))
+                if element_attrs
+                    && !key.contains('=')
+                    && (HTML_ATTRIBUTES.contains(&key)
+                        || key.starts_with("aria-")
+                        || key.starts_with("data-")) =>
+            {
+                format!("{}={}", key, value.trim())
+            }
+            _ => body,
         };
         // Renamed keys (keeping any `hover:` / `md:` style prefix)
         let key_end = body.find(char::is_whitespace).unwrap_or(body.len());
@@ -754,6 +832,7 @@ mod tests {
     #[test]
     fn with_and_layout() {
         assert_eq!(up("@with $a as b\n  @text $b"), "@let b $a\n@text $b");
+        assert_eq!(up("@defer Loading\n  @text x"), "@text x");
         assert_eq!(up("@layout base.hl\n  @text x\n"), "@extends base.hl\n@text x\n");
         let r = upgrade("@layout base.hl\n  @text x\n@text after");
         assert_eq!(r.output, "@layout base.hl\n  @text x\n@text after");
@@ -818,8 +897,28 @@ mod tests {
     }
 
     #[test]
+    fn html_attributes_use_equals() {
+        assert_eq!(
+            up("@input [type email, name e, required, padding 8]"),
+            "@input [type=email, name=e, required, padding 8]"
+        );
+        assert_eq!(up("[id main, aria-label Close]\n  x"), "[id=main, aria-label=Close]\n  x");
+        // Idempotent: a second run changes nothing.
+        let once = up("@el [aria-label Main menu]");
+        assert_eq!(once, "@el [aria-label=Main menu]");
+        assert_eq!(up(&once), once);
+        assert_eq!(up("@let card [class note, padding 4]"), "@let card [class=note, padding 4]");
+        // Function parameters and directive options are left alone.
+        assert_eq!(up("@let card $title\n  @text $title\n@card [title Hi]"), "@let card $title\n  @text $title\n@card [title Hi]");
+        assert_eq!(up("@page [lang en] Home"), "@page [lang en] Home");
+        // Multi-line lists keep their element context.
+        assert_eq!(up("@input [\n  type email,\n  padding 8\n]"), "@input [\n  type=email,\n  padding 8\n]");
+    }
+
+    #[test]
     fn verbatim_regions_are_untouched() {
         let src = "@script\n  for (x of y) {}\n@raw \"\"\"\n@unless\n\"\"\"\n@style\n  .p { }";
         assert_eq!(up(src), src);
+        assert_eq!(up("@script [src app.js, defer]"), "@script [src=app.js, defer]");
     }
 }

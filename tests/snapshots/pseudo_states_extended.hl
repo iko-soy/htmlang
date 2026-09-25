@@ -1,11 +1,11 @@
 @page Pseudo States Extended
 
 @el [padding 10, focus-visible:border 2 blue, focus-within:background #eee]
-  @input [type text, placeholder Name]
+  @input [type=text, placeholder=Name]
 
 @el [disabled:opacity 0.5, checked:background green]
 
-@input [type text, placeholder:color #999]
+@input [type=text, placeholder:color #999]
 
 @el [first:border-top 0, last:border-bottom 0]
 

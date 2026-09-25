@@ -1494,10 +1494,15 @@ fn attr_completions(range: Range, element: Option<&str>) -> Vec<CompletionItem> 
     ]
     .iter()
     .map(|(name, detail, takes_value)| {
-        let insert = if *takes_value {
-            format!("{} ", name)
-        } else {
-            name.to_string()
+        // HTML attributes are written `key=value`, styles `key value`.
+        let is_html = !htmlang::vocab::is_style_attribute(name)
+            && (htmlang::vocab::HTML_ATTRIBUTES.contains(name)
+                || name.starts_with("aria-")
+                || name.starts_with("data-"));
+        let insert = match (*takes_value, is_html) {
+            (true, true) => format!("{}=", name),
+            (true, false) => format!("{} ", name),
+            (false, _) => name.to_string(),
         };
         let mut completion = item(name, CompletionItemKind::PROPERTY, detail, &insert, range);
         // Boost element-specific attributes to the top of the list when we

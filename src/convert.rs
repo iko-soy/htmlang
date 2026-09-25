@@ -979,7 +979,7 @@ fn emit_element(
 
     // Add id if present
     if let Some(id) = &id_str {
-        hl_attrs.insert(0, ("id".into(), Some(id.clone())));
+        hl_attrs.insert(0, ("id=".into(), Some(id.clone())));
     }
 
     // Bold/italic for strong/em/b/i/u
@@ -1006,33 +1006,21 @@ fn emit_element(
         && let Some(alt_text) = &alt
         && !alt_text.is_empty()
     {
-        hl_attrs.push(("alt".into(), Some(alt_text.clone())));
+        hl_attrs.push(("alt=".into(), Some(alt_text.clone())));
     }
 
-    // Passthrough HTML attributes that htmlang supports
+    // Every other HTML attribute carries over as `key=value` (a key ending
+    // in `=` marks an HTML attribute for `push_attr_block`), or bare for
+    // booleans like `required`.
     for (key, val) in attrs {
         match key.as_str() {
             "style" | "class" | "id" | "href" | "src" | "alt" => {}
-            "type" | "name" | "value" | "placeholder" | "disabled" | "required" | "checked"
-            | "readonly" | "maxlength" | "min" | "max" | "step" | "action" | "method"
-            | "target" | "rel" | "title" | "role" | "aria-label" | "aria-hidden" | "tabindex"
-            | "for" | "open" | "autoplay" | "controls" | "loop" | "muted" | "preload" | "width"
-            | "height" | "loading" | "decoding" | "srcset" | "sizes" | "media" | "datetime"
-            | "cite" | "download" => {
-                if val.is_empty() {
-                    hl_attrs.push((key.clone(), None));
-                } else {
-                    hl_attrs.push((key.clone(), Some(val.clone())));
-                }
+            _ if val.is_empty()
+                && htmlang_core::vocab::BOOLEAN_HTML_ATTRS.contains(&key.as_str()) =>
+            {
+                hl_attrs.push((key.clone(), None));
             }
-            _ if key.starts_with("data-") || key.starts_with("aria-") => {
-                if val.is_empty() {
-                    hl_attrs.push((key.clone(), None));
-                } else {
-                    hl_attrs.push((key.clone(), Some(val.clone())));
-                }
-            }
-            _ => {}
+            _ => hl_attrs.push((format!("{}=", key), Some(val.clone()))),
         }
     }
 
@@ -1105,7 +1093,10 @@ fn push_attr_block(attrs: &[HlAttr], out: &mut String) {
         }
         out.push_str(key);
         if let Some(v) = val {
-            out.push(' ');
+            // HTML attributes (`key=`) take the value right after the `=`.
+            if !key.ends_with('=') {
+                out.push(' ');
+            }
             if v.contains(',') || v.contains(']') {
                 out.push('"');
                 out.push_str(&v.replace('"', "'"));
@@ -1354,8 +1345,8 @@ mod tests {
     fn form_elements() {
         let html = r#"<form action="/submit"><input type="text" placeholder="Name"><button>Go</button></form>"#;
         let result = convert(html);
-        assert!(result.contains("@form [action /submit]"));
-        assert!(result.contains("@input [type text, placeholder Name]"));
+        assert!(result.contains("@form [action=/submit]"));
+        assert!(result.contains("@input [type=text, placeholder=Name]"));
         assert!(result.contains("@button"));
     }
 
@@ -1400,7 +1391,7 @@ mod tests {
     #[test]
     fn values_with_commas_are_quoted() {
         let result = convert(r#"<input type="text" placeholder="Name, email">"#);
-        assert!(result.contains(r#"placeholder "Name, email""#), "{result}");
+        assert!(result.contains(r#"placeholder="Name, email""#), "{result}");
     }
 
     #[test]

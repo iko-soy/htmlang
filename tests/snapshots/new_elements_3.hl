@@ -2,7 +2,7 @@
 
 @iframe [width fill, height 400] https://example.com
 
-@output [id result, for a b]
+@output [id=result, for=a b]
   42
 
-@canvas [width 400, height 300, id myCanvas]
+@canvas [width 400, height 300, id=myCanvas]

@@ -292,11 +292,43 @@ fn container_arguments_are_rendered_as_text() {
         "@paragraph Hello",
         "@row Hello",
         "@section Hello",
-        "@nav [id x] Hello",
+        "@nav [id=x] Hello",
     ] {
         let out = compile(src);
         assert!(out.contains("Hello"), "{:?} dropped its text: {}", src, out);
     }
     let out = compile("@paragraph Read {@link /more more}");
     assert!(out.contains("<a href=\"/more\">more</a>"), "{}", out);
+}
+
+#[test]
+fn html_attributes_use_equals_and_are_all_emitted() {
+    let out = compile("@link [target=_blank, rel=me] /x Home\n@iframe [sandbox, allow=camera] https://e.com");
+    assert!(out.contains("target=\"_blank\""), "{}", out);
+    assert!(out.contains("rel=\"me\""), "{}", out);
+    assert!(out.contains(" sandbox"), "{}", out);
+    assert!(out.contains("allow=\"camera\""), "{}", out);
+}
+
+#[test]
+fn html_attribute_and_style_with_the_same_name_are_distinct() {
+    let out = compile("@select [size=4, size 20]\n  @option A");
+    assert!(out.contains("size=\"4\""), "{}", out);
+    assert!(out.contains("font-size:20px"), "{}", out);
+    let out = compile("@image [width=800, width 200, alt=x] a.png");
+    assert!(out.contains("width=\"800\""), "{}", out);
+    assert!(out.contains("width:200px"), "{}", out);
+}
+
+#[test]
+fn space_form_html_attribute_points_to_equals() {
+    let result = parser::parse("@input [type email]");
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("`type=email`")),
+        "{:?}",
+        result.diagnostics
+    );
 }

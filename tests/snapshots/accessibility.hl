@@ -1,6 +1,6 @@
 @page Accessibility
-@image [alt A photo of sunset, width 200] https://example.com/sunset.jpg
-@el [role navigation, aria-label Main menu]
-  @link [tabindex 0, aria-current page] / Home
-  @link [tabindex 0] /about About
-@button [aria-pressed false, data-action toggle] Toggle
+@image [alt=A photo of sunset, width 200] https://example.com/sunset.jpg
+@el [role=navigation, aria-label=Main menu]
+  @link [tabindex=0, aria-current=page] / Home
+  @link [tabindex=0] /about About
+@button [aria-pressed=false, data-action=toggle] Toggle

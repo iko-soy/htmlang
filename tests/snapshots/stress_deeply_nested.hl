@@ -88,7 +88,7 @@
               @column [spacing 8, margin-top 8]
                 @el [padding 8, border 1 $--border, rounded 4]
                   @text [size 12, color #64748b, margin-bottom 4] Level 5 - Field Group
-                  @input [type text, placeholder Name, padding 6 10, rounded 4, border 1 $--border, width fill]
+                  @input [type=text, placeholder=Name, padding 6 10, rounded 4, border 1 $--border, width fill]
                   @el [margin-top 4, padding 4 8, background #fef2f2, rounded 4]
                     @text [size 11, color #991b1b] Level 6 - Validation Error
                     @el [margin-top 2]
@@ -99,9 +99,9 @@
                 @el [padding 8, border 1 $--border, rounded 4]
                   @text [size 12, color #64748b, margin-bottom 4] Level 5 - Select Group
                   @select [padding 6 10, rounded 4, border 1 $--border, width fill]
-                    @option [value a] Option A
-                    @option [value b] Option B
-                    @option [value c] Option C
+                    @option [value=a] Option A
+                    @option [value=b] Option B
+                    @option [value=c] Option C
 
           @deep-card [title Level 3 - Nested Lists Card]
             @inner-panel [label Level 4 - Category Browser]

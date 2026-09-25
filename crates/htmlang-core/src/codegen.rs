@@ -419,7 +419,6 @@ struct GenContext {
     depth: usize,
     image_count: usize,
     has_interactive: bool,
-    has_defer: bool,
 }
 
 impl GenContext {
@@ -729,7 +728,6 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
         depth: 0,
         image_count: 0,
         has_interactive: false,
-        has_defer: false,
     };
 
     // Check if document has @main for skip-to-content link
@@ -1021,17 +1019,6 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
         ""
     };
 
-    // Noscript fallback: show deferred content if JS is disabled
-    let noscript_html = if ctx.has_defer {
-        if dev {
-            "<noscript><style>.hl-defer-placeholder { display: none; }</style></noscript>\n"
-        } else {
-            "<noscript><style>.hl-defer-placeholder{display:none}</style></noscript>"
-        }
-    } else {
-        ""
-    };
-
     let reset_css = reset_css(dev, focus_visible_css, skip_link_css);
 
     match &doc.page_title {
@@ -1049,7 +1036,6 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
 <style>
 {reset_css}{element_css}\
 </style>
-{noscript_html}\
 </head>
 <body>
 {body}\
@@ -1070,13 +1056,12 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
                     head_html = head_html,
                     og_html = og_html,
                     reset_css = reset_css,
-                    noscript_html = noscript_html,
                     element_css = element_css,
                     body = body,
                 )
             } else {
                 format!(
-                    "<!DOCTYPE html><html{lang_attr}><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>{title}</title>{theme_color_html}{base_html}{canonical_html}{manifest_html}{preload_html}{dns_prefetch_html}{meta_html}{og_html}{favicon_html}{json_ld_html}{head_html}<style>{reset_css}{element_css}</style>{noscript_html}</head><body>{body}</body></html>",
+                    "<!DOCTYPE html><html{lang_attr}><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>{title}</title>{theme_color_html}{base_html}{canonical_html}{manifest_html}{preload_html}{dns_prefetch_html}{meta_html}{og_html}{favicon_html}{json_ld_html}{head_html}<style>{reset_css}{element_css}</style></head><body>{body}</body></html>",
                     title = html_escape(title),
                     lang_attr = lang_attr,
                     theme_color_html = theme_color_html,
@@ -1091,7 +1076,6 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
                     json_ld_html = json_ld_html,
                     head_html = head_html,
                     reset_css = reset_css,
-                    noscript_html = noscript_html,
                     element_css = element_css,
                     body = body,
                 )
@@ -1272,7 +1256,6 @@ fn generate_partial_inner(doc: &Document, dev: bool) -> String {
         depth: 0,
         image_count: 0,
         has_interactive: false,
-        has_defer: false,
     };
     let mut body = String::new();
 
@@ -1347,21 +1330,25 @@ fn emit_argument_attr(out: &mut String, elem: &Element) {
     }
 }
 
-fn emit_html_passthrough_attrs(out: &mut String, attrs: &[Attribute]) {
+/// Emit HTML attributes: `key=value` ones (except `id` / `class`, which
+/// are emitted with the generated class) and bare booleans like `required`.
+fn emit_html_attrs(out: &mut String, attrs: &[Attribute]) {
     for attr in attrs {
         let key = attr.key.as_str();
-        if !crate::vocab::is_html_passthrough(key) {
-            continue;
-        }
-        if crate::vocab::BOOLEAN_HTML_ATTRS.contains(&key) && attr.value.is_none() {
-            out.push(' ');
-            out.push_str(key);
-        } else if let Some(val) = &attr.value {
+        if attr.html && key != "id" && key != "class" {
             out.push(' ');
             out.push_str(key);
             out.push_str("=\"");
-            out.push_str(&html_escape(strip_string_quotes(val)));
+            out.push_str(&html_escape(strip_string_quotes(
+                attr.value.as_deref().unwrap_or(""),
+            )));
             out.push('"');
+        } else if !attr.html
+            && attr.value.is_none()
+            && crate::vocab::BOOLEAN_HTML_ATTRS.contains(&key)
+        {
+            out.push(' ');
+            out.push_str(key);
         }
     }
 }
@@ -1570,7 +1557,7 @@ fn generate_element(
         out.push('"');
     }
 
-    emit_html_passthrough_attrs(out, &elem.attrs);
+    emit_html_attrs(out, &elem.attrs);
 
     // Source map attributes in dev mode
     if ctx.dev && elem.line_num > 0 {
@@ -1682,7 +1669,7 @@ fn generate_self_closing(
         out.push('"');
     }
 
-    emit_html_passthrough_attrs(out, &elem.attrs);
+    emit_html_attrs(out, &elem.attrs);
 
     // Source map attributes in dev mode (self-closing)
     if ctx.dev && elem.line_num > 0 {
@@ -2067,6 +2054,9 @@ fn attrs_to_css(
     }
 
     for attr in attrs {
+        if attr.html {
+            continue;
+        }
         // Determine the effective key for this pass
         let effective_key = if state_prefix.is_empty() {
             if crate::vocab::is_prefixed(&attr.key) {
@@ -2645,21 +2635,9 @@ fn attrs_to_css(
             // Critical CSS hint — not CSS, handled elsewhere
             "critical" => {}
 
-            // Identity and HTML passthrough — not CSS
-            "id" | "class" => {}
-            "type" | "placeholder" | "name" | "value" | "disabled" | "required" | "checked"
-            | "for" | "action" | "method" | "autocomplete" | "min" | "max" | "step" | "pattern"
-            | "maxlength" | "rows" | "cols" | "multiple" | "alt" | "role" | "tabindex"
-            | "title" | "controls" | "autoplay" | "loop" | "muted" | "playsinline" | "poster"
-            | "preload" | "loading" | "decoding" | "ordered" | "src" | "open" | "novalidate"
-            | "low" | "high" | "optimum" | "colspan" | "rowspan" | "scope" | "inline"
-            | "responsive" | "datetime" | "media" | "sizes" | "srcset" | "cite" | "list"
-            | "sandbox" | "allow" | "allowfullscreen" | "referrerpolicy" | "formaction"
-            | "formmethod" | "formtarget" | "target" | "autofocus" => {}
-
             // Any other standard CSS property is copied through, with `px`
             // added to bare numbers where the property takes a length.
-            key if crate::vocab::is_css_property(key) && !crate::vocab::is_html_passthrough(key) => {
+            key if crate::vocab::is_css_property(key) => {
                 if let Some(v) = val {
                     if crate::vocab::is_length_property(key) {
                         push_css(&mut css, key, &css_px_multi(v));
@@ -2938,7 +2916,7 @@ fn css_px_multi(value: &str) -> String {
 fn extract_id_class(attrs: &[Attribute]) -> (Option<String>, Option<String>) {
     let mut id = None;
     let mut class = None;
-    for attr in attrs {
+    for attr in attrs.iter().filter(|a| a.html) {
         match attr.key.as_str() {
             "id" => id = attr.value.clone(),
             "class" => class = attr.value.clone(),

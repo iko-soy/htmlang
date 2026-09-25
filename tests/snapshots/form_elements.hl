@@ -1,12 +1,12 @@
 @page Form Elements
 @row [spacing 10]
-  @button [type submit] Click me
-  @input [type text, placeholder Enter name, name username]
-  @input [type email, required, disabled]
+  @button [type=submit] Click me
+  @input [type=text, placeholder=Enter name, name=username]
+  @input [type=email, required, disabled]
 @column [spacing 5]
-  @label [for bio] Biography
-  @textarea [name bio, rows 4] Default text
-@select [name color]
-  @option [value red] Red
-  @option [value green] Green
+  @label [for=bio] Biography
+  @textarea [name=bio, rows=4] Default text
+@select [name=color]
+  @option [value=red] Red
+  @option [value=green] Green
   @option Blue

@@ -1,4 +1,4 @@
-@script [src app.js, defer]
+@script [src=app.js, defer]
 
 @script
   console.log("hello world");

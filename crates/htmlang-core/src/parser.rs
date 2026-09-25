@@ -1870,77 +1870,6 @@ impl Parser {
         }
 
 
-        // --- @defer (lazy-load below-fold content via IntersectionObserver) ---
-
-        if content.trim() == "@defer" || content.starts_with("@defer ") {
-            let placeholder_text = content.strip_prefix("@defer").unwrap_or("").trim();
-
-            // Collect body lines
-            let mut body_lines = Vec::new();
-            while self.pos < self.lines.len() && self.lines[self.pos].indent > current_indent {
-                body_lines.push(self.lines[self.pos].clone());
-                self.pos += 1;
-            }
-
-            if body_lines.is_empty() {
-                return Ok(None);
-            }
-
-            // Parse the body to get the actual content nodes
-            let min_indent = body_lines.iter().map(|l| l.indent).min().unwrap_or(0);
-            let adjusted: Vec<Line> = body_lines
-                .iter()
-                .map(|l| Line {
-                    indent: l.indent - min_indent,
-                    content: l.content.clone(),
-                    line_num: l.line_num,
-                })
-                .collect();
-
-            let saved_vars = ctx.variables.clone();
-            let mut body_parser = Parser {
-                lines: adjusted,
-                pos: 0,
-            };
-            let inner_nodes = body_parser.parse_children(0, ctx);
-            ctx.variables = saved_vars;
-
-            // Wrap content in a div with data-defer attribute + placeholder
-            let _placeholder = if placeholder_text.is_empty() {
-                "Loading...".to_string()
-            } else {
-                substitute_vars(placeholder_text, &ctx.variables)
-            };
-            let mut wrapper_attrs = vec![
-                Attribute {
-                    key: "data-hl-defer".to_string(),
-                    value: None,
-                },
-                Attribute {
-                    key: "class".to_string(),
-                    value: Some("hl-defer-placeholder".to_string()),
-                },
-            ];
-            // Hidden until intersection observer triggers
-            wrapper_attrs.push(Attribute {
-                key: "hidden".to_string(),
-                value: None,
-            });
-
-            let wrapper = Element {
-                kind: ElementKind::El,
-                attrs: wrapper_attrs,
-                argument: None,
-                children: inner_nodes,
-                line_num,
-            };
-
-            // Also emit the IntersectionObserver script as a sibling raw node
-            let script = Node::Raw("<script>(function(){var d=document.querySelectorAll('[data-hl-defer]');if(!d.length)return;var o=new IntersectionObserver(function(e){e.forEach(function(i){if(i.isIntersecting){i.target.removeAttribute('hidden');i.target.classList.remove('hl-defer-placeholder');o.unobserve(i.target)}});},{rootMargin:'200px'});d.forEach(function(el){o.observe(el)})})()</script>".to_string());
-
-            return Ok(Some(vec![Node::Element(wrapper), script]));
-        }
-
         // --- @match ---
 
         if let Some(rest) = content.strip_prefix("@match ") {
@@ -2546,6 +2475,7 @@ impl Parser {
                 attrs: vec![Attribute {
                     key: "class".to_string(),
                     value: Some(format!("hl-{}", name)),
+                    html: true,
                 }],
                 argument: None,
                 children: result_nodes,
@@ -2841,6 +2771,7 @@ const REMOVED_SYNTAX: &[(&str, &str)] = &[
     ("@base", "use `@page [base ...] Title`"),
     ("@og", "use `@meta og:NAME VALUE`"),
     ("@debug", "use `@warn`"),
+    ("@defer", "remove it: the content is already in the page"),
     ("@log", "use `@warn`"),
     (
         "@component",
@@ -3542,16 +3473,24 @@ fn parse_attr_list(
             continue;
         }
 
-        let attr = if let Some((key, value)) = part.split_once(' ') {
+        let attr = if let Some((key, value)) = split_html_attribute(&part) {
+            Attribute {
+                key: key.to_string(),
+                value: Some(evaluate_if_expr(value)),
+                html: true,
+            }
+        } else if let Some((key, value)) = part.split_once(' ') {
             let value = evaluate_if_expr(value.trim());
             Attribute {
                 key: key.trim().to_string(),
                 value: Some(value),
+                html: false,
             }
         } else {
             Attribute {
                 key: part.to_string(),
                 value: None,
+                html: false,
             }
         };
 
@@ -3571,7 +3510,8 @@ fn parse_attr_list(
             }
 
             // Color validation for hex colors
-            if matches!(crate::vocab::base_attribute(&attr.key), "background" | "color")
+            if !attr.html
+                && matches!(crate::vocab::base_attribute(&attr.key), "background" | "color")
                 && let Some(ref val) = attr.value
                 && val.starts_with('#')
                 && !is_valid_hex_color(val)
@@ -3586,10 +3526,31 @@ fn parse_attr_list(
             }
         }
 
-        // Warn on unknown attributes
-        if validate {
+        // Warn on unknown attributes. `key=value` HTML attributes may use any
+        // name; everything else must be a known style.
+        if validate && !attr.html {
             let base_key = crate::vocab::base_attribute(attr.key.as_str());
-            if let Some(hint) = removed_attribute_hint(base_key) {
+            let is_boolean_html =
+                attr.value.is_none() && crate::vocab::BOOLEAN_HTML_ATTRS.contains(&base_key);
+            if is_boolean_html || crate::vocab::is_style_attribute(base_key) {
+                validate_attr_value(&attr, line_num, ctx);
+            } else if crate::vocab::HTML_ATTRIBUTES.contains(&base_key)
+                || base_key.starts_with("aria-")
+                || base_key.starts_with("data-")
+            {
+                ctx.diagnostics.push(Diagnostic {
+                    line: line_num,
+                    column: None,
+                    message: format!(
+                        "'{}' is an HTML attribute: write `{}={}` (run `htmlang upgrade`)",
+                        attr.key,
+                        attr.key,
+                        attr.value.as_deref().unwrap_or("")
+                    ),
+                    severity: Severity::Warning,
+                    source_line: None,
+                });
+            } else if let Some(hint) = removed_attribute_hint(base_key) {
                 ctx.diagnostics.push(Diagnostic {
                     line: line_num,
                     column: None,
@@ -3600,7 +3561,7 @@ fn parse_attr_list(
                     severity: Severity::Warning,
                     source_line: None,
                 });
-            } else if !crate::vocab::is_known_attribute(base_key) {
+            } else {
                 let suggestion = suggest_closest(base_key, &crate::vocab::all_attributes());
                 let msg = match suggestion {
                     Some(closest) => {
@@ -3618,8 +3579,6 @@ fn parse_attr_list(
                     severity: Severity::Warning,
                     source_line: None,
                 });
-            } else {
-                validate_attr_value(&attr, line_num, ctx);
             }
         }
 
@@ -3627,6 +3586,19 @@ fn parse_attr_list(
     }
 
     attrs
+}
+
+/// Split an HTML attribute written `key=value` (`alt=`, `type=email`,
+/// `aria-label=Close menu`). Returns `None` for style attributes.
+fn split_html_attribute(part: &str) -> Option<(&str, &str)> {
+    let first_token = part.split(char::is_whitespace).next()?;
+    let eq = first_token.find('=')?;
+    let key = &part[..eq];
+    let valid_key = key.starts_with(|c: char| c.is_ascii_alphabetic())
+        && key
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+    valid_key.then(|| (key, part[eq + 1..].trim()))
 }
 
 fn split_commas(input: &str) -> Vec<&str> {

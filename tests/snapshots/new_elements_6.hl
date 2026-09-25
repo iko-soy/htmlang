@@ -6,5 +6,5 @@
   @link mailto:john@example.com john@example.com
 
 @search
-  @input [type search, placeholder Search...]
-  @button [type submit] Go
+  @input [type=search, placeholder=Search...]
+  @button [type=submit] Go

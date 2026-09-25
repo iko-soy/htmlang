@@ -4,7 +4,8 @@
 //! - one of htmlang's own attributes, which mean more than a single CSS
 //!   property (`spacing`, `center-x`, `rounded`, ...), handled in codegen;
 //! - a standard CSS property, copied into the generated CSS unchanged;
-//! - an HTML attribute, emitted on the element.
+//! - an HTML attribute, written `key=value` (or bare, for booleans such as
+//!   `required`) and emitted on the element.
 
 /// htmlang's own attributes (those that are neither a CSS property nor an
 /// HTML attribute).
@@ -114,26 +115,18 @@ pub const CSS_PROPERTIES: &[&str] = &[
     "writing-mode", "z-index", "zoom",
 ];
 
-/// HTML attributes emitted on any element when present.
-pub const HTML_PASSTHROUGH_ATTRS: &[&str] = &[
-    "action", "alt", "aria-atomic", "aria-live", "aria-relevant", "autocomplete", "autofocus",
-    "autoplay", "blocking", "checked", "cols", "colspan", "controls", "datetime", "decoding",
-    "disabled", "enterkeyhint", "fetchpriority", "for", "high", "inputmode", "list", "loading",
-    "loop", "low", "max", "maxlength", "media", "method", "min", "multiple", "muted", "name",
-    "novalidate", "open", "optimum", "pattern", "placeholder", "playsinline", "popover",
-    "popovertarget", "popovertargetaction", "poster", "preload", "required", "role", "rows",
-    "rowspan", "scope", "sizes", "spellcheck", "src", "srcset", "step", "tabindex", "title",
-    "translate", "type", "value",
-];
-
-/// Boolean HTML attributes (rendered without a value, e.g. `<input disabled>`).
+/// Boolean HTML attributes, written bare (`[required]`) and rendered
+/// without a value (`<input required>`). HTML attributes with a value are
+/// written `key=value`.
 pub const BOOLEAN_HTML_ATTRS: &[&str] = &[
-    "disabled", "required", "checked", "multiple", "controls", "autoplay", "loop", "muted",
-    "playsinline", "open", "novalidate", "autofocus", "defer", "async", "nomodule", "popover",
+    "allowfullscreen", "async", "autofocus", "autoplay", "checked", "controls", "defer",
+    "disabled", "download", "formnovalidate", "inert", "loop", "multiple", "muted", "nomodule",
+    "novalidate", "open", "playsinline", "popover", "readonly", "required", "reversed",
+    "sandbox", "selected",
 ];
 
-/// Every HTML attribute htmlang knows, including ones only certain elements
-/// emit (`href`, `sandbox`, `defer`, ...).
+/// Common HTML attribute names, used to suggest `key=value` when one is
+/// written like a style (`type email`). Any name works with `=`.
 pub const HTML_ATTRIBUTES: &[&str] = &[
     "abbr", "accept", "action", "allow", "allowfullscreen", "alt", "aria-atomic", "aria-live",
     "aria-relevant", "async", "autocomplete", "autofocus", "autoplay", "blocking", "charset",
@@ -245,17 +238,9 @@ pub fn is_css_property(name: &str) -> bool {
     CSS_PROPERTIES.binary_search(&name).is_ok()
 }
 
-/// Emitted as an HTML attribute on any element.
-pub fn is_html_passthrough(name: &str) -> bool {
-    HTML_PASSTHROUGH_ATTRS.contains(&name) || name.starts_with("aria-") || name.starts_with("data-")
-}
-
-pub fn is_known_attribute(name: &str) -> bool {
-    HTMLANG_ATTRIBUTES.contains(&name)
-        || is_css_property(name)
-        || HTML_ATTRIBUTES.contains(&name)
-        || name.starts_with("aria-")
-        || name.starts_with("data-")
+/// A style attribute: one of htmlang's own or a CSS property.
+pub fn is_style_attribute(name: &str) -> bool {
+    HTMLANG_ATTRIBUTES.contains(&name) || is_css_property(name)
 }
 
 /// All known attribute names, for "did you mean" suggestions.

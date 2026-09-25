@@ -71,6 +71,8 @@ pub struct Element {
 pub struct Attribute {
     pub key: String,
     pub value: Option<String>,
+    /// Written `key=value`: an HTML attribute rather than a style.
+    pub html: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -1,9 +1,9 @@
 @page New Elements
 
-@form [method post, action /submit]
-  @label [for email] Email
-  @input [type email, name email, required]
-  @button [type submit] Submit
+@form [method=post, action=/submit]
+  @label [for=email] Email
+  @input [type=email, name=email, required]
+  @button [type=submit] Submit
 
 @hr
 
@@ -16,12 +16,12 @@
   @cite Shakespeare
 
 @figure
-  @image [alt A code example, width 200] example.png
+  @image [alt=A code example, width 200] example.png
   @figcaption A code example
 
 @pre
   @code console.log("hello")
 
-@progress [value 70, max 100]
+@progress [value=70, max=100]
 
-@meter [value 6, min 0, max 10, low 3, high 8]
+@meter [value=6, min=0, max=10, low=3, high=8]

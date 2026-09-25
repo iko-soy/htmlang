@@ -6,9 +6,9 @@
 @el [position absolute, inset 0]
   @text Overlay
 
-@input [type checkbox, accent-color #3b82f6]
+@input [type=checkbox, accent-color #3b82f6]
 
-@input [type text, caret-color red]
+@input [type=text, caret-color red]
 
 @list [list-style disc]
   @item One
@@ -29,4 +29,4 @@
 @el [overflow auto, scroll-behavior smooth]
   @text Smooth scroll
 
-@textarea [resize vertical, rows 4] Resizable
+@textarea [resize vertical, rows=4] Resizable

@@ -176,7 +176,7 @@
         @el [width fill]
 
         @row [spacing 12, align-items center]
-          @input [type search, placeholder Search..., padding 8 12, rounded 6, border 1 $--border, dark:border 1 #334155, dark:background #1e293b, dark:color white, width 240, focus:border 1 $--primary, transition all 0.2s]
+          @input [type=search, placeholder=Search..., padding 8 12, rounded 6, border 1 $--border, dark:border 1 #334155, dark:background #1e293b, dark:color white, width 240, focus:border 1 $--primary, transition all 0.2s]
           @el [position relative]
             @icon-button [label Alerts]
             @el [position absolute, top -2, right -2]
@@ -313,7 +313,7 @@
         @card [title Data Table]
           @column [spacing 0, margin-top 12]
             @row [spacing 16, margin-bottom 12, align-items center]
-              @input [type search, placeholder Filter results..., padding 8 12, rounded 6, border 1 $--border, width 240]
+              @input [type=search, placeholder=Filter results..., padding 8 12, rounded 6, border 1 $--border, width 240]
               @el [width fill]
               @row [spacing 8]
                 @each $cat in $categories

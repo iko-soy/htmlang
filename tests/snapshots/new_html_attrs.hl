@@ -1,7 +1,7 @@
 @page HTML Attrs
 
-@form [method post] /search
-  @input [type search, inputmode search, enterkeyhint search, placeholder Search..., spellcheck false]
-  @input [type email, inputmode email, enterkeyhint done, translate no]
-  @image [fetchpriority high, width 200] hero.jpg
-  @button [type submit] Go
+@form [method=post] /search
+  @input [type=search, inputmode=search, enterkeyhint=search, placeholder=Search..., spellcheck=false]
+  @input [type=email, inputmode=email, enterkeyhint=done, translate=no]
+  @image [fetchpriority=high, width 200] hero.jpg
+  @button [type=submit] Go

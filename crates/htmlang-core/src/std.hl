@@ -29,7 +29,7 @@
 
 -- Text that shows `tip` when hovered.
 @let tooltip $tip
-  @text [position relative, cursor help, title $tip]
+  @text [position relative, cursor help, title=$tip]
     @children
 
 -- Horizontally scrolling row that snaps to each child.
@@ -39,7 +39,7 @@
 
 -- Breadcrumb trail: each crumb is an @item.
 @let breadcrumb
-  @nav [aria-label breadcrumb]
+  @nav [aria-label=breadcrumb]
     @list [ordered, display flex, flex-direction row, flex-wrap wrap, gap 8px]
       @children
 
