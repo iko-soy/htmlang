@@ -71,6 +71,9 @@ fn check_doc(file: &str) {
                 d.severity == Severity::Error
                     || d.message.contains("unknown")
                     || d.message.contains("undefined variable")
+                    || d.message.contains("is an HTML attribute")
+                    || d.message.contains("was removed")
+                    || d.message.contains("no single root")
             })
             .map(|d| format!("line {}: {}", d.line, d.message))
             .collect();

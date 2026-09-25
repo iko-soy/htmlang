@@ -3,20 +3,42 @@
   "name": "htmlang",
   "scopeName": "source.htmlang",
   "patterns": [
-    { "include": "#comment" },
-    { "include": "#raw-block" },
-    { "include": "#page-directive" },
-    { "include": "#let-definition" },
-    { "include": "#define-definition" },
-    { "include": "#fn-definition" },
-    { "include": "#include-directive" },
-    { "include": "#element" },
-    { "include": "#function-call" },
-    { "include": "#variable" },
-    { "include": "#attributes" },
-    { "include": "#inline-element" },
-    { "include": "#color" },
-    { "include": "#number" }
+    {
+      "include": "#comment"
+    },
+    {
+      "include": "#raw-block"
+    },
+    {
+      "include": "#page-directive"
+    },
+    {
+      "include": "#let-definition"
+    },
+    {
+      "include": "#include-directive"
+    },
+    {
+      "include": "#element"
+    },
+    {
+      "include": "#function-call"
+    },
+    {
+      "include": "#variable"
+    },
+    {
+      "include": "#attributes"
+    },
+    {
+      "include": "#inline-element"
+    },
+    {
+      "include": "#color"
+    },
+    {
+      "include": "#number"
+    }
   ],
   "repository": {
     "comment": {
@@ -28,52 +50,56 @@
       "begin": "(@raw)\\s+(\"\"\")",
       "end": "(\"\"\")",
       "beginCaptures": {
-        "1": { "name": "entity.name.tag.htmlang" },
-        "2": { "name": "punctuation.definition.string.begin.htmlang" }
+        "1": {
+          "name": "entity.name.tag.htmlang"
+        },
+        "2": {
+          "name": "punctuation.definition.string.begin.htmlang"
+        }
       },
       "endCaptures": {
-        "1": { "name": "punctuation.definition.string.end.htmlang" }
+        "1": {
+          "name": "punctuation.definition.string.end.htmlang"
+        }
       },
       "contentName": "string.unquoted.raw.htmlang"
     },
     "page-directive": {
       "match": "(@page)\\s+(.*)",
       "captures": {
-        "1": { "name": "keyword.control.directive.htmlang" },
-        "2": { "name": "string.unquoted.page-title.htmlang" }
+        "1": {
+          "name": "keyword.control.directive.htmlang"
+        },
+        "2": {
+          "name": "string.unquoted.page-title.htmlang"
+        }
       }
     },
     "let-definition": {
       "match": "(@let)\\s+([a-zA-Z_][a-zA-Z0-9_-]*)",
       "captures": {
-        "1": { "name": "keyword.control.directive.htmlang" },
-        "2": { "name": "variable.other.htmlang" }
-      }
-    },
-    "define-definition": {
-      "match": "(@define)\\s+([a-zA-Z_][a-zA-Z0-9_-]*)",
-      "captures": {
-        "1": { "name": "keyword.control.directive.htmlang" },
-        "2": { "name": "variable.other.constant.htmlang" }
-      }
-    },
-    "fn-definition": {
-      "match": "(@fn)\\s+([a-zA-Z_][a-zA-Z0-9_-]*)",
-      "captures": {
-        "1": { "name": "keyword.control.directive.htmlang" },
-        "2": { "name": "entity.name.function.definition.htmlang" }
+        "1": {
+          "name": "keyword.control.directive.htmlang"
+        },
+        "2": {
+          "name": "variable.other.htmlang"
+        }
       }
     },
     "include-directive": {
-      "match": "(@(?:include|import|extends|canonical|base|font-face))\\s+(.*)",
+      "match": "(@(?:include|import|extends|font-face|markdown|svg|data))\\s+(.*)",
       "captures": {
-        "1": { "name": "keyword.control.directive.htmlang" },
-        "2": { "name": "string.unquoted.filename.htmlang" }
+        "1": {
+          "name": "keyword.control.directive.htmlang"
+        },
+        "2": {
+          "name": "string.unquoted.filename.htmlang"
+        }
       }
     },
     "element": {
       "name": "entity.name.tag.htmlang",
-      "match": "@(?:row|column|col|el|text|paragraph|p|image|img|link|raw|children|nav|header|footer|main|section|article|aside|list|item|table|thead|tbody|tr|td|th|form|input|button|select|textarea|label|option|details|summary|blockquote|cite|code|pre|hr|figure|figcaption|video|audio|iframe|canvas|script|noscript|address|search|breadcrumb|grid|stack|spacer|badge|tooltip|avatar|carousel|chip|tag)\\b"
+      "match": "@(?:row|column|el|text|paragraph|image|link|raw|children|slot|fragment|script|nav|header|footer|main|section|article|aside|address|search|form|details|summary|dialog|figure|figcaption|blockquote|cite|fieldset|legend|noscript|datalist|list|item|dl|dt|dd|table|thead|tbody|tr|td|th|select|picture|progress|meter|output|canvas|button|label|option|textarea|time|mark|abbr|code|kbd|pre|h1|h2|h3|h4|h5|h6|input|hr|source|video|audio|iframe|grid|stack|in-front|behind)(?![a-zA-Z0-9_-])"
     },
     "function-call": {
       "name": "entity.name.function.htmlang",
@@ -88,17 +114,34 @@
       "begin": "\\[",
       "end": "\\]",
       "beginCaptures": {
-        "0": { "name": "punctuation.section.brackets.begin.htmlang" }
+        "0": {
+          "name": "punctuation.section.brackets.begin.htmlang"
+        }
       },
       "endCaptures": {
-        "0": { "name": "punctuation.section.brackets.end.htmlang" }
+        "0": {
+          "name": "punctuation.section.brackets.end.htmlang"
+        }
       },
       "patterns": [
-        { "include": "#variable" },
-        { "include": "#color" },
-        { "include": "#number" },
-        { "include": "#state-prefix" },
-        { "include": "#attribute-name" },
+        {
+          "include": "#variable"
+        },
+        {
+          "include": "#color"
+        },
+        {
+          "include": "#number"
+        },
+        {
+          "include": "#state-prefix"
+        },
+        {
+          "include": "#html-attribute"
+        },
+        {
+          "include": "#attribute-name"
+        },
         {
           "name": "punctuation.separator.comma.htmlang",
           "match": ","
@@ -107,27 +150,39 @@
     },
     "state-prefix": {
       "name": "keyword.other.state.htmlang",
-      "match": "(?:hover|active|focus):"
+      "match": "(?:[a-z0-9-]+|nth:[^:\\s,\\]]+|has\\([^)]*\\)):(?=[a-z])"
     },
     "attribute-name": {
       "name": "support.type.property-name.htmlang",
-      "match": "\\b(?:spacing|padding|padding-x|padding-y|width|height|min-width|max-width|min-height|max-height|center-x|center-y|align-left|align-right|align-top|align-bottom|background|color|border|rounded|bold|italic|underline|size|font|transition|cursor|opacity|text-align|line-height|overflow|position|z-index|shadow|wrap|gap-x|gap-y|id|class)\\b"
+      "match": "\\b(?:spacing|padding|padding-x|padding-y|width|height|min-width|max-width|min-height|max-height|center-x|center-y|align-left|align-right|align-top|align-bottom|background|color|border|rounded|bold|italic|underline|size|font|transition|cursor|opacity|text-align|line-height|overflow|position|z-index|shadow|wrap|gap-x|gap-y|gap|margin|hidden)\\b"
     },
     "inline-element": {
       "name": "meta.inline-element.htmlang",
       "begin": "(\\{)(?=@)",
       "end": "(\\})",
       "beginCaptures": {
-        "1": { "name": "punctuation.section.braces.begin.htmlang" }
+        "1": {
+          "name": "punctuation.section.braces.begin.htmlang"
+        }
       },
       "endCaptures": {
-        "1": { "name": "punctuation.section.braces.end.htmlang" }
+        "1": {
+          "name": "punctuation.section.braces.end.htmlang"
+        }
       },
       "patterns": [
-        { "include": "#element" },
-        { "include": "#function-call" },
-        { "include": "#attributes" },
-        { "include": "#variable" }
+        {
+          "include": "#element"
+        },
+        {
+          "include": "#function-call"
+        },
+        {
+          "include": "#attributes"
+        },
+        {
+          "include": "#variable"
+        }
       ]
     },
     "color": {
@@ -137,6 +192,10 @@
     "number": {
       "name": "constant.numeric.htmlang",
       "match": "\\b[0-9]+(\\.[0-9]+)?\\b"
+    },
+    "html-attribute": {
+      "name": "entity.other.attribute-name.htmlang",
+      "match": "\\b[a-zA-Z][a-zA-Z0-9_.-]*(?==)"
     }
   }
 }

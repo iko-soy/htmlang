@@ -19,11 +19,19 @@ Linux, macOS, and Windows. Your change should pass all three.
 ## Repository layout
 
 - `crates/htmlang-core/` — parser, AST, code generator. No I/O lives here.
+  - `ast.rs` — the element kinds; every plain HTML element is one row in `TAGS`.
+  - `vocab.rs` — the attribute vocabulary (htmlang attributes, CSS properties,
+    HTML attributes) and the state/media prefixes.
+  - `expr.rs` — the expression language for conditions and computed values.
+  - `std.hl` — the standard library, written in htmlang and loaded before
+    every file.
 - `crates/htmlang-wasm/` — thin wrapper exposing `compile` to the web playground.
 - `src/` — CLI, dev server, formatter, and HTML-to-hl converter.
 - `src/bin/htmlang_lsp/` — language server binary (`htmlang-lsp`).
 - `editors/vscode/` — VS Code extension.
 - `tests/snapshots.rs` — integration / snapshot tests for the compiler.
+- `tests/regressions.rs` — one test per fixed bug.
+- `tests/docs.rs` — compiles every example in `DESIGN.md` and `README.md`.
 - `examples/` — sample `.hl` files used as smoke tests and documentation.
 
 ## Adding a feature
@@ -32,11 +40,14 @@ Linux, macOS, and Windows. Your change should pass all three.
    `tests/snapshots.rs`; prefer integration tests that exercise the full
    parser-to-HTML pipeline. Pure parser / codegen helpers can live as unit
    tests alongside the code.
-2. Thread the feature through the parser, then codegen, then the LSP (hover,
-   completions, diagnostics).
-3. Document it in `DESIGN.md`. If it's user-facing, also update `README.md`.
-4. If it changes the CLI surface, update the `--help` output and the shell
-   completions.
+2. Prefer the smallest mechanism: a component belongs in `std.hl`, an HTML
+   element is a row in `TAGS`, and a CSS property needs no code at all. Only
+   thread a feature through the parser, codegen and LSP when it needs to be.
+3. Document it in `DESIGN.md` (the examples there are compiled by the tests).
+   If it's user-facing, also update `README.md`.
+4. If it removes or renames syntax, add a rewrite to `src/upgrade.rs` and a
+   hint to `REMOVED_SYNTAX` in the parser.
+5. If it changes the CLI surface, update the `--help` output.
 
 ## Style
 

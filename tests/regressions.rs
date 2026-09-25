@@ -361,3 +361,13 @@ fn invalid_expressions_are_errors() {
         .collect();
     assert_eq!(errors.len(), 2, "{:?}", result.diagnostics);
 }
+
+#[test]
+fn htmlang_attributes_sharing_html_names_do_not_warn() {
+    let result = parser::parse("@row [size 18, wrap, hidden]\n  @text x");
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+}

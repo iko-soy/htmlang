@@ -258,7 +258,7 @@ fn hover_builtin(word: &str) -> Option<String> {
             "**@raw** \u{2014} Raw HTML\n\nPasses content through without processing.\n\nUsage: `@raw \"\"\"<div>custom html</div>\"\"\"`"
         }
         "@page" => {
-            "**@page** \u{2014} Page title\n\nSets the HTML `<title>` and wraps output in a full document.\n\nUsage: `@page My Page Title`"
+            "**@page** \u{2014} Page title\n\nSets the HTML `<title>` and wraps output in a full document. Attributes set `lang`, `favicon`, `canonical` and `base`.\n\nUsage: `@page [lang en, favicon /favicon.png] My Page Title`"
         }
         "@let" => {
             "**@let** \u{2014} Definition\n\nDefines a variable, attribute bundle, or component.\n\n- Variable: `@let primary #3b82f6`\n- Attribute bundle: `@let card-style [padding 20, rounded 8]`\n- Component:\n```\n@let card $title\n  @el [padding 20]\n    @text [bold] $title\n    @children\n```"
@@ -447,18 +447,6 @@ fn hover_builtin(word: &str) -> Option<String> {
         "@warn" => {
             "**@warn** \u{2014} Compile warning\n\nEmit a custom warning during compilation.\n\nUsage: `@warn This value is deprecated`"
         }
-        "@debug" => {
-            "**@debug** \u{2014} Debug message\n\nPrint a debug message to stderr during compilation.\n\nUsage: `@debug Theme is $theme`"
-        }
-        "@lang" => {
-            "**@lang** \u{2014} Document language\n\nSets the `lang` attribute on the `<html>` element.\n\nUsage: `@lang en`"
-        }
-        "@favicon" => {
-            "**@favicon** \u{2014} Favicon\n\nInlines a favicon as a base64 data URI in the `<head>`.\n\nUsage: `@favicon favicon.png`"
-        }
-        "@og" => {
-            "**@og** \u{2014} Open Graph meta tag\n\nAdds an Open Graph `<meta>` tag to `<head>`.\n\nUsage: `@og title My Page Title`"
-        }
         "@breakpoint" => {
             "**@breakpoint** \u{2014} Custom breakpoint\n\nDefines a custom responsive breakpoint.\n\nUsage: `@breakpoint tablet 600`"
         }
@@ -470,12 +458,6 @@ fn hover_builtin(word: &str) -> Option<String> {
         }
         "@extends" => {
             "**@extends** `<file.hl>`\n\nInherit a layout template. Fill named `@slot` blocks.\n\n```\n@extends layout.hl\n@slot content\n  My page content\n@slot sidebar\n  Sidebar content\n```"
-        }
-        "@canonical" => {
-            "**@canonical** `<url>`\n\nSets the canonical URL for the page. Adds `<link rel=\"canonical\">` to `<head>`.\n\nUsage: `@canonical https://example.com/page`"
-        }
-        "@base" => {
-            "**@base** `<url>`\n\nSets the base URL for all relative URLs in the document. Adds `<base>` to `<head>`.\n\nUsage: `@base https://example.com/`"
         }
         "@font-face" => {
             "**@font-face** \u{2014} Custom font\n\nDefines a custom font face. Generates a CSS `@font-face` rule.\n\n```\n@font-face\n  family Inter\n  src url(/fonts/Inter.woff2)\n  weight 400 700\n```"
@@ -952,15 +934,6 @@ fn hover_builtin(word: &str) -> Option<String> {
         }
         "backdrop-blur" => {
             "**backdrop-blur** `<value>` \u{2014} Apply backdrop blur\n\nShorthand for `backdrop-filter: blur(Npx)`.\n\nUsage: `[backdrop-blur 10]` \u{2192} `backdrop-filter: blur(10px)`"
-        }
-        "no-scrollbar" => {
-            "**no-scrollbar** \u{2014} Hide scrollbar\n\nHides scrollbar while keeping overflow scrollable.\n\nSets `scrollbar-width: none` and `::-webkit-scrollbar { display: none }`."
-        }
-        "skeleton" => {
-            "**skeleton** \u{2014} Loading skeleton\n\nAdds a shimmer animation for loading placeholders.\n\nUsage: `@el [width fill, height 20, rounded 4, skeleton]`"
-        }
-        "gradient" => {
-            "**gradient** `<from> <to> [angle]` \u{2014} Linear gradient\n\nShorthand for `background: linear-gradient(...)`.\n\nUsage:\n- `[gradient #fff #000]` \u{2192} top-to-bottom\n- `[gradient #fff #000 45deg]` \u{2192} 45\u{00b0} angle"
         }
         "direction" => "**direction** `<value>` \u{2014} Text direction (`ltr`, `rtl`).",
         // Grid areas

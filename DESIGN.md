@@ -35,18 +35,22 @@ Children are indented under their parent. Attributes are comma-separated inside
   Content
 ```
 
-A comma inside `(...)` or `"..."` does not split attributes, so a font stack is
-written `font "Inter, sans-serif"`.
+An attribute is either a **style**, written `key value` (`padding 20`,
+`color red`), or an **HTML attribute**, written `key=value` (`id=main`,
+`type=email`, `aria-label=Close`). Boolean HTML attributes are written bare
+(`required`, `disabled`, `open`). A comma inside `(...)` or `"..."` does not
+split attributes, so a font stack is written `font "Inter, sans-serif"`.
 
 ### Text
 
-Any line that doesn't start with `@` or `[` is text. Use `@text` when text needs
-attributes, and `{...}` to put elements inside a line of text:
+Any line that doesn't start with `@` or `[` is text. Text after an element's
+attributes is its content, and `{...}` puts elements inside a line of text:
 
 ```
 @paragraph
   This is {@text [bold] important} and this is a {@link https://example.com link}.
 @text [bold, size 24, color #333] Hello world
+@section [padding 8] Text after the attributes is content too.
 ```
 
 ### Comments
@@ -96,7 +100,6 @@ name.
 | `@grid` | div, grid | Grid container (use `grid-cols`) |
 | `@stack` | div, position relative | Children layered on top of each other |
 | `@in-front` / `@behind` | div, absolute | Overlay layers filling the parent (see below) |
-| `@spacer` | div, flex 1 | Pushes siblings apart |
 | `@text` | span | Styled inline text |
 | `@paragraph` | p | Flowing text with inline elements |
 | `@link url` | a | Link; text after the URL becomes its content |
@@ -111,23 +114,20 @@ Semantic containers, all laid out as columns: `@nav`, `@header`, `@footer`,
 Content: `@list` / `@item` (`@list [ordered]` for `<ol>`), `@dl` / `@dt` /
 `@dd`, `@table` / `@thead` / `@tbody` / `@tr` / `@th` / `@td`, `@code`, `@pre`,
 `@hr`, `@mark`, `@kbd`, `@abbr`, `@time`, `@progress`, `@meter`, `@output`,
-`@canvas`, `@iframe src`, `@video`, `@audio`, `@picture` / `@source`,
-`@script`, `@breadcrumb`, `@fragment` (children without a wrapper).
+`@canvas`, `@iframe src`, `@video src`, `@audio src`, `@picture` / `@source`,
+`@script`, `@fragment` (children without a wrapper).
 
 Form controls: `@input`, `@button`, `@select` / `@option`, `@textarea`,
-`@label`, `@datalist`.
-
-Styled components: `@badge`, `@chip`, `@tag`, `@avatar`, `@tooltip`,
-`@carousel`.
+`@label`, `@datalist`. `@form URL` sets the form's `action`.
 
 ```
 @list [ordered]
   @item First
   @item Second
-@form [method post] /subscribe
-  @label [for email] Email
-  @input [type email, name email, id email, required]
-  @button [type submit] Send
+@form [method=post] /subscribe
+  @label [for=email] Email
+  @input [type=email, name=email, id=email, required]
+  @button [type=submit] Send
 @details [open]
   @summary Question
   @text The answer.
@@ -149,6 +149,35 @@ wins.
     @el [background red, width fill, height fill]
 ```
 
+### Standard library
+
+These components are written in htmlang (`std.hl`) and available in every file.
+Use them like elements; your own `@let` with the same name takes precedence.
+
+| Component | Purpose |
+|---|---|
+| `@badge` | Small pill for counts and statuses |
+| `@tag` | Label with slightly rounded corners |
+| `@chip` | Outlined, fully rounded label |
+| `@avatar` | Circular frame for an image or initials |
+| `@spacer` | Takes up the remaining space in a row or column |
+| `@tooltip [tip TEXT]` | Text that shows `TEXT` when hovered |
+| `@carousel` | Horizontally scrolling row that snaps to each child |
+| `@breadcrumb` | Breadcrumb trail of `@item`s |
+| `$skeleton`, `$no-scrollbar` | Attribute bundles: loading placeholder, hidden scrollbars |
+
+```
+@row [spacing 8, align-items center]
+  @badge [background #ef4444, color white] 3
+  @chip Rust
+  @spacer
+  @tooltip [tip Opens in a new tab] Help
+@breadcrumb
+  @item > @link / Home
+  @item Docs
+@el [$skeleton, height 20, width fill]
+```
+
 ## Attributes
 
 ### Layout and sizing
@@ -156,11 +185,10 @@ wins.
 | Attribute | Effect |
 |---|---|
 | `spacing N` | Gap between children (also `gap-x N`, `gap-y N`) |
-| `padding N` / `padding Y X` / `padding T R B L` | Padding (also `padding-x`, `padding-y`, per side) |
-| `margin ...` | Margin, same forms as padding |
+| `padding N` / `padding Y X` / `padding T R B L` | Padding (also `padding-x`, `padding-y`) |
+| `margin ...` | Margin, same forms as padding (also `margin-x`, `margin-y`) |
 | `width fill` / `width N` / `width shrink` | Take remaining space, exact size, or fit content |
 | `height fill` / `height N` / `height shrink` | Same for height |
-| `min-width`, `max-width`, `min-height`, `max-height` | Size limits |
 | `center-x`, `center-y` | Center within the parent |
 | `align-left`, `align-right`, `align-top`, `align-bottom` | Align within the parent |
 | `wrap` | Let a row wrap |
@@ -171,28 +199,36 @@ wins.
 
 | Attribute | Effect |
 |---|---|
-| `background COLOR`, `color COLOR` | Colors |
-| `border N COLOR` (also `border-top` etc.) | Border |
+| `border N COLOR` (also `border-top` etc.) | Solid border |
 | `rounded N` | Border radius |
 | `shadow VALUE` | Box shadow |
 | `bold`, `italic`, `underline` | Text style |
 | `size N` | Font size |
 | `font NAME` | Font family |
-| `transition VALUE`, `animation VALUE` | Motion |
+| `truncate`, `line-clamp N` | Cut text off with an ellipsis |
+| `blur N`, `backdrop-blur N` | Blur filters |
 
-Most CSS properties can also be written directly as attributes with the same
-name and value: `opacity 0.5`, `cursor pointer`, `z-index 10`,
-`text-align center`, `position absolute`, `grid-template-areas "a b"`, and so on.
+**Any standard CSS property** can also be used as an attribute, with the same
+name and value: `background red`, `opacity 0.5`, `cursor pointer`,
+`z-index 10`, `margin-top 16`, `grid-template-areas "a b"`, and so on.
 
-**Units.** A bare number is pixels (`padding 20` is `20px`). Values with a unit,
-keywords and CSS functions are passed through: `width 50%`, `margin 0 auto`,
-`max-width min(100%, 800px)`.
+**Units.** For lengths, a bare number is pixels (`padding 20` is `20px`).
+Values with a unit, keywords and CSS functions are passed through: `width 50%`,
+`margin 0 auto`, `max-width min(100%, 800px)`.
 
 ### HTML attributes
 
-`id`, `class`, and element attributes such as `href`, `type`, `name`, `value`,
-`placeholder`, `alt`, `for`, `required`, `disabled`, `target`, `rel`, `role`,
-`tabindex`, `title`, `data-*` and `aria-*` are emitted as HTML attributes.
+Write HTML attributes as `key=value`: `id=main`, `class=note`, `href=/about`,
+`type=email`, `alt=Logo`, `target=_blank`, `aria-label=Close menu`,
+`data-id=42`. Any name works. Booleans are written bare: `required`,
+`disabled`, `checked`, `open`, `sandbox`. A style and an HTML attribute may
+share a name without clashing:
+
+```
+@image [width=800, width 200, alt=A photo] photo.jpg
+@select [size=4, size 18]
+  @option One
+```
 
 ### State and media prefixes
 
@@ -201,7 +237,8 @@ Prefix a style attribute to apply it conditionally:
 | Prefix | Applies |
 |---|---|
 | `hover:`, `active:`, `focus:`, `focus-visible:`, `focus-within:`, `disabled:`, `checked:`, `visited:`, `target:`, `valid:`, `invalid:`, `empty:`, `placeholder:`, `selection:` | In that state |
-| `first:`, `last:`, `odd:`, `even:`, `nth(EXPR):` | By position among siblings |
+| `first:`, `last:`, `odd:`, `even:`, `nth:EXPR:` | By position among siblings |
+| `children:` | To each direct child |
 | `before:`, `after:` | On the `::before` / `::after` pseudo-element (with `content`) |
 | `has(SELECTOR):` | When the element contains a match |
 | `sm:`, `md:`, `lg:`, `xl:`, `2xl:` | From that viewport width up (640–1536px) |
@@ -213,11 +250,17 @@ Prefix a style attribute to apply it conditionally:
 ```
 @el [padding 16, background #3b82f6, hover:background #2563eb, md:padding 32, dark:background #1e3a8a]
   @text [color white] Click me
+@row [spacing 4, children:flex 1, nth:2n:background #f3f4f6]
+  @el A
+  @el B
 @el [before:content "→ ", before:color red]
   Item with an arrow
 ```
 
 ### Conditional attributes
+
+`key if CONDITION` includes an attribute only when the condition holds;
+`if(CONDITION, A, B)` picks a value.
 
 ```
 @let active true
@@ -232,9 +275,9 @@ Prefix a style attribute to apply it conditionally:
 ```
 -- A value, used as $primary
 @let primary #3b82f6
--- A computed value (= is optional)
+-- A computed value: `=` makes it an expression
 @let gap = 8 * 2
--- A quoted string: interpolated, never computed
+-- A quoted string, with $variables interpolated
 @let greeting "Hello $primary"
 -- An attribute bundle, used as [$card]
 @let card [padding 20, background white, rounded 8]
@@ -250,11 +293,28 @@ Prefix a style attribute to apply it conditionally:
   Attributes after a bundle override it.
 ```
 
-Function arguments are passed as attributes; parameters with `=default` may be
-omitted. `@component name $params` defines a function whose indented `@style`
-block is scoped to its output. Inside a function, `@children` is replaced by the caller's children,
-and `@slot name` by the caller's `@slot name` block (the slot's own children are
-the default).
+A function is called like an element:
+
+- Its parameters are passed as attributes; parameters with `=default` may be
+  omitted.
+- Other attributes style its root element, so `@panel [title Hi, padding 40]`
+  works like styling a built-in element.
+- Text after the attributes and indented children replace `@children`, and a
+  caller's `@slot name` block replaces `@slot name` (the slot's own children are
+  the default).
+- An `@style` block at the top of the body is scoped to the function: its rules
+  only apply inside the function's output.
+
+```
+@let note $kind=info
+  @style
+    .title { font-weight: bold; }
+  @el [padding 12, rounded 6, background #eff6ff]
+    @text [class=title] $kind
+    @children
+
+@note [kind Tip, padding 20] Scoped styles and forwarded attributes.
+```
 
 A multi-line string uses triple quotes; its indented lines are the value:
 
@@ -291,8 +351,23 @@ and for colors `lighten:N`, `darken:N`, `alpha:N`, `mix:COLOR:N`.
 ### Checks
 
 `@assert CONDITION` fails the build when false. `@warn MESSAGE` emits a
-warning; `@debug` and `@log` print values at compile time. `@deprecated MESSAGE`
-before a function warns every caller.
+warning. `@deprecated MESSAGE` before a function warns every caller.
+
+## Expressions
+
+Conditions and computed values (`@let x = ...`) are expressions:
+
+| | |
+|---|---|
+| Values | numbers, `"strings"` (with `$var` interpolation), `$variables` (with filters), `true`, `false`, and bare words (`dark`, `#fff`) as strings |
+| Arithmetic | `+ - * / %` with the usual precedence, unary `-`, `( )` |
+| Text | `~` joins two values: `$first ~ " " ~ $last` |
+| Comparison | `== != < > <= >=` (numeric when both sides are numbers), `contains`, `starts-with`, `ends-with` |
+| Logic | `and`, `or`, `not`; empty, `false` and `0` are false |
+| Choice | `if(CONDITION, A, B)` |
+
+Variables are looked up while evaluating, so a value containing `==` or spaces
+is still one value. An invalid expression is a compile error.
 
 ## Control flow
 
@@ -302,15 +377,12 @@ All control flow runs at compile time.
 @let items apple, banana, cherry
 @let count 3
 
-@if $count > 2
+@if $count > 2 and not $hidden
   @text Many
 @else if $count == 0
   @text None
 @else
   @text Few
-
-@if not $count
-  @text Nothing to show
 
 @each $item in $items
   @text $_index: $item
@@ -330,12 +402,7 @@ All control flow runs at compile time.
     @text Other
 ```
 
-`@defer` keeps its children hidden until they scroll near the viewport (they
-are shown immediately when JavaScript is off).
-
-Conditions support `==`, `!=`, `<`, `>`, `<=`, `>=`, `contains`, `starts-with`,
-`ends-with`, `not`, and truthiness (empty, `false` and `0` are false). A range
-counts down when its start is greater than its end.
+A range counts down when its start is greater than its end.
 
 ## Files and data
 
@@ -401,16 +468,17 @@ adds a meta tag (`og:` names become Open Graph `property` tags), and
   to [opacity 1]
 @style
   .note { color: gray; }
-@el [animation fade-in 0.3s ease, class note] Fades in
+@el [animation fade-in 0.3s ease, class=note] Fades in
 ```
 
 ## Upgrading older files
 
-`htmlang upgrade [dir|file]` rewrites removed syntax:
+`htmlang upgrade [dir|file]` rewrites removed syntax; the compiler reports each
+removed form with its replacement.
 
 | Removed | Use instead |
 |---|---|
-| `@fn`, `@define`, `@mixin` | `@let` (function, bundle) |
+| `@fn`, `@define`, `@mixin`, `@component` | `@let` (function, bundle; `@style` in a function body is scoped) |
 | `@unless COND` | `@if not COND` |
 | `@for $i in A..B`, `@repeat N` | `@each $i in A..B`, `@each $_ in 1..N` |
 | `@switch` | `@match` |
@@ -418,9 +486,16 @@ adds a meta tag (`og:` names become Open Graph `property` tags), and
 | `@with $x as y` | `@let y $x` |
 | `@layout file` | `@extends file` |
 | `@scope`, `@starting-style`, `@css-property` | The CSS rule in `@style` |
+| `@lang`, `@favicon`, `@canonical`, `@base` | `@page [lang ..., favicon ..., canonical ..., base ...] Title` |
+| `@og KEY VALUE` | `@meta og:KEY VALUE` |
+| `@debug`, `@log` | `@warn` |
+| `@defer` | Its content, directly |
 | `@col`, `@p`, `@img`, `@li`, `@btn`, `@ul`, `@divider`, `@opt` | `@column`, `@paragraph`, `@image`, `@item`, `@button`, `@list`, `@hr`, `@option` |
+| `type email`, `id main` (HTML attributes written as styles) | `type=email`, `id=main` |
+| `skeleton`, `no-scrollbar`, `gradient A B` | `$skeleton`, `$no-scrollbar`, `background linear-gradient(A, B)` |
+| `@tooltip TEXT` | `@tooltip [tip TEXT] TEXT` |
+| `@let x $a + 1` (computed without `=`) | `@let x = $a + 1` |
+| `COND ? A : B` | `if(COND, A, B)` |
 | `...$bundle` | `$bundle` |
 | `animate`, `inset-area` | `animation`, `position-area` |
 | `\|upper`, `\|lower`, `\|cap`, `\|len` | `\|uppercase`, `\|lowercase`, `\|capitalize`, `\|length` |
-
-The compiler reports each removed form with its replacement.

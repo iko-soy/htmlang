@@ -56,11 +56,23 @@ pub fn upgrade(input: &str) -> Upgrade {
     let mut i = 0;
     // A file may define its own function named like an old alias (e.g.
     // `@let divider`); calls to it must not be renamed.
-    let user_defined: Vec<&str> = lines
-        .iter()
-        .filter_map(|l| l.trim().strip_prefix("@let "))
-        .filter_map(|rest| rest.split_whitespace().next())
-        .collect();
+    // (Lines inside `"""` strings don't count: they're text.)
+    let mut user_defined: Vec<&str> = Vec::new();
+    let mut j = 0;
+    while j < lines.len() {
+        if let Some(end) = triple_quote_end(&lines, j) {
+            j = end;
+            continue;
+        }
+        if let Some(name) = lines[j]
+            .trim()
+            .strip_prefix("@let ")
+            .and_then(|rest| rest.split_whitespace().next())
+        {
+            user_defined.push(name);
+        }
+        j += 1;
+    }
 
     while i < lines.len() {
         let line = lines[i];
@@ -76,7 +88,7 @@ pub fn upgrade(input: &str) -> Upgrade {
         if attr_depth == 0 && VERBATIM_BODIES.iter().any(|d| starts_directive(trimmed, d)) {
             // The directive line is upgraded like any other; its body is not.
             let end = block_end(&lines, i);
-            let mut header = rewrite_attr_regions(line, &mut attr_depth, true);
+            let mut header = rewrite_attr_regions(line, &mut attr_depth, &mut true, &user_defined);
             header = rename_filters(&header);
             if header != line {
                 changes += 1;
@@ -106,7 +118,8 @@ pub fn upgrade(input: &str) -> Upgrade {
         if attr_depth == 0 {
             element_attrs = takes_element_attributes(new_line.trim_start(), &user_defined);
         }
-        new_line = rewrite_attr_regions(&new_line, &mut attr_depth, element_attrs);
+        new_line =
+            rewrite_attr_regions(&new_line, &mut attr_depth, &mut element_attrs, &user_defined);
         new_line = rename_filters(&new_line);
         if new_line != line {
             changes += 1;
@@ -557,9 +570,16 @@ fn takes_element_attributes(trimmed: &str, user_defined: &[&str]) -> bool {
             || STD_COMPONENTS.contains(&name))
 }
 
-fn rewrite_attr_regions(line: &str, depth: &mut i32, element_attrs: bool) -> String {
+fn rewrite_attr_regions(
+    line: &str,
+    depth: &mut i32,
+    element_attrs: &mut bool,
+    user_defined: &[&str],
+) -> String {
     let trimmed = line.trim_start();
-    if *depth == 0 && !trimmed.starts_with('@') && !trimmed.starts_with('[') {
+    // In a text line, only inline elements (`{@abbr [...]}`) have attributes.
+    let text_line = !trimmed.starts_with('@') && !trimmed.starts_with('[');
+    if *depth == 0 && text_line && !line.contains("{@") {
         return line.to_string();
     }
     let mut out = String::with_capacity(line.len());
@@ -572,20 +592,28 @@ fn rewrite_attr_regions(line: &str, depth: &mut i32, element_attrs: bool) -> Str
                 _ => {}
             }
             if *depth == 0 {
-                out.push_str(&rewrite_attr_list(&region, element_attrs));
+                out.push_str(&rewrite_attr_list(&region, *element_attrs));
                 region.clear();
                 out.push(ch);
             } else {
                 region.push(ch);
             }
-        } else {
-            out.push(ch);
-            if ch == '[' {
+            continue;
+        }
+        if ch == '[' {
+            if !text_line {
                 *depth = 1;
+            } else if let Some(brace) = out.rfind('{') {
+                let name = out[brace + 1..].trim_end();
+                if name.starts_with('@') && !name.contains(char::is_whitespace) {
+                    *element_attrs = takes_element_attributes(name, user_defined);
+                    *depth = 1;
+                }
             }
         }
+        out.push(ch);
     }
-    out.push_str(&rewrite_attr_list(&region, element_attrs));
+    out.push_str(&rewrite_attr_list(&region, *element_attrs));
     out
 }
 
@@ -938,6 +966,15 @@ mod tests {
         // Function parameters and directive options are left alone.
         assert_eq!(up("@let card $title\n  @text $title\n@card [title Hi]"), "@let card $title\n  @text $title\n@card [title Hi]");
         assert_eq!(up("@page [lang en] Home"), "@page [lang en] Home");
+        // Inline elements in text, and `@let` inside a raw string.
+        assert_eq!(
+            up("Read {@abbr [title HyperText] HTML} now"),
+            "Read {@abbr [title=HyperText] HTML} now"
+        );
+        assert_eq!(
+            up("@raw \"\"\"\n@let button $x\n\"\"\"\n@button [type submit] Go"),
+            "@raw \"\"\"\n@let button $x\n\"\"\"\n@button [type=submit] Go"
+        );
         // Multi-line lists keep their element context.
         assert_eq!(up("@input [\n  type email,\n  padding 8\n]"), "@input [\n  type=email,\n  padding 8\n]");
     }

@@ -1043,9 +1043,9 @@ pub(crate) fn semantic_tokens(text: &str, result: &ParseResult) -> Vec<SemanticT
                 let token_type = match word {
                     "@page" | "@let" | "@if" | "@else" | "@each" | "@include" | "@import"
                     | "@meta" | "@head" | "@style" | "@keyframes" | "@match" | "@case"
-                    | "@default" | "@slot" | "@children" | "@warn" | "@debug" | "@lang"
-                    | "@favicon" | "@fragment" | "@og" | "@breakpoint"
-                    | "@canonical" | "@base" | "@font-face" | "@json-ld" | "@assert" | "@theme"
+                    | "@default" | "@slot" | "@children" | "@warn"
+                    | "@fragment" | "@breakpoint"
+                    | "@font-face" | "@json-ld" | "@assert" | "@theme"
                     | "@deprecated" | "@extends" | "@data" | "@env" | "@fetch"
                     | "@svg" => 0, // keyword
                     _ => {

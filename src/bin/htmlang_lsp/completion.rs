@@ -329,22 +329,6 @@ fn directive_completions(range: Range) -> Vec<CompletionItem> {
         ("@default", "Default case (inside @match)", "@default"),
         ("@warn", "Emit a compile-time warning", "@warn "),
         (
-            "@debug",
-            "Print debug message during compilation",
-            "@debug ",
-        ),
-        (
-            "@lang",
-            "Set document language (html lang attribute)",
-            "@lang ",
-        ),
-        (
-            "@favicon",
-            "Set favicon (inlined as base64 data URI)",
-            "@favicon ",
-        ),
-        ("@og", "Add Open Graph meta tag", "@og "),
-        (
             "@breakpoint",
             "Define custom responsive breakpoint",
             "@breakpoint ",
@@ -364,12 +348,6 @@ fn directive_completions(range: Range) -> Vec<CompletionItem> {
             "Inherit a layout template and fill @slot blocks",
             "@extends ",
         ),
-        (
-            "@canonical",
-            "Set canonical URL for the page",
-            "@canonical ",
-        ),
-        ("@base", "Set base URL for relative links", "@base "),
         ("@font-face", "Define a custom font face", "@font-face"),
         (
             "@json-ld",
@@ -1427,13 +1405,6 @@ fn attr_completions(range: Range, element: Option<&str>) -> Vec<CompletionItem> 
         ("line-clamp", "Clamp text to N lines with ellipsis", true),
         ("blur", "Apply blur filter (px)", true),
         ("backdrop-blur", "Apply backdrop blur filter (px)", true),
-        (
-            "no-scrollbar",
-            "Hide scrollbar while keeping overflow",
-            false,
-        ),
-        ("skeleton", "Add shimmer loading skeleton animation", false),
-        ("gradient", "Linear gradient (color1 color2 [angle])", true),
         // Direction
         ("direction", "Text direction (ltr/rtl)", true),
         // Container query prefixes

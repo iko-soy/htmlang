@@ -108,7 +108,7 @@
         padding 2 6, background #f1f5f9, rounded 4,
         font monospace, size 13
       ] Ctrl+K} to search. {@mark [background #fef08a] Highlighted} uses mark.
-      {@abbr [title HyperText Markup Language + language] htmlang} is an abbreviation.
+      {@abbr [title=HyperText Markup Language + language] htmlang} is an abbreviation.
 
     @blockquote [
       padding-inline-start $gap, border-left 3 $primary,
@@ -217,7 +217,7 @@
       ]
       @row [spacing 8]
         @button [
-          type submit,
+          type=submit,
           padding 10 16, background $primary, color white, bold,
           rounded 6, border 0,
           hover:background $primary|darken:10,
@@ -226,7 +226,7 @@
           cursor pointer
         ] Subscribe
         @button [
-          type reset,
+          type=reset,
           padding 10 16, background white,
           border 1 #e5e7eb, rounded 6, cursor pointer
         ] Reset

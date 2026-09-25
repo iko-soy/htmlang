@@ -11,10 +11,10 @@
 /// HTML attribute).
 pub const HTMLANG_ATTRIBUTES: &[&str] = &[
     "align-bottom", "align-left", "align-right", "align-top", "backdrop-blur", "blur", "bold",
-    "center-x", "center-y", "col-span", "critical", "gap-x", "gap-y", "grid-cols",
-    "grid-rows", "inline", "italic", "margin-x", "margin-y", "ordered",
-    "padding-x", "padding-y", "responsive", "rounded", "row-span", "shadow", 
-    "spacing", "truncate", "underline",
+    "center-x", "center-y", "col-span", "critical", "gap-x", "gap-y", "grid-cols", "grid-rows",
+    "hidden", "inline", "italic", "margin-x", "margin-y", "ordered", "padding-x", "padding-y",
+    "responsive", "rounded", "row-span", "shadow", "size", "spacing", "truncate", "underline",
+    "wrap",
 ];
 
 /// Standard CSS properties, sorted. Any of these can be written as an
