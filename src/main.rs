@@ -344,96 +344,13 @@ fn lint_file(path: &str) -> Vec<String> {
     };
     let base = Path::new(path).parent();
     let result = htmlang::parser::parse_with_base(&input, base);
-    let mut warnings = Vec::new();
-
-    // Report parser diagnostics
-    for d in &result.diagnostics {
-        let prefix = severity_label(d.severity);
-        warnings.push(format!("{}:{}:{}: {}", path, d.line, prefix, d.message));
-    }
-
-    // Additional lint checks on the AST
-    lint_nodes(&result.document.nodes, path, 0, &mut warnings);
-    warnings
-}
-
-fn lint_nodes(nodes: &[htmlang::ast::Node], path: &str, depth: usize, warnings: &mut Vec<String>) {
-    for node in nodes {
-        if let htmlang::ast::Node::Element(elem) = node {
-            // Deeply nested elements (>10 levels)
-            if depth > 10 {
-                warnings.push(format!(
-                    "{}:{}:lint: deeply nested element ({} levels) — consider simplifying",
-                    path, elem.line_num, depth
-                ));
-            }
-
-            // @image without alt
-            if elem.kind == htmlang::ast::ElementKind::Image
-                && !elem.attrs.iter().any(|a| a.key == "alt")
-            {
-                warnings.push(format!(
-                    "{}:{}:lint: @image missing 'alt' attribute (accessibility)",
-                    path, elem.line_num
-                ));
-            }
-
-            // @link without content or aria-label
-            if elem.kind == htmlang::ast::ElementKind::Link {
-                let has_aria = elem.attrs.iter().any(|a| a.key == "aria-label");
-                let has_children = !elem.children.is_empty();
-                let has_arg_text = elem.argument.as_ref().is_some_and(|_| false);
-                if !has_aria && !has_children && !has_arg_text {
-                    warnings.push(format!(
-                        "{}:{}:lint: @link has no visible text or aria-label (accessibility)",
-                        path, elem.line_num
-                    ));
-                }
-            }
-
-            // @input without type
-            if elem.kind.is_tag("input")
-                && !elem.attrs.iter().any(|a| a.key == "type")
-            {
-                warnings.push(format!(
-                    "{}:{}:lint: @input missing 'type' attribute",
-                    path, elem.line_num
-                ));
-            }
-
-            // Empty containers (no children, no text)
-            if matches!(
-                elem.kind,
-                htmlang::ast::ElementKind::Row
-                    | htmlang::ast::ElementKind::Column
-                    | htmlang::ast::ElementKind::El
-            ) && elem.children.is_empty()
-            {
-                warnings.push(format!(
-                    "{}:{}:lint: empty container (@{}) has no children",
-                    path,
-                    elem.line_num,
-                    match elem.kind {
-                        htmlang::ast::ElementKind::Row => "row",
-                        htmlang::ast::ElementKind::Column => "column",
-                        _ => "el",
-                    }
-                ));
-            }
-
-            // @button without type
-            if elem.kind.is_tag("button")
-                && !elem.attrs.iter().any(|a| a.key == "type")
-            {
-                warnings.push(format!(
-                    "{}:{}:lint: @button missing 'type' attribute (defaults to submit)",
-                    path, elem.line_num
-                ));
-            }
-
-            lint_nodes(&elem.children, path, depth + 1, warnings);
-        }
-    }
+    let lint = htmlang::parser::lint(&result.document.nodes);
+    result
+        .diagnostics
+        .iter()
+        .chain(&lint)
+        .map(|d| format!("{}:{}:{}: {}", path, d.line, severity_label(d.severity), d.message))
+        .collect()
 }
 
 /// Whether the build cache record at `path` matches `key` and every

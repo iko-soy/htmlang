@@ -385,3 +385,19 @@ fn data_glob_loads_each_file_under_its_stem() {
     assert!(out.contains("2: First, Second"), "{}", out);
     assert!(out.contains(">a<") && out.contains(">b<"), "{}", out);
 }
+
+#[test]
+fn lint_adds_only_checks_the_compiler_does_not_already_make() {
+    let result = parser::parse("@row\n@button Go\n@image a.png");
+    let lint = parser::lint(&result.document.nodes);
+    let messages: Vec<&str> = result
+        .diagnostics
+        .iter()
+        .chain(&lint)
+        .map(|d| d.message.as_str())
+        .collect();
+    // Each problem is reported once, whichever pass finds it.
+    assert_eq!(messages.iter().filter(|m| m.contains("'alt'")).count(), 1, "{:?}", messages);
+    assert!(messages.iter().any(|m| m.contains("empty container")), "{:?}", messages);
+    assert!(messages.iter().any(|m| m.contains("'type'")), "{:?}", messages);
+}

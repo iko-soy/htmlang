@@ -3448,6 +3448,45 @@ fn is_container(kind: &ElementKind) -> bool {
         || kind.spec().is_some_and(|spec| spec.container)
 }
 
+/// Stricter checks for `htmlang lint`, on top of the diagnostics every
+/// compile reports: deep nesting, empty layout containers, and buttons
+/// without an explicit `type`.
+pub fn lint(nodes: &[Node]) -> Vec<Diagnostic> {
+    fn walk(nodes: &[Node], depth: usize, out: &mut Vec<Diagnostic>) {
+        for node in nodes {
+            let Node::Element(elem) = node else { continue };
+            let mut warn = |message: String| {
+                out.push(Diagnostic {
+                    line: elem.line_num,
+                    column: None,
+                    message,
+                    severity: Severity::Warning,
+                    source_line: None,
+                })
+            };
+            if depth > 10 {
+                warn(format!(
+                    "deeply nested element ({} levels): consider simplifying",
+                    depth
+                ));
+            }
+            if matches!(elem.kind, ElementKind::Row | ElementKind::Column | ElementKind::El)
+                && elem.children.is_empty()
+            {
+                warn(format!("empty container (@{}) has no children", elem.kind.name()));
+            }
+            if elem.kind.is_tag("button") && !elem.attrs.iter().any(|a| a.key == "type") {
+                warn("@button missing 'type' attribute (defaults to submit)".to_string());
+            }
+            walk(&elem.children, depth + 1, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(nodes, 0, &mut out);
+    out
+}
+
+
 fn validate_tree(
     nodes: &[Node],
     parent_kind: Option<&ElementKind>,
