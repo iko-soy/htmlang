@@ -1,7 +1,6 @@
 import {
   commands,
   ExtensionContext,
-  Location,
   Position,
   StatusBarAlignment,
   StatusBarItem,
@@ -13,6 +12,7 @@ import {
 import {
   LanguageClient,
   LanguageClientOptions,
+  Location as ProtocolLocation,
   ServerOptions,
   State,
 } from "vscode-languageclient/node";
@@ -51,19 +51,23 @@ async function startServer(context: ExtensionContext) {
       executeCommand: async (command, args, next) => {
         // The server emits `htmlang.showReferences` from code lenses; route
         // it through the built-in references viewer.
+        // The server precomputes the reference locations, since a reference
+        // query at the definition site would resolve the `@let` keyword.
         if (command === "htmlang.showReferences") {
-          const [uri, position] = args as [string, Position];
+          const [uri, position, locations] = args as [
+            string,
+            Position,
+            ProtocolLocation[] | undefined,
+          ];
           const target = Uri.parse(uri);
-          const refs = await commands.executeCommand<Location[]>(
-            "vscode.executeReferenceProvider",
-            target,
-            new Position(position.line, position.character)
+          const refs = (locations ?? []).map((l) =>
+            client!.protocol2CodeConverter.asLocation(l)
           );
           await commands.executeCommand(
             "editor.action.showReferences",
             target,
             new Position(position.line, position.character),
-            refs ?? []
+            refs
           );
           return;
         }

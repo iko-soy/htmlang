@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use serde_json::json;
@@ -36,6 +37,9 @@ struct Backend {
     /// Per-URI debounce handles. The value is a join handle for an in-flight
     /// diagnostic publish; replacing the entry cancels the prior handle.
     pending_diags: Arc<Mutex<HashMap<Url, JoinHandle<()>>>>,
+    /// Whether the client accepted the `utf-8` position encoding. When false,
+    /// positions are UTF-16 code units (the LSP default).
+    utf8_positions: AtomicBool,
 }
 
 const DIAG_DEBOUNCE: Duration = Duration::from_millis(150);
@@ -55,7 +59,11 @@ impl Backend {
             .write()
             .await
             .insert(uri.clone(), entry.clone());
+        self.doc_updated(uri, entry).await;
+    }
 
+    /// Follow-up work after a document entry has been stored.
+    async fn doc_updated(&self, uri: Url, entry: Arc<DocumentEntry>) {
         // Refresh the workspace symbol index for this file synchronously —
         // symbol extraction is cheap (single pass over text) and keeps
         // workspace-wide queries consistent without waiting on the debounce.
@@ -152,9 +160,22 @@ impl LanguageServer for Backend {
             self.index.write().await.set_root(root);
         }
 
+        // Positions are byte offsets throughout this server, so prefer the
+        // `utf-8` encoding — but only if the client offers it. Otherwise we
+        // must stay on the UTF-16 default (VS Code refuses to start a server
+        // that answers with an encoding it didn't offer).
+        let client_supports_utf8 = params
+            .capabilities
+            .general
+            .as_ref()
+            .and_then(|g| g.position_encodings.as_ref())
+            .is_some_and(|encs| encs.contains(&PositionEncodingKind::UTF8));
+        self.utf8_positions
+            .store(client_supports_utf8, Ordering::Relaxed);
+
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
-                position_encoding: Some(PositionEncodingKind::UTF8),
+                position_encoding: client_supports_utf8.then_some(PositionEncodingKind::UTF8),
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
                     TextDocumentSyncKind::INCREMENTAL,
                 )),
@@ -279,15 +300,22 @@ impl LanguageServer for Backend {
         let uri = params.text_document.uri.clone();
         let version = params.text_document.version;
 
-        // Start from the current text and apply each change in order.
-        let mut text = match self.doc(&uri).await {
-            Some(d) => d.text.clone(),
-            None => String::new(),
+        let utf8 = self.utf8_positions.load(Ordering::Relaxed);
+
+        // Hold the write lock across read-modify-write: tower-lsp may run
+        // notification handlers concurrently, and two interleaved incremental
+        // edits applied to the same base text would lose one of them.
+        let entry = {
+            let mut docs = self.documents.write().await;
+            let mut text = docs.get(&uri).map(|d| d.text.clone()).unwrap_or_default();
+            for change in &params.content_changes {
+                apply_change(&mut text, change, utf8);
+            }
+            let entry = Arc::new(DocumentEntry::new(text, version));
+            docs.insert(uri.clone(), entry.clone());
+            entry
         };
-        for change in &params.content_changes {
-            apply_change(&mut text, change);
-        }
-        self.set_doc(uri, text, version).await;
+        self.doc_updated(uri, entry).await;
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
@@ -302,6 +330,16 @@ impl LanguageServer for Backend {
             .remove(&params.text_document.uri)
         {
             handle.abort();
+        }
+        // The index may hold symbols from unsaved buffer edits; resync it
+        // with what's actually on disk.
+        if let Ok(path) = params.text_document.uri.to_file_path() {
+            let mut idx = self.index.write().await;
+            if path.exists() {
+                idx.update_from_disk(&path);
+            } else {
+                idx.remove(&path);
+            }
         }
         self.client
             .publish_diagnostics(params.text_document.uri, vec![], None)
@@ -613,8 +651,12 @@ impl LanguageServer for Backend {
         if formatted == doc.text {
             return Ok(None);
         }
-        let last_line = doc.text.lines().count().saturating_sub(1) as u32;
-        let last_col = doc.text.lines().last().map_or(0, |l| l.len()) as u32;
+        // End the edit at the true end of the document. `str::lines` drops a
+        // trailing newline, which would leave it outside the replaced range
+        // and append an extra blank line after the (newline-terminated)
+        // formatted text.
+        let last_line = doc.text.matches('\n').count() as u32;
+        let last_col = doc.text.rsplit('\n').next().map_or(0, |l| l.len()) as u32;
         Ok(Some(vec![TextEdit {
             range: Range::new(Position::new(0, 0), Position::new(last_line, last_col)),
             new_text: formatted,
@@ -738,6 +780,7 @@ impl LanguageServer for Backend {
         #[derive(Clone)]
         struct Def {
             line: u32,
+            col: u32,
             name: String,
             kind: &'static str,
         }
@@ -746,6 +789,9 @@ impl LanguageServer for Backend {
         for (i, line) in lines.iter().enumerate() {
             let trimmed = line.trim_start();
             if let Some(rest) = trimmed.strip_prefix("@let ") {
+                // `rest` is a suffix of `line`, so the name's column is
+                // however much of the line precedes it.
+                let col = (line.len() - rest.trim_start().len()) as u32;
                 let rest = rest.trim();
                 if let Some(name) = rest.split_whitespace().next() {
                     let has_body = lines
@@ -758,18 +804,21 @@ impl LanguageServer for Backend {
                     {
                         defs.push(Def {
                             line: i as u32,
+                            col,
                             name: name.to_string(),
                             kind: "fn",
                         });
                     } else if value_after_name.starts_with('[') {
                         defs.push(Def {
                             line: i as u32,
+                            col,
                             name: name.to_string(),
                             kind: "define",
                         });
                     } else {
                         defs.push(Def {
                             line: i as u32,
+                            col,
                             name: name.to_string(),
                             kind: "let",
                         });
@@ -780,7 +829,7 @@ impl LanguageServer for Backend {
 
         let mut lenses = Vec::with_capacity(defs.len());
         for def in &defs {
-            let mut count: usize = 0;
+            let mut locations: Vec<Location> = Vec::new();
             let needle = match def.kind {
                 "fn" => format!("@{}", def.name),
                 _ => format!("${}", def.name),
@@ -798,27 +847,36 @@ impl LanguageServer for Backend {
                         Some(c) => !(c.is_ascii_alphanumeric() || c == b'_' || c == b'-'),
                     };
                     if ok {
-                        count += 1;
+                        locations.push(Location {
+                            uri: uri.clone(),
+                            range: Range::new(
+                                Position::new(i as u32, pos as u32),
+                                Position::new(i as u32, (pos + needle.len()) as u32),
+                            ),
+                        });
                     }
                     from = pos + needle.len();
                 }
             }
 
-            let title = if count == 1 {
+            let title = if locations.len() == 1 {
                 "1 reference".to_string()
             } else {
-                format!("{} references", count)
+                format!("{} references", locations.len())
             };
             // A clickable lens that opens VS Code's references panel at this
-            // definition. The command name matches what VS Code's built-in
+            // definition. The arguments mirror what VS Code's built-in
             // `editor.action.showReferences` accepts: (uri, position, locations).
+            // The locations are sent precomputed because a reference query at
+            // the definition site would resolve the `@let` keyword instead.
             let line_pos = Position::new(def.line, 0);
+            let name_pos = Position::new(def.line, def.col);
             lenses.push(CodeLens {
                 range: Range::new(line_pos, line_pos),
                 command: Some(Command {
                     title,
                     command: "htmlang.showReferences".into(),
-                    arguments: Some(vec![json!(uri), json!(line_pos)]),
+                    arguments: Some(vec![json!(uri), json!(name_pos), json!(locations)]),
                 }),
                 data: None,
             });
@@ -917,6 +975,7 @@ async fn main() {
         documents: Arc::new(RwLock::new(HashMap::new())),
         index: Arc::new(RwLock::new(WorkspaceIndex::new())),
         pending_diags: Arc::new(Mutex::new(HashMap::new())),
+        utf8_positions: AtomicBool::new(false),
     });
     Server::new(stdin, stdout, socket).serve(service).await;
 }

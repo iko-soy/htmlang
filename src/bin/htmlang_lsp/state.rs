@@ -43,11 +43,13 @@ impl DocumentEntry {
 }
 
 /// Apply a single content change event to a string. Used when the LSP client
-/// negotiates incremental sync.
-pub fn apply_change(text: &mut String, change: &TextDocumentContentChangeEvent) {
+/// negotiates incremental sync. `utf8` selects how `Position::character` is
+/// interpreted: UTF-8 bytes when the client agreed to the `utf-8` position
+/// encoding, UTF-16 code units (the LSP default) otherwise.
+pub fn apply_change(text: &mut String, change: &TextDocumentContentChangeEvent, utf8: bool) {
     if let Some(range) = change.range {
-        let start = position_to_byte(text, range.start);
-        let end = position_to_byte(text, range.end);
+        let start = position_to_byte(text, range.start, utf8);
+        let end = position_to_byte(text, range.end, utf8).max(start);
         text.replace_range(start..end, &change.text);
     } else {
         text.clear();
@@ -57,29 +59,31 @@ pub fn apply_change(text: &mut String, change: &TextDocumentContentChangeEvent) 
 
 /// Convert an LSP `Position` to a byte offset in `text`.
 ///
-/// We treat `character` as a UTF-8 byte offset within the line. This matches
-/// the convention used elsewhere in this crate (e.g. `(pos.character as usize).min(line.len())`),
-/// which assumes UTF-8 positions. We negotiate the `utf-8` position encoding
-/// during initialize, so this stays consistent for clients that respect it
-/// (VS Code does).
-fn position_to_byte(text: &str, pos: Position) -> usize {
-    let target_line = pos.line as usize;
+/// Per the LSP spec, a `character` past the end of the line resolves to the
+/// end of that line, and a line past the end of the document resolves to the
+/// end of the document. The result always lies on a char boundary.
+fn position_to_byte(text: &str, pos: Position, utf8: bool) -> usize {
     let mut line_start = 0;
-    let mut line = 0;
-    for (i, b) in text.bytes().enumerate() {
-        if line == target_line {
-            return (line_start + pos.character as usize).min(text.len());
-        }
-        if b == b'\n' {
-            line += 1;
-            line_start = i + 1;
+    for _ in 0..pos.line {
+        match text[line_start..].find('\n') {
+            Some(nl) => line_start += nl + 1,
+            None => return text.len(),
         }
     }
-    if line == target_line {
-        (line_start + pos.character as usize).min(text.len())
-    } else {
-        text.len()
+    let line_end = text[line_start..]
+        .find('\n')
+        .map_or(text.len(), |nl| line_start + nl);
+    let line = &text[line_start..line_end];
+    let target = pos.character as usize;
+
+    let mut units = 0;
+    for (byte_idx, ch) in line.char_indices() {
+        if units >= target {
+            return line_start + byte_idx;
+        }
+        units += if utf8 { ch.len_utf8() } else { ch.len_utf16() };
     }
+    line_end
 }
 
 // ---------------------------------------------------------------------------
@@ -220,6 +224,7 @@ mod tests {
                 range_length: None,
                 text: "replaced".into(),
             },
+            true,
         );
         assert_eq!(s, "replaced");
     }
@@ -228,22 +233,45 @@ mod tests {
     fn apply_change_insert_in_middle() {
         let mut s = String::from("@row [width 200]\n@text hello");
         // Position 15 is just before the closing `]` on line 0.
-        apply_change(&mut s, &change((0, 15), (0, 15), ", padding 10"));
+        apply_change(&mut s, &change((0, 15), (0, 15), ", padding 10"), true);
         assert_eq!(s, "@row [width 200, padding 10]\n@text hello");
     }
 
     #[test]
     fn apply_change_delete_across_lines() {
         let mut s = String::from("line one\nline two\nline three");
-        apply_change(&mut s, &change((0, 4), (2, 4), ""));
+        apply_change(&mut s, &change((0, 4), (2, 4), ""), true);
         assert_eq!(s, "line three");
     }
 
     #[test]
     fn apply_change_replace_at_eof() {
         let mut s = String::from("abc");
-        apply_change(&mut s, &change((0, 3), (0, 3), "def"));
+        apply_change(&mut s, &change((0, 3), (0, 3), "def"), true);
         assert_eq!(s, "abcdef");
+    }
+
+    #[test]
+    fn apply_change_utf16_positions() {
+        // "é" is 2 UTF-8 bytes but 1 UTF-16 unit; "😀" is 4 bytes / 2 units.
+        let mut s = String::from("é😀x\nnext");
+        apply_change(&mut s, &change((0, 3), (0, 4), "y"), false);
+        assert_eq!(s, "é😀y\nnext");
+    }
+
+    #[test]
+    fn apply_change_utf8_positions_with_multibyte() {
+        let mut s = String::from("é😀x\nnext");
+        apply_change(&mut s, &change((0, 6), (0, 7), "y"), true);
+        assert_eq!(s, "é😀y\nnext");
+    }
+
+    #[test]
+    fn apply_change_clamps_character_to_line_end() {
+        // A character past the end of line 0 must not spill into line 1.
+        let mut s = String::from("ab\ncd");
+        apply_change(&mut s, &change((0, 99), (0, 99), "!"), false);
+        assert_eq!(s, "ab!\ncd");
     }
 }
 
