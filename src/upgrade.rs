@@ -447,6 +447,9 @@ fn rewrite_directive_line(
     {
         return format!("{pad}@let {} = {}", name, value.trim());
     }
+    if let Some(rest) = trimmed.strip_prefix("@import ") {
+        return format!("{pad}@include {}", rest);
+    }
     if let Some(rest) = trimmed.strip_prefix("@unless ") {
         return format!("{pad}@if not {}", rest);
     }
@@ -466,7 +469,7 @@ fn rewrite_directive_line(
             manual.push((idx + 1, "could not read the file name in @use".to_string()));
             return line.to_string();
         }
-        return format!("{pad}@import {}", file);
+        return format!("{pad}@include {}", file);
     }
     line.to_string()
 }
@@ -869,7 +872,8 @@ mod tests {
         assert_eq!(up("@fn card $t\n  @text $t"), "@let card $t\n  @text $t");
         assert_eq!(up("@define c [bold]\n@mixin m [italic]"), "@let c [bold]\n@let m [italic]");
         assert_eq!(up("@for $i in 1..3\n  $i"), "@each $i in 1..3\n  $i");
-        assert_eq!(up("@use \"lib.hl\" a, b"), "@import lib.hl");
+        assert_eq!(up("@use \"lib.hl\" a, b"), "@include lib.hl");
+        assert_eq!(up("@import theme.hl\n@import \"ui.hl\" as ui"), "@include theme.hl\n@include \"ui.hl\" as ui");
         assert_eq!(
             up("@repeat 2\n  @text $_count"),
             "@each $_ in 1..2\n  @text 2"

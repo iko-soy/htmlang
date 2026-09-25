@@ -758,6 +758,7 @@ fn removed_directives_point_to_upgrade() {
         "@repeat 2\n  hi",
         "@switch $v\n  @case a\n    hi",
         "@use \"a.hl\" x",
+        "@import a.hl",
         "@with $a as b\n  hi",
         "@layout base.hl\n  hi",
         "@scope .c\n  .t {}",
@@ -3153,13 +3154,13 @@ fn test_carousel_children_snap() {
 fn test_import_missing_file() {
     // We can't test @use with actual files in unit tests easily, but we can verify
     // the parser recognizes the directive without errors when it can't find the file
-    let result = htmlang::parser::parse("@import nonexistent.hl");
+    let result = htmlang::parser::parse("@include nonexistent.hl");
     let has_use_error = result.diagnostics.iter().any(|d| {
-        d.message.contains("cannot import") && d.severity == htmlang::parser::Severity::Error
+        d.message.contains("cannot include") && d.severity == htmlang::parser::Severity::Error
     });
     assert!(
         has_use_error,
-        "@import should report error for missing file, got: {:?}",
+        "@include should report error for missing file, got: {:?}",
         result.diagnostics
     );
 }
@@ -5155,7 +5156,7 @@ fn perf_large_document() {
 }
 
 // ---------------------------------------------------------------------------
-// Filesystem-based error tests for @include / @import / @data
+// Filesystem-based error tests for @include / @data
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -5185,14 +5186,14 @@ fn error_circular_include_filesystem() {
 
 #[test]
 fn import_with_alias_prefixes_definitions() {
-    // Verify that @import with alias registers imported fns under `alias.name`.
+    // Verify that @include with alias registers imported fns under `alias.name`.
     let dir = std::env::temp_dir().join("htmlang_test_import_alias");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let lib_path = dir.join("lib.hl");
     std::fs::write(&lib_path, "@let card\n  @el\n    @text card-body\n").unwrap();
 
-    let input = "@import lib.hl as ui\n@ui.card\n";
+    let input = "@include lib.hl as ui\n@ui.card\n";
     let result = htmlang::parser::parse_with_base(input, Some(&dir));
     let html = htmlang::codegen::generate(&result.document);
     let _ = std::fs::remove_dir_all(&dir);

@@ -931,79 +931,7 @@ impl Parser {
         }
 
         if let Some(rest) = content.strip_prefix("@include ") {
-            let filename = substitute_vars(rest.trim(), &ctx.variables);
-            let resolved = match &ctx.base_path {
-                Some(base) => base.join(&filename),
-                None => PathBuf::from(&filename),
-            };
-
-            // Circular include check
-            if ctx.include_stack.contains(&resolved) {
-                let cycle_chain = format_include_chain(&ctx.include_stack);
-                ctx.diagnostics.push(Diagnostic {
-                    line: line_num,
-                    column: None,
-                    message: format!(
-                        "circular include '{}' (cycle: {} → {})",
-                        filename, cycle_chain, filename
-                    ),
-                    severity: Severity::Error,
-                    source_line: Some(content.clone()),
-                });
-                return Ok(None);
-            }
-
-            // Use file cache to avoid redundant reads
-            let included_text = if let Some(cached) = ctx.file_cache.get(&resolved) {
-                cached.clone()
-            } else {
-                match std::fs::read_to_string(&resolved) {
-                    Ok(text) => {
-                        ctx.file_cache.insert(resolved.clone(), text.clone());
-                        text
-                    }
-                    Err(e) => {
-                        ctx.diagnostics.push(Diagnostic {
-                            line: line_num,
-                            column: None,
-                            message: format!("cannot include '{}': {}", filename, e),
-                            severity: Severity::Error,
-                            source_line: Some(content.clone()),
-                        });
-                        return Ok(None);
-                    }
-                }
-            };
-
-            ctx.included_files.push(resolved.clone());
-            ctx.include_stack.push(resolved.clone());
-            let saved_base = ctx.base_path.clone();
-            ctx.base_path = resolved.parent().map(|p| p.to_path_buf());
-
-            let diag_count_before = ctx.diagnostics.len();
-            let included_lines = preprocess(&included_text);
-            let mut included_parser = Parser {
-                lines: included_lines,
-                pos: 0,
-            };
-            let nodes = included_parser.parse_children(0, ctx);
-
-            // Annotate new diagnostics with include chain
-            let include_chain = format_include_chain(&ctx.include_stack);
-            for d in &mut ctx.diagnostics[diag_count_before..] {
-                d.message = format!("{}\n  in {}", d.message, include_chain);
-            }
-
-            ctx.base_path = saved_base;
-            ctx.include_stack.pop();
-            return Ok(Some(nodes));
-        }
-
-        // --- @import (definitions only, no DOM nodes) ---
-
-        if let Some(rest) = content.strip_prefix("@import ") {
             let rest = rest.trim();
-            // Support @import "file.hl" as prefix — namespace imported definitions
             let (filename, alias) = if let Some((file_part, alias_part)) = rest.rsplit_once(" as ")
             {
                 (
@@ -1077,13 +1005,14 @@ impl Parser {
                     });
                     return Ok(None);
                 }
+                let mut matched_nodes = Vec::new();
                 for file_path in matched_files {
                     let rel_name = file_path
                         .strip_prefix(&base_dir)
                         .unwrap_or(&file_path)
                         .to_string_lossy()
                         .to_string();
-                    // Synthesize an @import line for each matched file
+                    // Synthesize an @include line for each matched file
                     let import_line = match &alias {
                         Some(pfx) => {
                             let stem = file_path
@@ -1091,18 +1020,18 @@ impl Parser {
                                 .unwrap_or_default()
                                 .to_string_lossy()
                                 .to_string();
-                            format!("@import \"{}\" as {}.{}", rel_name, pfx, stem)
+                            format!("@include \"{}\" as {}.{}", rel_name, pfx, stem)
                         }
-                        None => format!("@import \"{}\"", rel_name),
+                        None => format!("@include \"{}\"", rel_name),
                     };
                     let synth_lines = preprocess(&import_line);
                     let mut synth_parser = Parser {
                         lines: synth_lines,
                         pos: 0,
                     };
-                    let _ = synth_parser.parse_children(0, ctx);
+                    matched_nodes.extend(synth_parser.parse_children(0, ctx));
                 }
-                return Ok(None);
+                return Ok(Some(matched_nodes));
             }
 
             let resolved = match &ctx.base_path {
@@ -1116,7 +1045,7 @@ impl Parser {
                     line: line_num,
                     column: None,
                     message: format!(
-                        "circular import '{}' (cycle: {} → {})",
+                        "circular include '{}' (cycle: {} → {})",
                         filename, cycle_chain, filename
                     ),
                     severity: Severity::Error,
@@ -1137,7 +1066,7 @@ impl Parser {
                         ctx.diagnostics.push(Diagnostic {
                             line: line_num,
                             column: None,
-                            message: format!("cannot import '{}': {}", filename, e),
+                            message: format!("cannot include '{}': {}", filename, e),
                             severity: Severity::Error,
                             source_line: Some(content.clone()),
                         });
@@ -1153,6 +1082,7 @@ impl Parser {
             ctx.base_path = resolved.parent().map(|p| p.to_path_buf());
 
             let diag_count_before = ctx.diagnostics.len();
+            let mut included_nodes = Vec::new();
 
             if let Some(ref prefix) = alias {
                 // Snapshot just the *key sets* before parsing — much cheaper
@@ -1209,13 +1139,12 @@ impl Parser {
                     }
                 }
             } else {
-                // Parse the file but discard DOM nodes — only keep definitions
-                let imported_lines = preprocess(&imported_text);
-                let mut imported_parser = Parser {
-                    lines: imported_lines,
+                let included_lines = preprocess(&imported_text);
+                let mut included_parser = Parser {
+                    lines: included_lines,
                     pos: 0,
                 };
-                let _discarded_nodes = imported_parser.parse_children(0, ctx);
+                included_nodes = included_parser.parse_children(0, ctx);
             }
 
             // Annotate new diagnostics with import chain
@@ -1227,7 +1156,7 @@ impl Parser {
             ctx.base_path = saved_base;
             ctx.include_stack.pop();
             ctx.import_stack.pop();
-            return Ok(None); // No nodes emitted
+            return Ok(Some(included_nodes));
         }
 
         // --- @env (compile-time environment variables) ---
@@ -2714,7 +2643,6 @@ const KNOWN_DIRECTIVES: &[&str] = &[
     "page",
     "let",
     "include",
-    "import",
     "raw",
     "keyframes",
     "if",
@@ -2776,7 +2704,11 @@ const REMOVED_SYNTAX: &[(&str, &str)] = &[
         "@switch",
         "use `@match`, with `@let __switch [...]` inside a case for its attributes",
     ),
-    ("@use", "use `@import`"),
+    ("@use", "use `@include`"),
+    (
+        "@import",
+        "use `@include` (a file with only definitions emits no content)",
+    ),
     ("@with", "use `@let alias $source`"),
     (
         "@layout",
