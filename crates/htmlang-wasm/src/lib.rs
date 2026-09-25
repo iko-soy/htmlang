@@ -10,7 +10,7 @@ pub fn compile(source: &str) -> String {
         .filter(|d| d.severity == htmlang_core::parser::Severity::Error)
         .map(|d| {
             let loc = if let Some(col) = d.column {
-                format!("{}:{}", d.line, col)
+                format!("{}:{}", d.line, col + 1)
             } else {
                 d.line.to_string()
             };

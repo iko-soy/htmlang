@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -181,17 +181,16 @@ where
         return handle_sse(stream, reload_rx).await;
     }
 
-    if path.contains("..") {
+    let Some(requested) = resolve_request_path(&root_dir, path) else {
         stream
             .write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
             .await?;
         return Ok(());
-    }
-
+    };
     let clean_path = path.trim_start_matches('/');
 
     // Try to resolve the request to a file
-    let file_path = if clean_path.is_empty() {
+    let file_path = if requested == root_dir {
         // Root: try index.html
         let index = root_dir.join("index.html");
         if index.exists() {
@@ -208,25 +207,18 @@ where
             return Ok(());
         }
     } else {
-        let requested = root_dir.join(clean_path);
-        if requested.is_file() {
-            Some(requested)
-        } else {
-            // Try .html extension
-            let with_html = requested.with_extension("html");
-            if with_html.is_file() {
-                Some(with_html)
-            } else {
-                // Try as directory with index.html
-                let dir_index = requested.join("index.html");
-                if dir_index.is_file() {
-                    Some(dir_index)
-                } else {
-                    None
-                }
-            }
-        }
+        // The file itself, then `<path>.html`, then `<path>/index.html`.
+        [
+            requested.clone(),
+            requested.with_extension("html"),
+            requested.join("index.html"),
+        ]
+        .into_iter()
+        .find(|p| p.is_file())
     };
+
+    // Reject symlinks that lead outside the served directory.
+    let file_path = file_path.filter(|fp| is_within(&root_dir, fp));
 
     match file_path {
         Some(fp) => {
@@ -247,7 +239,7 @@ where
             };
             let content_type = content_type_for(&fp);
             let header = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nCache-Control: no-cache\r\nAccess-Control-Allow-Origin: *\r\n\r\n",
+                "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nCache-Control: no-cache\r\n\r\n",
                 content_type,
                 body.len(),
             );
@@ -400,18 +392,25 @@ async fn handle_file<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin + Send,
 {
-    if request_path.contains("..") {
+    let dir = root_dir.unwrap_or_else(|| {
+        html_path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(Path::new("."))
+    });
+    let Some(requested) = resolve_request_path(dir, request_path) else {
         stream
             .write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
             .await?;
         return Ok(());
-    }
-
-    let file_path = if request_path == "/" {
+    };
+    let file_path = if requested == dir {
         html_path.to_path_buf()
+    } else if is_within(dir, &requested) {
+        requested
     } else {
-        let dir = root_dir.unwrap_or_else(|| html_path.parent().unwrap_or(Path::new(".")));
-        dir.join(&request_path[1..])
+        send_404(&mut stream, request_path).await?;
+        return Ok(());
     };
 
     let body = match std::fs::read(&file_path) {
@@ -430,13 +429,55 @@ where
 
     let content_type = content_type_for(&file_path);
     let header = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-cache\r\nAccess-Control-Allow-Origin: *\r\n\r\n",
+        "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-cache\r\n\r\n",
         body.len(),
     );
     stream.write_all(header.as_bytes()).await?;
     stream.write_all(&body).await?;
 
     Ok(())
+}
+
+/// Map a request target (`/a/b.css?v=2`) to a path under `root`. Strips the
+/// query and fragment, percent-decodes, and rejects anything but a plain
+/// relative path (`..`, absolute paths, drive prefixes). `/` maps to `root`.
+fn resolve_request_path(root: &Path, target: &str) -> Option<PathBuf> {
+    let path = target.split(['?', '#']).next().unwrap_or("");
+    let decoded = percent_decode(path)?;
+    let mut resolved = root.to_path_buf();
+    for component in Path::new(decoded.trim_start_matches('/')).components() {
+        match component {
+            Component::Normal(part) => resolved.push(part),
+            Component::CurDir => {}
+            _ => return None,
+        }
+    }
+    Some(resolved)
+}
+
+/// Whether `file`, with symlinks resolved, lies inside `root`.
+fn is_within(root: &Path, file: &Path) -> bool {
+    match (root.canonicalize(), file.canonicalize()) {
+        (Ok(root), Ok(file)) => file.starts_with(root),
+        _ => false,
+    }
+}
+
+fn percent_decode(s: &str) -> Option<String> {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            let hex = s.get(i + 1..i + 3)?;
+            out.push(u8::from_str_radix(hex, 16).ok()?);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8(out).ok()
 }
 
 async fn send_404<S>(stream: &mut S, path: &str) -> std::io::Result<()>
@@ -514,5 +555,33 @@ fn content_type_for(path: &Path) -> &'static str {
         Some("wasm") => "application/wasm",
         Some("map") => "application/json",
         _ => "application/octet-stream",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn request_paths_stay_inside_root() {
+        let root = Path::new("/srv/site");
+        assert_eq!(resolve_request_path(root, "/"), Some(root.to_path_buf()));
+        assert_eq!(
+            resolve_request_path(root, "/css/a.css?v=2#x"),
+            Some(root.join("css/a.css"))
+        );
+        assert_eq!(
+            resolve_request_path(root, "/my%20photo.png"),
+            Some(root.join("my photo.png"))
+        );
+        // A doubled leading slash must not turn into an absolute path.
+        assert_eq!(
+            resolve_request_path(root, "//etc/passwd"),
+            Some(root.join("etc/passwd"))
+        );
+        assert_eq!(resolve_request_path(root, "/../secret"), None);
+        assert_eq!(resolve_request_path(root, "/a/%2e%2e/%2e%2e/secret"), None);
+        assert_eq!(resolve_request_path(root, "/bad%zz"), None);
+        assert_eq!(resolve_request_path(root, "é"), Some(root.join("é")));
     }
 }

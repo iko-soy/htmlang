@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::codegen::{generate, generate_dev, generate_partial, short_class_name};
+    use crate::codegen::{generate, generate_dev, generate_partial, json_str, short_class_name};
     use crate::parser::parse;
 
     fn compile(src: &str) -> String {
@@ -58,8 +58,8 @@ mod tests {
         assert_eq!(short_class_name(0), "a");
         assert_eq!(short_class_name(25), "z");
         // Higher indexes must produce unique, stable names.
-        let names: std::collections::HashSet<_> = (0..200).map(short_class_name).collect();
-        assert_eq!(names.len(), 200, "short_class_name collisions");
+        let names: std::collections::HashSet<_> = (0..50_000).map(short_class_name).collect();
+        assert_eq!(names.len(), 50_000, "short_class_name collisions");
     }
 
     #[test]
@@ -92,5 +92,11 @@ mod tests {
             count <= 1,
             "duplicate CSS rule emitted ({count} times) in:\n{out}"
         );
+    }
+
+    #[test]
+    fn json_str_escapes_quotes_and_controls() {
+        assert_eq!(json_str(r#"My "App""#), r#""My \"App\"""#);
+        assert_eq!(json_str("a\\b\n\t\u{1}"), r#""a\\b\n\t\u0001""#);
     }
 }

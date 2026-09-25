@@ -10,7 +10,7 @@ A minimalist layout language inspired by [elm-ui](https://package.elm-lang.org/p
 @page My Site
 @let primary #3b82f6
 
-@fn card $title
+@let card $title
   @el [padding 20, background white, rounded 8, border 1 #e5e7eb, hover:border 1 $primary, transition all 0.15s ease]
     @text [bold] $title
     @children
@@ -59,9 +59,9 @@ More commands (run with `--help` for flags):
 | `serve [path]`     | Dev server with live reload (`--https` ready)  |
 | `convert file.html`| Convert HTML back to htmlang                   |
 | `new name`         | Scaffold a new page from a template            |
-| `components`       | List `@fn` / `@component` definitions          |
+| `components`       | List function (`@let` with body) definitions   |
 | `deps file.hl`     | Print the include / import graph               |
-| `dead-code [dir]`  | Report unused `@fn` / `@let` / `@define`       |
+| `dead-code [dir]`  | Report unused functions, variables and bundles |
 | `feed [dir]`       | Generate an Atom feed from `@article` pages    |
 | `sitemap [dir]`    | Generate `sitemap.xml`                         |
 | `lint [path]`      | Run warnings-only checks, optional JSON output |
@@ -115,13 +115,22 @@ A VS Code extension with syntax highlighting and LSP integration is available in
 ### Layout attributes
 
 ```
-@row [spacing 20]                  -- gap between children
-@row [gap-x 10, gap-y 20]         -- separate horizontal/vertical gaps
-@el [padding 20]                   -- uniform padding (also padding-x, padding-y)
-@el [width fill]                   -- take remaining space (also width 200, width shrink)
-@el [center-x]                     -- center horizontally (also align-left, align-right)
-@el [overflow hidden]              -- overflow behavior (hidden, scroll, auto)
+-- gap between children
+@row [spacing 20]
+-- separate horizontal/vertical gaps
+@row [gap-x 10, gap-y 20]
+-- uniform padding (also padding-x, padding-y)
+@el [padding 20]
+-- take remaining space (also width 200, width shrink)
+@el [width fill]
+-- center horizontally (also align-left, align-right)
+@el [center-x]
+-- overflow behavior (hidden, scroll, auto)
+@el [overflow hidden]
 ```
+
+Comments start with `--` and run to the end of the line; they must be on a
+line of their own.
 
 ### Style attributes
 
@@ -167,21 +176,27 @@ Use `dark:` for dark mode and `print:` for print styles:
 @el [background white, dark:background #1a1a2e, print:display none]
 ```
 
-### Variables and defines
+### Variables and attribute bundles
 
 ```
-@let primary #3b82f6              -- simple variable, used as $primary
-@let greeting "Hello $name"       -- quoted string interpolation
-@define card [padding 20, rounded 8]   -- attribute bundle, used as [$card]
+-- simple variable, used as $primary
+@let primary #3b82f6
+-- quoted string interpolation
+@let greeting "Hello $name"
+-- attribute bundle, used as [$card]
+@let card [padding 20, rounded 8]
 ```
 
 ### Functions
 
+A `@let` with an indented body defines a function. `@children` is where the
+caller's children go:
+
 ```
-@fn button $label
+@let button $label
   @el [padding 12, background $primary, rounded 8]
     @text [color white, bold] $label
-    @children                      -- slot for caller's children
+    @children
 
 @button [label Click me]
 ```
@@ -189,7 +204,8 @@ Use `dark:` for dark mode and `print:` for print styles:
 ### File includes
 
 ```
-@include header.hl                -- inline another .hl file
+-- inline another .hl file
+@include header.hl
 ```
 
 ### Multi-line attributes
@@ -220,7 +236,7 @@ Attribute lists can span multiple lines:
 - `[animate fade-in 0.3s ease]` animation shorthand
 - `[view-transition-name hero]` View Transitions API
 - `[has(.active):background blue]` `:has()` pseudo-selector
-- `@slot header` / `@slot content` named slots in `@fn`
+- `@slot header` / `@slot content` named slots in functions
 - `@theme` design tokens as runtime CSS custom properties
 - VS Code snippets for common patterns
 

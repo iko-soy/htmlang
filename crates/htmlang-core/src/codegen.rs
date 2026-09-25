@@ -16,25 +16,29 @@ const BREAKPOINTS: &[(&str, &str)] = &[
     ("2xl", "1536px"),
 ];
 
-/// Generate short CSS class names: a, b, ..., z, a0, a1, ..., z9, aa, ab, ...
+/// Generate short CSS class names: a..z, then aa..a9, ba..b9, ..., z9, then
+/// aaa, ... The first character is always a letter; later ones are drawn from
+/// [a-z0-9]. The mapping is a bijection, so distinct indices never collide.
 pub(crate) fn short_class_name(idx: usize) -> String {
-    if idx < 26 {
-        return String::from((b'a' + idx as u8) as char);
+    const REST: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
+    // Find the name length: 26 names of length 1, 26*36 of length 2, ...
+    let mut n = idx;
+    let mut len = 1;
+    let mut count = 26usize;
+    while n >= count {
+        n -= count;
+        len += 1;
+        count = count.saturating_mul(36);
     }
-    let mut n = idx - 26;
-    let mut name = String::new();
-    // First char is always a letter
-    name.push((b'a' + (n % 26) as u8) as char);
-    n /= 26;
-    loop {
-        name.push((b'a' + (n % 36).min(25) as u8) as char);
-        if n < 36 {
-            break;
-        }
+    let mut tail = Vec::with_capacity(len - 1);
+    for _ in 1..len {
+        tail.push(REST[n % 36]);
         n /= 36;
     }
-    // Reverse so it reads naturally
-    name.chars().rev().collect()
+    let mut name = String::with_capacity(len);
+    name.push((b'a' + n as u8) as char);
+    name.extend(tail.iter().rev().map(|&b| b as char));
+    name
 }
 
 struct StyleEntry {
@@ -566,9 +570,9 @@ fn minify_html(html: &str) -> String {
         if i + 4 < chars.len() && chars[i] == '<' {
             let rest: String = chars[i..].iter().take(10).collect();
             let rest_lower = rest.to_lowercase();
-            if rest_lower.starts_with("<pre") {
+            if rest_lower.starts_with("<pre") || rest_lower.starts_with("<textarea") {
                 in_pre = true;
-            } else if rest_lower.starts_with("</pre") {
+            } else if rest_lower.starts_with("</pre") || rest_lower.starts_with("</textarea") {
                 in_pre = false;
             } else if rest_lower.starts_with("<script") {
                 in_script = true;
@@ -610,23 +614,16 @@ fn minify_html(html: &str) -> String {
             continue;
         }
 
-        // Collapse whitespace between tags
+        // Collapse whitespace runs to a single space. Spaces are never
+        // dropped entirely: next to inline elements they are significant
+        // ("Built with <span>" must keep its space).
         if chars[i].is_whitespace() {
             if !prev_was_space {
-                // Only emit a space if we're between content (not between tags)
                 result.push(' ');
                 prev_was_space = true;
             }
             i += 1;
             continue;
-        }
-
-        // Trim space before closing tags
-        if chars[i] == '<' && prev_was_space {
-            // Remove trailing space before tag
-            if result.ends_with(' ') {
-                result.pop();
-            }
         }
 
         prev_was_space = false;
@@ -771,131 +768,7 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
     // Collect external domains for DNS prefetch
     let dns_prefetch_html = collect_dns_prefetch(&body, dev);
 
-    let mut element_css = String::new();
-
-    // Collect all CSS custom properties (explicit `@let --name` / `@theme`
-    // tokens, plus any auto-extracted repeats) so they can be emitted in a
-    // single `:root` block below.
-    let mut root_vars: Vec<(String, String)> = Vec::new();
-    for (name, value) in &doc.css_vars {
-        root_vars.push((name.clone(), value.clone()));
-    }
-    for (name, value) in &doc.theme_tokens {
-        let css_name = format!("--{}", name);
-        if !root_vars.iter().any(|(n, _)| *n == css_name) {
-            root_vars.push((css_name, value.clone()));
-        }
-    }
-
-    let has_custom_css = !doc.custom_css.is_empty();
-    let styles_css = styles.to_css_formatted(dev, !has_custom_css);
-    // Fold literal values declared via `@theme` / `@let --name` back into
-    // `var(--name)` references so the generated CSS actually uses the
-    // custom properties emitted in `:root`. Saves bytes and makes runtime
-    // theming take effect.
-    let styles_css = substitute_css_vars(&styles_css, &root_vars);
-    // Further compress the CSS by auto-extracting any remaining literal
-    // values that appear often enough for `var(--hN)` references to come out
-    // shorter overall. Disabled in dev mode to keep the generated CSS
-    // readable.
-    let styles_css = if dev {
-        styles_css
-    } else {
-        let (new_css, auto_vars) = auto_extract_repeats(&styles_css, &root_vars);
-        root_vars.extend(auto_vars);
-        new_css
-    };
-
-    // Emit the (possibly extended) :root block first so the cascade picks up
-    // the custom properties before the class rules consume them.
-    if !root_vars.is_empty() {
-        if dev {
-            element_css.push_str(":root {\n");
-            for (name, value) in &root_vars {
-                element_css.push_str(&format!("  {}: {};\n", name, value));
-            }
-            element_css.push_str("}\n");
-        } else {
-            element_css.push_str(":root{");
-            for (name, value) in &root_vars {
-                element_css.push_str(name);
-                element_css.push(':');
-                element_css.push_str(value);
-                element_css.push(';');
-            }
-            element_css.push('}');
-        }
-    }
-
-    element_css.push_str(&styles_css);
-
-    // @keyframes
-    for (name, kf_body) in &doc.keyframes {
-        if dev {
-            element_css.push_str(&format!("@keyframes {} {{\n{}\n}}\n", name, kf_body));
-        } else {
-            element_css.push_str(&format!("@keyframes {}{{{}}}", name, kf_body));
-        }
-    }
-
-    // Auto-inject skeleton keyframe if skeleton attribute is used
-    let skeleton_used = element_css.contains("hl-skeleton");
-    if skeleton_used {
-        if dev {
-            element_css.push_str("@keyframes hl-skeleton {\n  0% { background-position: 200% 0; }\n  100% { background-position: -200% 0; }\n}\n");
-        } else {
-            element_css.push_str("@keyframes hl-skeleton{0%{background-position:200% 0}100%{background-position:-200% 0}}");
-        }
-    }
-
-    // Also inject carousel webkit scrollbar hiding
-    let carousel_used = element_css.contains("scroll-snap-type:x mandatory");
-    if carousel_used && !element_css.contains("::-webkit-scrollbar") {
-        // The carousel class already has scrollbar-width:none, but webkit needs pseudo-element
-        // We add a global rule for carousel-style elements
-    }
-
-    // @style blocks (custom CSS)
-    for block in &doc.custom_css {
-        if dev {
-            element_css.push_str(block);
-            element_css.push('\n');
-        } else {
-            // Minify: collapse whitespace
-            let minified: String = block.lines().map(|l| l.trim()).collect::<Vec<_>>().join("");
-            element_css.push_str(&minified);
-        }
-    }
-
-    // @scope blocks
-    for block in &doc.scope_blocks {
-        if dev {
-            element_css.push_str(block);
-            element_css.push('\n');
-        } else {
-            let minified: String = block.lines().map(|l| l.trim()).collect::<Vec<_>>().join("");
-            element_css.push_str(&minified);
-        }
-    }
-
-    // @starting-style blocks
-    if !doc.starting_style_blocks.is_empty() {
-        if dev {
-            element_css.push_str("@starting-style {\n");
-            for block in &doc.starting_style_blocks {
-                element_css.push_str(block);
-                element_css.push('\n');
-            }
-            element_css.push_str("}\n");
-        } else {
-            element_css.push_str("@starting-style{");
-            for block in &doc.starting_style_blocks {
-                let minified: String = block.lines().map(|l| l.trim()).collect::<Vec<_>>().join("");
-                element_css.push_str(&minified);
-            }
-            element_css.push('}');
-        }
-    }
+    let element_css = build_element_css(doc, &styles, dev);
 
     // Build meta tags string
     let meta_html = if doc.meta_tags.is_empty() {
@@ -1020,35 +893,6 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
         None => String::new(),
     };
 
-    // @font-face CSS
-    for (name, url) in &doc.font_faces {
-        let format_hint = if url.ends_with(".woff2") {
-            " format('woff2')"
-        } else if url.ends_with(".woff") {
-            " format('woff')"
-        } else if url.ends_with(".ttf") {
-            " format('truetype')"
-        } else if url.ends_with(".otf") {
-            " format('opentype')"
-        } else {
-            ""
-        };
-        if dev {
-            element_css.insert_str(0, &format!(
-                "@font-face {{\n  font-family: '{}';\n  src: url('{}'){};\n  font-display: swap;\n}}\n",
-                name, url, format_hint
-            ));
-        } else {
-            element_css.insert_str(
-                0,
-                &format!(
-                    "@font-face{{font-family:'{}';src:url('{}'){};font-display:swap}}",
-                    name, url, format_hint
-                ),
-            );
-        }
-    }
-
     // JSON-LD blocks
     let json_ld_html: String = doc
         .json_ld_blocks
@@ -1068,20 +912,20 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
     // Manifest link
     let manifest_html = if let Some(ref manifest) = doc.manifest {
         let mut json = String::from("{");
-        json.push_str(&format!("\"name\":\"{}\",", manifest.name));
+        json.push_str(&format!("\"name\":{},", json_str(&manifest.name)));
         if let Some(ref short) = manifest.short_name {
-            json.push_str(&format!("\"short_name\":\"{}\",", short));
+            json.push_str(&format!("\"short_name\":{},", json_str(short)));
         }
-        json.push_str(&format!("\"start_url\":\"{}\",", manifest.start_url));
-        json.push_str(&format!("\"display\":\"{}\"", manifest.display));
+        json.push_str(&format!("\"start_url\":{},", json_str(&manifest.start_url)));
+        json.push_str(&format!("\"display\":{}", json_str(&manifest.display)));
         if let Some(ref bg) = manifest.background_color {
-            json.push_str(&format!(",\"background_color\":\"{}\"", bg));
+            json.push_str(&format!(",\"background_color\":{}", json_str(bg)));
         }
         if let Some(ref tc) = manifest.theme_color {
-            json.push_str(&format!(",\"theme_color\":\"{}\"", tc));
+            json.push_str(&format!(",\"theme_color\":{}", json_str(tc)));
         }
         if let Some(ref desc) = manifest.description {
-            json.push_str(&format!(",\"description\":\"{}\"", desc));
+            json.push_str(&format!(",\"description\":{}", json_str(desc)));
         }
         if !manifest.icons.is_empty() {
             json.push_str(",\"icons\":[");
@@ -1090,8 +934,9 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
                     json.push(',');
                 }
                 json.push_str(&format!(
-                    "{{\"src\":\"{}\",\"sizes\":\"{}\",\"type\":\"image/png\"}}",
-                    src, sizes
+                    "{{\"src\":{},\"sizes\":{},\"type\":\"image/png\"}}",
+                    json_str(src),
+                    json_str(sizes)
                 ));
             }
             json.push(']');
@@ -1202,6 +1047,8 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
         ""
     };
 
+    let reset_css = reset_css(doc, dev, focus_visible_css, skip_link_css);
+
     match &doc.page_title {
         Some(title) => {
             if dev {
@@ -1215,11 +1062,7 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
 <title>{title}</title>
 {theme_color_html}{base_html}{canonical_html}{manifest_html}{preload_html}{dns_prefetch_html}{meta_html}{og_html}{favicon_html}{json_ld_html}{head_html}\
 <style>
-*, *::before, *::after {{ box-sizing: border-box; }}
-body {{ margin: 0; font-family: system-ui, -apple-system, sans-serif; }}
-img {{ display: block; }}
-a {{ text-decoration: none; color: inherit; }}
-{focus_visible_css}{skip_link_css}{element_css}\
+{reset_css}{element_css}\
 </style>
 {noscript_html}\
 </head>
@@ -1241,15 +1084,14 @@ a {{ text-decoration: none; color: inherit; }}
                     json_ld_html = json_ld_html,
                     head_html = head_html,
                     og_html = og_html,
-                    focus_visible_css = focus_visible_css,
-                    skip_link_css = skip_link_css,
+                    reset_css = reset_css,
                     noscript_html = noscript_html,
                     element_css = element_css,
                     body = body,
                 )
             } else {
                 format!(
-                    "<!DOCTYPE html><html{lang_attr}><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>{title}</title>{theme_color_html}{base_html}{canonical_html}{manifest_html}{preload_html}{dns_prefetch_html}{meta_html}{og_html}{favicon_html}{json_ld_html}{head_html}<style>*,*::before,*::after{{box-sizing:border-box}}body{{margin:0;font-family:system-ui,-apple-system,sans-serif}}img{{display:block}}a{{text-decoration:none;color:inherit}}{focus_visible_css}{skip_link_css}{element_css}</style>{noscript_html}</head><body>{body}</body></html>",
+                    "<!DOCTYPE html><html{lang_attr}><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>{title}</title>{theme_color_html}{base_html}{canonical_html}{manifest_html}{preload_html}{dns_prefetch_html}{meta_html}{og_html}{favicon_html}{json_ld_html}{head_html}<style>{reset_css}{element_css}</style>{noscript_html}</head><body>{body}</body></html>",
                     title = html_escape(title),
                     lang_attr = lang_attr,
                     theme_color_html = theme_color_html,
@@ -1263,8 +1105,7 @@ a {{ text-decoration: none; color: inherit; }}
                     favicon_html = favicon_html,
                     json_ld_html = json_ld_html,
                     head_html = head_html,
-                    focus_visible_css = focus_visible_css,
-                    skip_link_css = skip_link_css,
+                    reset_css = reset_css,
                     noscript_html = noscript_html,
                     element_css = element_css,
                     body = body,
@@ -1283,25 +1124,60 @@ a {{ text-decoration: none; color: inherit; }}
     }
 }
 
-/// Generate an HTML fragment: body + optional <style>, no <html>/<head>/<body> wrapper.
-fn generate_partial_inner(doc: &Document, dev: bool) -> String {
-    let mut styles = StyleCollector::new();
-    let mut ctx = GenContext {
-        dev,
-        depth: 0,
-        image_count: 0,
-        has_interactive: false,
-        has_defer: false,
-    };
-    let mut body = String::new();
-
-    for node in &doc.nodes {
-        generate_node(node, None, &mut body, &mut styles, &mut ctx);
+/// Encode `s` as a JSON string literal (with surrounding quotes).
+pub(crate) fn json_str(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
     }
+    out.push('"');
+    out
+}
 
-    let has_custom_css = !doc.custom_css.is_empty();
+/// Assemble every CSS block the document needs (font faces, custom
+/// properties, generated class rules, keyframes, and user CSS). Shared by
+/// full-page and partial output so both emit the same styles.
+fn build_element_css(doc: &Document, styles: &StyleCollector, dev: bool) -> String {
     let mut element_css = String::new();
 
+    // @font-face rules, in declaration order
+    for (name, url) in &doc.font_faces {
+        let format_hint = if url.ends_with(".woff2") {
+            " format('woff2')"
+        } else if url.ends_with(".woff") {
+            " format('woff')"
+        } else if url.ends_with(".ttf") {
+            " format('truetype')"
+        } else if url.ends_with(".otf") {
+            " format('opentype')"
+        } else {
+            ""
+        };
+        if dev {
+            element_css.push_str(&format!(
+                "@font-face {{\n  font-family: '{}';\n  src: url('{}'){};\n  font-display: swap;\n}}\n",
+                name, url, format_hint
+            ));
+        } else {
+            element_css.push_str(&format!(
+                "@font-face{{font-family:'{}';src:url('{}'){};font-display:swap}}",
+                name, url, format_hint
+            ));
+        }
+    }
+
+    // Collect all CSS custom properties (explicit `@let --name` / `@theme`
+    // tokens, plus any auto-extracted repeats) so they can be emitted in a
+    // single `:root` block below.
     let mut root_vars: Vec<(String, String)> = Vec::new();
     for (name, value) in &doc.css_vars {
         root_vars.push((name.clone(), value.clone()));
@@ -1313,8 +1189,14 @@ fn generate_partial_inner(doc: &Document, dev: bool) -> String {
         }
     }
 
-    let styles_css = styles.to_css_formatted(dev, !has_custom_css);
+    let styles_css = styles.to_css_formatted(dev, uses_layer(doc));
+    // Fold literal values declared via `@theme` / `@let --name` back into
+    // `var(--name)` references so the generated CSS actually uses the
+    // custom properties emitted in `:root`.
     let styles_css = substitute_css_vars(&styles_css, &root_vars);
+    // Further compress the CSS by auto-extracting any remaining literal
+    // values that appear often enough for `var(--hN)` references to come out
+    // shorter overall. Disabled in dev mode to keep the CSS readable.
     let styles_css = if dev {
         styles_css
     } else {
@@ -1323,6 +1205,8 @@ fn generate_partial_inner(doc: &Document, dev: bool) -> String {
         new_css
     };
 
+    // Emit the :root block first so the cascade picks up the custom
+    // properties before the class rules consume them.
     if !root_vars.is_empty() {
         if dev {
             element_css.push_str(":root {\n");
@@ -1344,6 +1228,7 @@ fn generate_partial_inner(doc: &Document, dev: bool) -> String {
 
     element_css.push_str(&styles_css);
 
+    // @keyframes
     for (name, kf_body) in &doc.keyframes {
         if dev {
             element_css.push_str(&format!("@keyframes {} {{\n{}\n}}\n", name, kf_body));
@@ -1352,15 +1237,84 @@ fn generate_partial_inner(doc: &Document, dev: bool) -> String {
         }
     }
 
-    for block in &doc.custom_css {
+    // Auto-inject skeleton keyframe if skeleton attribute is used
+    if element_css.contains("hl-skeleton") {
         if dev {
-            element_css.push_str(block);
-            element_css.push('\n');
+            element_css.push_str("@keyframes hl-skeleton {\n  0% { background-position: 200% 0; }\n  100% { background-position: -200% 0; }\n}\n");
         } else {
-            let minified: String = block.lines().map(|l| l.trim()).collect::<Vec<_>>().join("");
-            element_css.push_str(&minified);
+            element_css.push_str("@keyframes hl-skeleton{0%{background-position:200% 0}100%{background-position:-200% 0}}");
         }
     }
+
+    let push_block = |css: &mut String, block: &str| {
+        if dev {
+            css.push_str(block);
+            css.push('\n');
+        } else {
+            let minified: String = block.lines().map(|l| l.trim()).collect::<Vec<_>>().join("");
+            css.push_str(&minified);
+        }
+    };
+
+    // @style and @scope blocks (custom CSS)
+    for block in doc.custom_css.iter().chain(&doc.scope_blocks) {
+        push_block(&mut element_css, block);
+    }
+
+    // @starting-style blocks
+    if !doc.starting_style_blocks.is_empty() {
+        element_css.push_str(if dev { "@starting-style {\n" } else { "@starting-style{" });
+        for block in &doc.starting_style_blocks {
+            push_block(&mut element_css, block);
+        }
+        element_css.push_str(if dev { "}\n" } else { "}" });
+    }
+
+    element_css
+}
+
+/// Generated class rules go in `@layer htmlang` unless the page has custom
+/// `@style` CSS (which is unlayered and would then always win).
+fn uses_layer(doc: &Document) -> bool {
+    doc.custom_css.is_empty()
+}
+
+/// Built-in reset rules. When generated rules are layered, the reset must be
+/// layered too (in an earlier layer): unlayered CSS beats every layer, so an
+/// unlayered `a{color:inherit}` would override `@link [color red]`.
+fn reset_css(doc: &Document, dev: bool, focus_visible_css: &str, skip_link_css: &str) -> String {
+    let base = if dev {
+        "*, *::before, *::after { box-sizing: border-box; }\nbody { margin: 0; font-family: system-ui, -apple-system, sans-serif; }\nimg { display: block; }\na { text-decoration: none; color: inherit; }\n"
+    } else {
+        "*,*::before,*::after{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,sans-serif}img{display:block}a{text-decoration:none;color:inherit}"
+    };
+    let rules = format!("{}{}{}", base, focus_visible_css, skip_link_css);
+    if !uses_layer(doc) {
+        rules
+    } else if dev {
+        format!("@layer hl-reset, htmlang;\n@layer hl-reset {{\n{}}}\n", rules)
+    } else {
+        format!("@layer hl-reset,htmlang;@layer hl-reset{{{}}}", rules)
+    }
+}
+
+/// Generate an HTML fragment: body + optional <style>, no <html>/<head>/<body> wrapper.
+fn generate_partial_inner(doc: &Document, dev: bool) -> String {
+    let mut styles = StyleCollector::new();
+    let mut ctx = GenContext {
+        dev,
+        depth: 0,
+        image_count: 0,
+        has_interactive: false,
+        has_defer: false,
+    };
+    let mut body = String::new();
+
+    for node in &doc.nodes {
+        generate_node(node, None, &mut body, &mut styles, &mut ctx);
+    }
+
+    let element_css = build_element_css(doc, &styles, dev);
 
     if element_css.is_empty() {
         body
@@ -2216,11 +2170,11 @@ fn generate_self_closing(
             && !src.starts_with("data:")
             && let Some((w, h)) = read_image_dimensions(src)
         {
-            if !has_width {
-                out.push_str(&format!(" width=\"{}\"", w));
-            }
-            if !has_height {
-                out.push_str(&format!(" height=\"{}\"", h));
+            // Intrinsic size attributes only when neither dimension is set in
+            // CSS; with one CSS dimension, a leftover intrinsic attribute for
+            // the other would distort the image (200 wide but 1000 tall).
+            if !has_width && !has_height {
+                out.push_str(&format!(" width=\"{}\" height=\"{}\"", w, h));
             }
             // Auto aspect-ratio to prevent CLS
             if !elem.attrs.iter().any(|a| a.key == "aspect-ratio") {
@@ -2877,6 +2831,12 @@ fn attrs_to_css(
             }
             "font" => {
                 if let Some(v) = val {
+                    // `font "Inter, sans-serif"` quotes a whole font stack so
+                    // its commas don't split the attribute list.
+                    let v = match v.strip_prefix('"').and_then(|v| v.strip_suffix('"')) {
+                        Some(stack) if stack.contains(',') => stack,
+                        _ => v,
+                    };
                     push_css(&mut css, "font-family", v);
                 }
             }
@@ -3788,30 +3748,22 @@ fn push_css(css: &mut String, prop: &str, value: &str) {
 }
 
 /// Known CSS units — if a value ends with one, skip appending `px`.
-const CSS_UNITS: &[&str] = &[
-    "%", "rem", "em", "vh", "vw", "vmin", "vmax", "dvh", "svh", "lvh", "ch", "ex", "cm", "mm",
-    "in", "pt", "pc", "fr",
-];
-
-/// Format a numeric value: if it already has a CSS unit, pass through as-is;
-/// otherwise append `px`.
+/// Format a length value: a bare number gets `px` appended; anything else
+/// (values with units, keywords like `auto`, functions like `calc(...)`) is
+/// passed through unchanged.
 fn css_px(value: &str) -> String {
     let v = value.trim();
     if v == "0" {
         return "0".to_string();
     }
-    if CSS_UNITS.iter().any(|u| v.ends_with(u)) {
-        return v.to_string();
+    let is_bare_number = !v.is_empty()
+        && v.bytes().all(|b| b.is_ascii_digit() || matches!(b, b'.' | b'-' | b'+'))
+        && v.parse::<f64>().is_ok();
+    if is_bare_number {
+        format!("{}px", v)
+    } else {
+        v.to_string()
     }
-    if v.starts_with("var(")
-        || v.starts_with("calc(")
-        || v.starts_with("clamp(")
-        || v.starts_with("min(")
-        || v.starts_with("max(")
-    {
-        return v.to_string();
-    }
-    format!("{}px", v)
 }
 
 /// Rewrite literal values that match a declared CSS custom property (from
@@ -3848,8 +3800,34 @@ fn substitute_css_vars(css: &str, vars: &[(String, String)]) -> String {
     let mut out = String::with_capacity(css.len());
     let mut i = 0;
     let mut prev: Option<u8> = None;
+    // Only declaration values are rewritten — never selectors or at-rule
+    // preludes such as `@media (min-width:768px)`. `blocks` records, for
+    // each open `{`, whether it holds declarations (a style rule) or nested
+    // rules (an at-rule like `@media` / `@layer`).
+    let mut blocks: Vec<bool> = Vec::new();
+    let mut prelude_start = 0;
+    let mut in_value = false;
     while i < bytes.len() {
-        if is_boundary_before(prev) {
+        match bytes[i] {
+            b'{' => {
+                let prelude = css[prelude_start..i].trim_start();
+                blocks.push(!prelude.starts_with('@'));
+                in_value = false;
+                prelude_start = i + 1;
+            }
+            b'}' => {
+                blocks.pop();
+                in_value = false;
+                prelude_start = i + 1;
+            }
+            b';' => {
+                in_value = false;
+                prelude_start = i + 1;
+            }
+            b':' if blocks.last() == Some(&true) => in_value = true,
+            _ => {}
+        }
+        if in_value && is_boundary_before(prev) {
             let mut matched = false;
             for (val, repl) in &pairs {
                 let vb = val.as_bytes();
@@ -4004,22 +3982,9 @@ fn css_line_height(value: &str) -> String {
     if v == "0" || v == "1" {
         return v.to_string();
     }
-    if v.contains('.') {
-        return v.to_string();
-    }
-    if CSS_UNITS.iter().any(|u| v.ends_with(u)) || v.ends_with("px") {
-        return v.to_string();
-    }
-    if v.starts_with("var(")
-        || v.starts_with("calc(")
-        || v.starts_with("clamp(")
-        || v.starts_with("min(")
-        || v.starts_with("max(")
-    {
-        return v.to_string();
-    }
-    // Plain integer — treat as pixel length.
-    if v.chars().all(|c| c.is_ascii_digit()) {
+    // Plain integer — treat as pixel length. Decimals, units, keywords and
+    // functions pass through.
+    if !v.is_empty() && v.chars().all(|c| c.is_ascii_digit()) {
         return format!("{}px", v);
     }
     v.to_string()
@@ -4232,10 +4197,24 @@ fn base64_encode(data: &[u8]) -> String {
 /// Generate a standard v3 source map with VLQ-encoded mappings.
 /// Compatible with browser devtools and source map tooling.
 pub fn generate_source_map(doc: &Document, source_file: &str) -> String {
+    source_map_for_html(&generate_dev(doc), source_file)
+}
+
+/// Build a source map for dev-mode HTML by reading the `data-hl-line`
+/// markers each element carries, so generated line numbers are exact.
+pub fn source_map_for_html(html: &str, source_file: &str) -> String {
     let mut mappings: Vec<(usize, usize)> = Vec::new(); // (html_line, hl_line)
-    collect_source_lines(&doc.nodes, &mut mappings);
-    mappings.sort_by_key(|m| m.0);
-    mappings.dedup_by_key(|m| m.0);
+    for (idx, line) in html.lines().enumerate() {
+        if let Some(pos) = line.find("data-hl-line=\"") {
+            let digits: String = line[pos + "data-hl-line=\"".len()..]
+                .chars()
+                .take_while(|c| c.is_ascii_digit())
+                .collect();
+            if let Ok(hl_line) = digits.parse::<usize>() {
+                mappings.push((idx + 1, hl_line));
+            }
+        }
+    }
 
     // Build VLQ-encoded mappings string.
     // Each generated line is separated by ';'. Each segment within a line is
@@ -4291,17 +4270,6 @@ fn vlq_encode(value: i64, out: &mut String) {
         out.push(B64[digit as usize] as char);
         if v == 0 {
             break;
-        }
-    }
-}
-
-fn collect_source_lines(nodes: &[Node], mappings: &mut Vec<(usize, usize)>) {
-    for node in nodes {
-        if let Node::Element(elem) = node {
-            if elem.line_num > 0 {
-                mappings.push((mappings.len() + 1, elem.line_num));
-            }
-            collect_source_lines(&elem.children, mappings);
         }
     }
 }

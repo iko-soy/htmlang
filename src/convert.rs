@@ -41,10 +41,6 @@ impl<'a> HtmlParser<'a> {
         }
     }
 
-    fn remaining(&self) -> &'a str {
-        std::str::from_utf8(&self.src[self.pos..]).unwrap_or("")
-    }
-
     fn advance(&mut self) {
         if self.pos < self.src.len() {
             self.pos += 1;
@@ -58,25 +54,39 @@ impl<'a> HtmlParser<'a> {
     }
 
     fn starts_with(&self, s: &str) -> bool {
-        self.remaining().starts_with(s)
+        self.src[self.pos..].starts_with(s.as_bytes())
     }
 
+    /// Whether the `<` at the current position opens markup (a tag, closing
+    /// tag, comment or doctype) rather than being a literal `<` in text.
+    fn at_markup(&self) -> bool {
+        self.src.get(self.pos) == Some(&b'<')
+            && self
+                .src
+                .get(self.pos + 1)
+                .is_some_and(|&c| c.is_ascii_alphabetic() || c == b'/' || c == b'!')
+    }
+
+    /// Consume up to and including `needle`, returning the text before it.
+    /// Without a match, consumes the rest of the input.
     fn consume_until(&mut self, needle: &str) -> String {
+        self.consume_until_by(needle, |a, b| a == b)
+    }
+
+    /// Case-insensitive consume-until.
+    fn consume_until_ci(&mut self, needle: &str) -> String {
+        self.consume_until_by(needle, |a, b| a.eq_ignore_ascii_case(b))
+    }
+
+    fn consume_until_by(&mut self, needle: &str, eq: impl Fn(&[u8], &[u8]) -> bool) -> String {
         let start = self.pos;
-        while self.pos < self.src.len() {
-            if self.remaining().starts_with(needle) {
-                let text = std::str::from_utf8(&self.src[start..self.pos])
-                    .unwrap_or("")
-                    .to_string();
-                self.pos += needle.len();
-                return text;
-            }
-            self.pos += 1;
-        }
-        // Reached end without finding needle
-        std::str::from_utf8(&self.src[start..])
-            .unwrap_or("")
-            .to_string()
+        let needle = needle.as_bytes();
+        let found = self.src[start..]
+            .windows(needle.len())
+            .position(|w| eq(w, needle));
+        let end = found.map_or(self.src.len(), |i| start + i);
+        self.pos = found.map_or(self.src.len(), |_| end + needle.len());
+        String::from_utf8_lossy(&self.src[start..end]).into_owned()
     }
 
     fn parse_nodes(&mut self, stop_tag: Option<&str>) -> Vec<HtmlNode> {
@@ -115,7 +125,7 @@ impl<'a> HtmlParser<'a> {
             } else if self.starts_with("</") {
                 // Stray closing tag (no matching open) -- skip it
                 self.consume_until(">");
-            } else if self.starts_with("<") {
+            } else if self.at_markup() {
                 if let Some(node) = self.parse_element() {
                     nodes.push(node);
                 }
@@ -132,11 +142,12 @@ impl<'a> HtmlParser<'a> {
 
     fn parse_text(&mut self) -> String {
         let start = self.pos;
-        while self.pos < self.src.len() && self.src[self.pos] != b'<' {
+        // A `<` that doesn't open markup (`a < b`, `1 <2`) is literal text.
+        while self.pos < self.src.len() && (self.pos == start || !self.at_markup()) {
             self.pos += 1;
         }
-        let raw = std::str::from_utf8(&self.src[start..self.pos]).unwrap_or("");
-        decode_entities(raw)
+        let raw = String::from_utf8_lossy(&self.src[start..self.pos]);
+        decode_entities(&raw)
     }
 
     fn parse_tag_name(&mut self) -> String {
@@ -288,35 +299,80 @@ impl<'a> HtmlParser<'a> {
         }
     }
 
-    /// Case-insensitive consume-until.
-    fn consume_until_ci(&mut self, needle: &str) -> String {
-        let start = self.pos;
-        let needle_lower = needle.to_ascii_lowercase();
-        while self.pos < self.src.len() {
-            let rem = self.remaining().to_ascii_lowercase();
-            if rem.starts_with(&needle_lower) {
-                let text = std::str::from_utf8(&self.src[start..self.pos])
-                    .unwrap_or("")
-                    .to_string();
-                self.pos += needle.len();
-                return text;
-            }
-            self.pos += 1;
-        }
-        std::str::from_utf8(&self.src[start..])
-            .unwrap_or("")
-            .to_string()
-    }
 }
 
+/// Decode HTML character references in one pass (so `&amp;lt;` stays `&lt;`),
+/// including numeric (`&#8212;`, `&#x2014;`) and common named entities.
+/// Unknown references are kept as written.
 fn decode_entities(s: &str) -> String {
-    s.replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&#39;", "'")
-        .replace("&apos;", "'")
-        .replace("&nbsp;", " ")
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(amp) = rest.find('&') {
+        out.push_str(&rest[..amp]);
+        rest = &rest[amp..];
+        let decoded = rest[1..].find(';').filter(|&end| end <= 32).and_then(|end| {
+            let name = &rest[1..1 + end];
+            decode_entity(name).map(|c| (c, end + 2))
+        });
+        match decoded {
+            Some((c, len)) => {
+                out.push(c);
+                rest = &rest[len..];
+            }
+            None => {
+                out.push('&');
+                rest = &rest[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+fn decode_entity(name: &str) -> Option<char> {
+    if let Some(num) = name.strip_prefix('#') {
+        let code = match num.strip_prefix(['x', 'X']) {
+            Some(hex) => u32::from_str_radix(hex, 16).ok()?,
+            None => num.parse().ok()?,
+        };
+        return char::from_u32(code);
+    }
+    Some(match name {
+        "amp" => '&',
+        "lt" => '<',
+        "gt" => '>',
+        "quot" => '"',
+        "apos" => '\'',
+        "nbsp" => '\u{a0}',
+        "copy" => '©',
+        "reg" => '®',
+        "trade" => '™',
+        "hellip" => '…',
+        "mdash" => '—',
+        "ndash" => '–',
+        "lsquo" => '‘',
+        "rsquo" => '’',
+        "ldquo" => '“',
+        "rdquo" => '”',
+        "laquo" => '«',
+        "raquo" => '»',
+        "bull" => '•',
+        "middot" => '·',
+        "deg" => '°',
+        "times" => '×',
+        "divide" => '÷',
+        "euro" => '€',
+        "pound" => '£',
+        "yen" => '¥',
+        "cent" => '¢',
+        "sect" => '§',
+        "para" => '¶',
+        "larr" => '←',
+        "rarr" => '→',
+        "uarr" => '↑',
+        "darr" => '↓',
+        _ => return None,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -747,6 +803,11 @@ fn emit_node(node: &HtmlNode, depth: usize, out: &mut String) {
                     let l = line.trim();
                     if !l.is_empty() {
                         out.push_str(&indent_str(depth));
+                        // A bare line starting with `@`, `[` or `--` would be
+                        // read as an element, attribute list or comment.
+                        if l.starts_with('@') || l.starts_with('[') || l.starts_with("--") {
+                            out.push_str("@text ");
+                        }
                         out.push_str(l);
                         out.push('\n');
                     }
@@ -836,14 +897,12 @@ fn emit_element(
         "input" => "@input",
         "button" => "@button",
         "select" => "@select",
-        "textarea" => "@textarea",
         "label" => "@label",
         "details" => "@details",
         "summary" => "@summary",
         "blockquote" => "@blockquote",
         "cite" => "@cite",
         "code" => "@code",
-        "pre" => "@pre",
         "hr" => "@hr",
         "figure" => "@figure",
         "figcaption" => "@figcaption",
@@ -872,9 +931,10 @@ fn emit_element(
         "b" | "strong" => "@text",
         "i" | "em" => "@text",
         "u" => "@text",
-        "br" => {
-            out.push_str(&indent);
-            out.push('\n');
+        // Whitespace-sensitive content: htmlang text lines are trimmed and
+        // joined, so keep these as HTML.
+        "br" | "pre" | "textarea" => {
+            emit_raw_element(tag, attrs, children, depth, out);
             return;
         }
         "iframe" => "@iframe",
@@ -897,6 +957,25 @@ fn emit_element(
 
     // Build htmlang attributes from CSS + HTML attrs
     let (mut hl_attrs, leftover_css) = css_to_hl_attrs(&css_props);
+
+    // Only a div can become @row/@column. For other flex containers
+    // (`<nav style="display:flex">`) keep the semantic element and lay the
+    // children out in a nested @row/@column that takes the flex attributes.
+    let nested_flex = (is_flex && tag != "div").then(|| {
+        let kind = match flex_dir {
+            Some("column") | Some("column-reverse") => "@column",
+            _ => "@row",
+        };
+        let (flex_attrs, rest): (Vec<HlAttr>, Vec<HlAttr>) =
+            hl_attrs.drain(..).partition(|(k, _)| {
+                matches!(
+                    k.as_str(),
+                    "spacing" | "gap-x" | "gap-y" | "wrap" | "justify-content" | "align-items"
+                )
+            });
+        hl_attrs = rest;
+        (kind, flex_attrs)
+    });
 
     // Add id if present
     if let Some(id) = &id_str {
@@ -974,21 +1053,7 @@ fn emit_element(
         out.push_str(src_val);
     }
 
-    // Attributes block
-    if !hl_attrs.is_empty() {
-        out.push_str(" [");
-        for (i, (key, val)) in hl_attrs.iter().enumerate() {
-            if i > 0 {
-                out.push_str(", ");
-            }
-            out.push_str(key);
-            if let Some(v) = val {
-                out.push(' ');
-                out.push_str(v);
-            }
-        }
-        out.push(']');
-    }
+    push_attr_block(&hl_attrs, out);
     out.push('\n');
 
     // Comment with original classes (if any)
@@ -1011,22 +1076,46 @@ fn emit_element(
         out.push('\n');
     }
 
-    // Alt text for images
-    if tag == "img"
-        && let Some(alt_text) = &alt
-        && !alt_text.is_empty()
-    {
-        // Alt is emitted as an attribute already? No -- let's add it.
-        // Actually we should add it to hl_attrs above. But since we
-        // already flushed the line, add a comment.
-        // Re-check: the image alt is typically an attribute.
-        // We'll add it inline. Let's fix this by checking above.
-    }
-
     // Emit children
+    let child_depth = match &nested_flex {
+        Some((kind, flex_attrs)) => {
+            out.push_str(&indent_str(depth + 1));
+            out.push_str(kind);
+            push_attr_block(flex_attrs, out);
+            out.push('\n');
+            depth + 2
+        }
+        None => depth + 1,
+    };
     for child in children {
-        emit_node(child, depth + 1, out);
+        emit_node(child, child_depth, out);
     }
+}
+
+/// Append ` [key value, ...]` for a non-empty attribute list. Values that
+/// contain a `,` or `]` are quoted so they stay one attribute.
+fn push_attr_block(attrs: &[HlAttr], out: &mut String) {
+    if attrs.is_empty() {
+        return;
+    }
+    out.push_str(" [");
+    for (i, (key, val)) in attrs.iter().enumerate() {
+        if i > 0 {
+            out.push_str(", ");
+        }
+        out.push_str(key);
+        if let Some(v) = val {
+            out.push(' ');
+            if v.contains(',') || v.contains(']') {
+                out.push('"');
+                out.push_str(&v.replace('"', "'"));
+                out.push('"');
+            } else {
+                out.push_str(v);
+            }
+        }
+    }
+    out.push(']');
 }
 
 fn emit_raw_element(
@@ -1051,11 +1140,13 @@ fn emit_raw_element(
             html.push('"');
         }
     }
-    if children.is_empty() {
-        html.push_str(" />");
+    if VOID_TAGS.contains(&tag) {
+        html.push('>');
+    } else if children.is_empty() {
+        html.push_str(&format!("></{}>", tag));
     } else {
         html.push('>');
-        reconstruct_html(children, &mut html);
+        reconstruct_html(children, is_raw_text_tag(tag), &mut html);
         html.push_str(&format!("</{}>", tag));
     }
 
@@ -1063,8 +1154,9 @@ fn emit_raw_element(
     if trimmed.contains('\n') || trimmed.len() > 60 {
         out.push_str(&indent);
         out.push_str("@raw \"\"\"\n");
+        // Raw content is emitted verbatim by the compiler, so indenting it
+        // here would change the output (e.g. inside <pre>).
         for line in trimmed.lines() {
-            out.push_str(&indent_str(depth + 1));
             out.push_str(line);
             out.push('\n');
         }
@@ -1078,9 +1170,15 @@ fn emit_raw_element(
     }
 }
 
-fn reconstruct_html(nodes: &[HtmlNode], out: &mut String) {
+/// Elements whose text content is not HTML (and was not entity-decoded).
+fn is_raw_text_tag(tag: &str) -> bool {
+    tag == "script" || tag == "style"
+}
+
+fn reconstruct_html(nodes: &[HtmlNode], raw_text: bool, out: &mut String) {
     for node in nodes {
         match node {
+            HtmlNode::Text(t) if raw_text => out.push_str(t),
             HtmlNode::Text(t) => out.push_str(&html_escape(t)),
             HtmlNode::Comment(c) => {
                 out.push_str("<!--");
@@ -1109,7 +1207,7 @@ fn reconstruct_html(nodes: &[HtmlNode], out: &mut String) {
                     out.push_str(" />");
                 } else {
                     out.push('>');
-                    reconstruct_html(children, out);
+                    reconstruct_html(children, is_raw_text_tag(tag), out);
                     out.push_str(&format!("</{}>", tag));
                 }
             }
@@ -1277,5 +1375,60 @@ mod tests {
     fn rounded_shorthand() {
         let result = convert(r#"<div style="border-radius: 8px">X</div>"#);
         assert!(result.contains("rounded 8"));
+    }
+
+    #[test]
+    fn bare_less_than_is_text() {
+        let result = convert("<p>a < b and 1 <2 ok</p><p>after</p>");
+        assert!(result.contains("a < b and 1 <2 ok"), "{result}");
+        assert!(result.contains("after"), "{result}");
+        assert!(!result.contains("@raw"), "{result}");
+    }
+
+    #[test]
+    fn script_content_is_not_escaped() {
+        let result = convert("<script>if (a < b && c > d) {}</script>");
+        assert!(result.contains("if (a < b && c > d) {}"), "{result}");
+    }
+
+    #[test]
+    fn entities_decode_once_and_fully() {
+        assert_eq!(decode_entities("&amp;lt;tag&amp;gt;"), "&lt;tag&gt;");
+        assert_eq!(decode_entities("&copy; &#8212; &#x2014; &bogus; a&b"), "© — — &bogus; a&b");
+    }
+
+    #[test]
+    fn values_with_commas_are_quoted() {
+        let result = convert(r#"<input type="text" placeholder="Name, email">"#);
+        assert!(result.contains(r#"placeholder "Name, email""#), "{result}");
+    }
+
+    #[test]
+    fn text_that_looks_like_syntax_is_escaped() {
+        let result = convert("<p>-- not a comment</p><p>@mention</p>");
+        assert!(result.contains("@text -- not a comment"), "{result}");
+        assert!(result.contains("@text @mention"), "{result}");
+    }
+
+    #[test]
+    fn whitespace_sensitive_elements_stay_raw() {
+        let result = convert("<div>line1<br>line2</div><pre>  indented\n    more</pre>");
+        assert!(result.contains(r#"@raw """<br>""""#), "{result}");
+        assert!(result.contains("<pre>  indented\n    more</pre>"), "{result}");
+    }
+
+    #[test]
+    fn flex_on_semantic_element_nests_a_row() {
+        let result = convert(r#"<nav style="display:flex; gap: 8px"><a href="/">Home</a></nav>"#);
+        assert!(result.contains("@nav\n  @row [spacing 8]\n    @link /"), "{result}");
+    }
+
+    #[test]
+    fn large_script_converts_quickly() {
+        let body = "x".repeat(200_000);
+        let start = std::time::Instant::now();
+        let result = convert(&format!("<script>{body}</script>"));
+        assert!(result.contains(&body[..100]));
+        assert!(start.elapsed() < std::time::Duration::from_secs(2));
     }
 }

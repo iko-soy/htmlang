@@ -682,63 +682,6 @@ pub(crate) fn use_symbol_completions(
     items
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn pos(line: u32, ch: u32) -> Position {
-        Position::new(line, ch)
-    }
-
-    #[test]
-    fn owning_element_finds_element_on_same_line() {
-        let text = "@input [type text, ";
-        // Cursor at end of line — inside the unclosed `[`.
-        assert_eq!(
-            owning_element(text, pos(0, text.len() as u32)),
-            Some("input".to_string())
-        );
-    }
-
-    #[test]
-    fn owning_element_finds_element_across_lines() {
-        let text = "@button [\n  padding 10,\n  ";
-        assert_eq!(
-            owning_element(text, pos(2, 2)),
-            Some("button".to_string())
-        );
-    }
-
-    #[test]
-    fn owning_element_returns_none_when_not_in_brackets() {
-        let text = "@row\n";
-        assert_eq!(owning_element(text, pos(0, 4)), None);
-    }
-
-    #[test]
-    fn owning_element_skips_nested_brackets() {
-        let text = "@el [transform translate(10, [20, 30]), ";
-        // Cursor sits inside the outermost bracket after the inner one closed.
-        assert_eq!(
-            owning_element(text, pos(0, text.len() as u32)),
-            Some("el".to_string())
-        );
-    }
-
-    #[test]
-    fn theme_tokens_extracted_from_block() {
-        let text = "@theme\n  primary #3b82f6\n  spacing-md 16\n@row\n";
-        let tokens = collect_theme_tokens(text);
-        assert_eq!(
-            tokens,
-            vec![
-                ("primary".into(), "#3b82f6".into()),
-                ("spacing-md".into(), "16".into()),
-            ]
-        );
-    }
-}
-
 /// Walk back from `position` to find the element directive that opened the
 /// nearest unmatched `[`. Returns the bare name without the leading `@`
 /// (e.g. `"input"`).
@@ -1962,4 +1905,61 @@ fn function_completions(text: &str, range: Range) -> Vec<CompletionItem> {
     }
 
     items
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pos(line: u32, ch: u32) -> Position {
+        Position::new(line, ch)
+    }
+
+    #[test]
+    fn owning_element_finds_element_on_same_line() {
+        let text = "@input [type text, ";
+        // Cursor at end of line — inside the unclosed `[`.
+        assert_eq!(
+            owning_element(text, pos(0, text.len() as u32)),
+            Some("input".to_string())
+        );
+    }
+
+    #[test]
+    fn owning_element_finds_element_across_lines() {
+        let text = "@button [\n  padding 10,\n  ";
+        assert_eq!(
+            owning_element(text, pos(2, 2)),
+            Some("button".to_string())
+        );
+    }
+
+    #[test]
+    fn owning_element_returns_none_when_not_in_brackets() {
+        let text = "@row\n";
+        assert_eq!(owning_element(text, pos(0, 4)), None);
+    }
+
+    #[test]
+    fn owning_element_skips_nested_brackets() {
+        let text = "@el [transform translate(10, [20, 30]), ";
+        // Cursor sits inside the outermost bracket after the inner one closed.
+        assert_eq!(
+            owning_element(text, pos(0, text.len() as u32)),
+            Some("el".to_string())
+        );
+    }
+
+    #[test]
+    fn theme_tokens_extracted_from_block() {
+        let text = "@theme\n  primary #3b82f6\n  spacing-md 16\n@row\n";
+        let tokens = collect_theme_tokens(text);
+        assert_eq!(
+            tokens,
+            vec![
+                ("primary".into(), "#3b82f6".into()),
+                ("spacing-md".into(), "16".into()),
+            ]
+        );
+    }
 }

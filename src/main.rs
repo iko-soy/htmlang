@@ -77,7 +77,7 @@ fn compile(input_path: &str, cfg: &CompileConfig) -> (bool, Vec<PathBuf>) {
         for d in &result.diagnostics {
             let prefix = severity_label(d.severity);
             if let Some(col) = d.column {
-                eprintln!("{}: line {}:{}: {}", prefix, d.line, col, d.message);
+                eprintln!("{}: line {}:{}: {}", prefix, d.line, col + 1, d.message);
             } else {
                 eprintln!("{}: line {}: {}", prefix, d.line, d.message);
             }
@@ -123,8 +123,10 @@ fn compile(input_path: &str, cfg: &CompileConfig) -> (bool, Vec<PathBuf>) {
             // Generate source map alongside HTML
             if cfg.dev {
                 let map_path = out_path.with_extension("html.map");
-                let source_map = htmlang::codegen::generate_source_map(
-                    &result.document,
+                // Map the HTML that was actually written, so line numbers
+                // match even with --compat or --minify.
+                let source_map = htmlang::codegen::source_map_for_html(
+                    &html,
                     &Path::new(input_path)
                         .file_name()
                         .unwrap_or_default()
@@ -139,11 +141,48 @@ fn compile(input_path: &str, cfg: &CompileConfig) -> (bool, Vec<PathBuf>) {
 }
 
 fn json_escape_string(s: &str) -> String {
-    let escaped = s
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n");
-    format!("\"{}\"", escaped)
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// Rename attribute key `from` to `to` wherever it appears as a whole key:
+/// preceded by `[`, `,`, whitespace or a `prefix:` and followed by a space.
+fn rename_attr_key(line: &str, from: &str, to: &str) -> String {
+    let needle = format!("{from} ");
+    let mut out = String::with_capacity(line.len());
+    let mut rest = line;
+    while let Some(pos) = rest.find(&needle) {
+        let whole_key = rest[..pos]
+            .chars()
+            .next_back()
+            .is_none_or(|c| matches!(c, '[' | ',' | ':') || c.is_whitespace());
+        out.push_str(&rest[..pos]);
+        out.push_str(if whole_key { to } else { from });
+        out.push(' ');
+        rest = &rest[pos + needle.len()..];
+    }
+    out.push_str(rest);
+    out
+}
+
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
 
 fn json_array(items: impl Iterator<Item = String>) -> String {
@@ -291,7 +330,24 @@ fn base64_encode(data: &[u8]) -> String {
 
 fn copy_non_hl_files(src_dir: &Path, out_dir: &Path) {
     let skip = out_dir.canonicalize().ok();
+    // Building in place: the assets are already where they belong, and
+    // copying a file onto itself truncates it.
+    if skip.is_some() && src_dir.canonicalize().ok() == skip {
+        return;
+    }
     copy_non_hl_recursive(src_dir, src_dir, out_dir, skip.as_deref());
+}
+
+/// True for `page.html` / `page.html.map` files that sit next to a
+/// `page.hl` source — stale compiler output, not a static asset.
+fn is_generated_output(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    let stem = name
+        .strip_suffix(".html.map")
+        .or_else(|| name.strip_suffix(".html"));
+    stem.is_some_and(|stem| path.with_file_name(format!("{stem}.hl")).is_file())
 }
 
 fn copy_non_hl_recursive(base: &Path, dir: &Path, out_dir: &Path, skip_canonical: Option<&Path>) {
@@ -313,11 +369,17 @@ fn copy_non_hl_recursive(base: &Path, dir: &Path, out_dir: &Path, skip_canonical
                     continue;
                 }
                 copy_non_hl_recursive(base, &path, out_dir, skip_canonical);
-            } else if path.is_file() && path.extension().is_none_or(|e| e != "hl") {
+            } else if path.is_file()
+                && path.extension().is_none_or(|e| e != "hl")
+                && !is_generated_output(&path)
+            {
                 let rel = path.strip_prefix(base).unwrap_or(&path);
                 let dest = out_dir.join(rel);
                 if let Some(parent) = dest.parent() {
                     let _ = fs::create_dir_all(parent);
+                }
+                if dest.canonicalize().ok() == path.canonicalize().ok() {
+                    continue;
                 }
                 match fs::copy(&path, &dest) {
                     Ok(_) => eprintln!("copied {}", dest.display()),
@@ -338,7 +400,7 @@ fn generate_error_overlay(diagnostics: &[htmlang::parser::Diagnostic], file: &st
             .replace('<', "&lt;")
             .replace('>', "&gt;");
         let location = match d.column {
-            Some(col) => format!("line {}:{}", d.line, col),
+            Some(col) => format!("line {}:{}", d.line, col + 1),
             None => format!("line {}", d.line),
         };
         errors.push_str(&format!(
@@ -614,7 +676,7 @@ fn generate_sitemap(dir: &str, base_url: &str) {
         };
 
         xml.push_str("  <url>\n");
-        xml.push_str(&format!("    <loc>{}</loc>\n", url));
+        xml.push_str(&format!("    <loc>{}</loc>\n", xml_escape(&url)));
         if let Some(ref date) = lastmod {
             xml.push_str(&format!("    <lastmod>{}</lastmod>\n", date));
         }
@@ -862,70 +924,112 @@ fn count_elements(
     }
 }
 
-/// Extract shared CSS rules across multiple HTML files and write shared.css
-fn extract_shared_css(html_files: &[PathBuf], out_dir: &Path) {
-    // Parse <style> blocks from each HTML file and count rule occurrences
-    let mut rule_counts: HashMap<String, usize> = HashMap::new();
-    let total = html_files.len();
-    for file in html_files {
-        if let Ok(html) = fs::read_to_string(file) {
-            // Extract CSS between <style> and </style>
-            if let Some(start) = html.find("<style>")
-                && let Some(end) = html[start..].find("</style>")
-            {
-                let css = &html[start + 7..start + end];
-                // Extract individual rules (class-based)
-                let mut seen_in_file = std::collections::HashSet::new();
-                let mut i = 0;
-                let bytes = css.as_bytes();
-                while i < bytes.len() {
-                    if bytes[i] == b'.' || bytes[i] == b'@' {
-                        // Find end of rule block
-                        let start_pos = i;
-                        let mut depth = 0;
-                        let mut found_open = false;
-                        while i < bytes.len() {
-                            if bytes[i] == b'{' {
-                                depth += 1;
-                                found_open = true;
-                            } else if bytes[i] == b'}' {
-                                depth -= 1;
-                                if found_open && depth == 0 {
-                                    i += 1;
-                                    break;
-                                }
-                            }
-                            i += 1;
-                        }
-                        let rule = &css[start_pos..i];
-                        if !rule.is_empty() && !seen_in_file.contains(rule) {
-                            seen_in_file.insert(rule.to_string());
-                            *rule_counts.entry(rule.to_string()).or_insert(0) += 1;
-                        }
-                    } else {
-                        i += 1;
-                    }
-                }
-            }
+/// Whether the build cache record at `path` matches `key` and every
+/// dependency it lists still has the recorded content hash.
+fn build_cache_is_fresh(path: &Path, key: u64) -> bool {
+    let Ok(record) = fs::read_to_string(path) else {
+        return false;
+    };
+    let mut lines = record.lines();
+    if lines.next() != Some(key.to_string().as_str()) {
+        return false;
+    }
+    lines.all(|line| {
+        line.split_once(' ').is_some_and(|(hash, dep)| {
+            fs::read(dep).is_ok_and(|content| hash_bytes(&content).to_string() == hash)
+        })
+    })
+}
+
+/// Record a successful build: the source+flags `key`, then one
+/// `<content hash> <path>` line per included file.
+fn write_build_cache(path: &Path, key: u64, deps: &[PathBuf]) {
+    let mut record = key.to_string();
+    for dep in deps {
+        if let Ok(content) = fs::read(dep) {
+            record.push_str(&format!("\n{} {}", hash_bytes(&content), dep.display()));
         }
     }
-    // Rules appearing in ALL files are shared
-    let shared_rules: Vec<&String> = rule_counts
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let _ = fs::write(path, record);
+}
+
+fn hash_bytes(bytes: &[u8]) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Split a stylesheet into top-level segments: each rule or at-rule block,
+/// together with the whitespace before it, is one segment, so the segments
+/// concatenate back to the original text.
+fn css_segments(css: &str) -> Vec<&str> {
+    let mut segments = Vec::new();
+    let mut start = 0;
+    let mut depth = 0i32;
+    for (i, c) in css.char_indices() {
+        match c {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    segments.push(&css[start..=i]);
+                    start = i + 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    if start < css.len() {
+        segments.push(&css[start..]);
+    }
+    segments
+}
+
+/// Locate the first `<style>...</style>` body in `html` as a byte range.
+fn style_body_range(html: &str) -> Option<(usize, usize)> {
+    let start = html.find("<style>")? + "<style>".len();
+    let end = start + html[start..].find("</style>")?;
+    Some((start, end))
+}
+
+/// Extract shared CSS rules across multiple HTML files and write shared.css
+fn extract_shared_css(html_files: &[PathBuf], out_dir: &Path) {
+    let pages: Vec<(&PathBuf, String)> = html_files
         .iter()
-        .filter(|(_, count)| **count == total)
-        .map(|(rule, _)| rule)
+        .filter_map(|f| fs::read_to_string(f).ok().map(|html| (f, html)))
         .collect();
+    if pages.len() < 2 {
+        return;
+    }
+
+    // A rule is shared when it appears (verbatim) in every page. Keep the
+    // order of the first page so the cascade stays deterministic.
+    let rule_sets: Vec<std::collections::HashSet<&str>> = pages
+        .iter()
+        .map(|(_, html)| {
+            style_body_range(html)
+                .map(|(s, e)| css_segments(&html[s..e]).into_iter().map(str::trim).collect())
+                .unwrap_or_default()
+        })
+        .collect();
+    let first_css = style_body_range(&pages[0].1).map_or("", |(s, e)| &pages[0].1[s..e]);
+    let mut shared_rules: Vec<&str> = Vec::new();
+    for rule in css_segments(first_css).into_iter().map(str::trim) {
+        if rule.ends_with('}')
+            && !shared_rules.contains(&rule)
+            && rule_sets.iter().all(|set| set.contains(rule))
+        {
+            shared_rules.push(rule);
+        }
+    }
     if shared_rules.is_empty() {
         return;
     }
-    let shared_set: std::collections::HashSet<&String> = shared_rules.iter().copied().collect();
     let shared_css_path = out_dir.join("shared.css");
-    let shared_css: String = shared_rules
-        .iter()
-        .map(|r| r.as_str())
-        .collect::<Vec<_>>()
-        .join("\n");
-    if fs::write(&shared_css_path, &shared_css).is_err() {
+    if fs::write(&shared_css_path, shared_rules.join("\n")).is_err() {
         return;
     }
     eprintln!(
@@ -935,53 +1039,30 @@ fn extract_shared_css(html_files: &[PathBuf], out_dir: &Path) {
     );
 
     // Remove shared rules from individual files and inject <link> tag
-    for file in html_files {
-        if let Ok(html) = fs::read_to_string(file)
-            && let Some(style_start) = html.find("<style>")
-            && let Some(style_end_rel) = html[style_start..].find("</style>")
-        {
-            let css = &html[style_start + 7..style_start + style_end_rel];
-            // Rebuild CSS without shared rules
-            let mut filtered = String::new();
-            let mut i = 0;
-            let bytes = css.as_bytes();
-            while i < bytes.len() {
-                if bytes[i] == b'.' || bytes[i] == b'@' {
-                    let start_pos = i;
-                    let mut depth = 0;
-                    let mut found_open = false;
-                    while i < bytes.len() {
-                        if bytes[i] == b'{' {
-                            depth += 1;
-                            found_open = true;
-                        } else if bytes[i] == b'}' {
-                            depth -= 1;
-                            if found_open && depth == 0 {
-                                i += 1;
-                                break;
-                            }
-                        }
-                        i += 1;
-                    }
-                    let rule = &css[start_pos..i];
-                    if !shared_set.contains(&rule.to_string()) {
-                        filtered.push_str(rule);
-                    }
-                } else {
-                    filtered.push(css.as_bytes()[i] as char);
-                    i += 1;
-                }
-            }
-            let link_tag = "<link rel=\"stylesheet\" href=\"shared.css\">";
-            let new_html = format!(
-                "{}{}<style>{}</style>{}",
-                &html[..style_start],
-                link_tag,
-                filtered,
-                &html[style_start + style_end_rel + 8..],
-            );
-            let _ = fs::write(file, new_html);
-        }
+    for (file, html) in &pages {
+        let Some((style_start, style_end)) = style_body_range(html) else {
+            continue;
+        };
+        let filtered: String = css_segments(&html[style_start..style_end])
+            .into_iter()
+            .filter(|seg| !shared_rules.contains(&seg.trim()))
+            .collect();
+        // Link relative to the page so nested pages (blog/post.html) resolve.
+        let depth = file
+            .strip_prefix(out_dir)
+            .map_or(0, |rel| rel.components().count().saturating_sub(1));
+        let href = format!("{}shared.css", "../".repeat(depth));
+        let link_tag = format!("<link rel=\"stylesheet\" href=\"{}\">", href);
+        let head = &html[..style_start - "<style>".len()];
+        let link = if head.contains(&link_tag) { "" } else { &link_tag };
+        let new_html = format!(
+            "{}{}<style>{}</style>{}",
+            head,
+            link,
+            filtered,
+            &html[style_end + "</style>".len()..],
+        );
+        let _ = fs::write(file, new_html);
     }
 }
 
@@ -1212,6 +1293,7 @@ fn main() {
         let mut build_minify = false;
         let mut build_compat = false;
         let mut build_strict = false;
+        let mut shared_css = false;
         let mut i = 2;
         while i < args.len() {
             match args[i].as_str() {
@@ -1222,6 +1304,7 @@ fn main() {
                 "--minify" => build_minify = true,
                 "--compat" => build_compat = true,
                 "--strict" => build_strict = true,
+                "--shared-css" => shared_css = true,
                 _ if src_dir.is_none() => src_dir = Some(args[i].as_str()),
                 _ => {
                     eprintln!("unknown argument: {}", args[i]);
@@ -1280,37 +1363,33 @@ fn main() {
                 let skipped = &skipped;
                 let cache_dir = &cache_dir;
                 s.spawn(move || {
-                    // Content hash-based caching: skip if file content hasn't changed
-                    let hash_file_name = file
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .to_string()
-                        + ".hash";
-                    let hash_path = cache_dir.join(&hash_file_name);
-                    if let Ok(content) = fs::read(file) {
+                    // Content hash-based caching: skip if neither the file, the
+                    // files it includes, nor the build flags have changed.
+                    let rel = file.strip_prefix(dir).unwrap_or(file);
+                    let hash_path = cache_dir.join(rel).with_extension("hl.hash");
+                    let cache_key = fs::read(file).ok().map(|content| {
                         let mut hasher = std::collections::hash_map::DefaultHasher::new();
                         content.hash(&mut hasher);
-                        let current_hash = hasher.finish().to_string();
-                        if let Ok(cached_hash) = fs::read_to_string(&hash_path)
-                            && cached_hash.trim() == current_hash
-                        {
-                            // Also verify output exists
-                            let out_exists = effective_out
-                                .as_ref()
-                                .map_or(file.with_extension("html").exists(), |p| {
-                                    Path::new(p.as_str()).exists()
-                                });
-                            if out_exists {
-                                skipped.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                                return;
-                            }
+                        (build_minify, build_compat, build_strict, effective_out).hash(&mut hasher);
+                        hasher.finish()
+                    });
+                    if !shared_css
+                        && let Some(key) = cache_key
+                        && build_cache_is_fresh(&hash_path, key)
+                    {
+                        // Also verify output exists
+                        let out_exists = effective_out
+                            .as_ref()
+                            .map_or(file.with_extension("html").exists(), |p| {
+                                Path::new(p.as_str()).exists()
+                            });
+                        if out_exists {
+                            skipped.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            return;
                         }
-                        // Update hash cache after compilation
-                        let _ = fs::write(&hash_path, &current_hash);
                     }
                     let path_str = file.to_string_lossy().to_string();
-                    let (has_errors, _) = compile(
+                    let (has_errors, included) = compile(
                         &path_str,
                         &CompileConfig {
                             output_path: effective_out.as_deref(),
@@ -1322,6 +1401,10 @@ fn main() {
                     );
                     if has_errors {
                         any_errors.store(true, std::sync::atomic::Ordering::Relaxed);
+                        // Never let a failed build be skipped next time.
+                        let _ = fs::remove_file(&hash_path);
+                    } else if let Some(key) = cache_key {
+                        write_build_cache(&hash_path, key, &included);
                     }
                 });
             }
@@ -1356,7 +1439,9 @@ fn main() {
         if let Some(out) = out_dir {
             copy_non_hl_files(dir, Path::new(out));
 
-            // Shared CSS extraction: find duplicate CSS rules across pages
+            // Shared CSS extraction (opt-in): find duplicate CSS rules across
+            // pages. It rewrites the output, so it needs freshly compiled
+            // pages — the incremental cache is bypassed when it's enabled.
             let out_path = Path::new(out);
             let html_files: Vec<PathBuf> = hl_files
                 .iter()
@@ -1366,7 +1451,7 @@ fn main() {
                 })
                 .filter(|p| p.exists())
                 .collect();
-            if html_files.len() > 1 {
+            if shared_css && html_files.len() > 1 {
                 extract_shared_css(&html_files, out_path);
             }
         }
@@ -1921,19 +2006,21 @@ fn main() {
             copy_non_hl_files(target_path, Path::new(out_dir));
             let (tx, _) = tokio::sync::broadcast::channel::<()>(16);
             let serve_dir = PathBuf::from(out_dir);
-            let index_path = serve_dir.join("index.html");
+            let server_dir = serve_dir.clone();
             let server_tx = tx.clone();
             let tls_for_thread = tls_config;
             std::thread::spawn(move || {
                 let rt = tokio::runtime::Runtime::new().expect("failed to create runtime");
                 match tls_for_thread {
-                    Some(tls) => rt.block_on(htmlang::serve::run_https(
+                    Some(tls) => rt.block_on(htmlang::serve::run_dir_https(
                         effective_port,
-                        index_path,
+                        server_dir,
                         server_tx,
                         tls,
                     )),
-                    None => rt.block_on(htmlang::serve::run(effective_port, index_path, server_tx)),
+                    None => {
+                        rt.block_on(htmlang::serve::run_dir(effective_port, server_dir, server_tx))
+                    }
                 }
             });
             if serve_open {
@@ -1948,6 +2035,11 @@ fn main() {
                 Some(tx),
                 effective_port,
                 config.debounce_ms,
+                &WatchBuild {
+                    out_dirs: Some((target_path.to_path_buf(), serve_dir)),
+                    discover_new_files: true,
+                    ..Default::default()
+                },
             );
         } else {
             let out_dir = config.output.as_deref().unwrap_or("out");
@@ -1957,6 +2049,7 @@ fn main() {
                 .map(|s| s.to_os_string())
                 .unwrap_or_default();
             let out_path = Path::new(out_dir).join(&file_stem).with_extension("html");
+            let watch_out = out_path.clone();
             let out_path_str = out_path.to_string_lossy().to_string();
             let (_, included) = compile(
                 &target,
@@ -1995,6 +2088,10 @@ fn main() {
                 Some(tx),
                 effective_port,
                 config.debounce_ms,
+                &WatchBuild {
+                    out_file: Some(watch_out),
+                    ..Default::default()
+                },
             );
         }
         return;
@@ -2058,6 +2155,13 @@ fn main() {
                 None,
                 0,
                 config.debounce_ms,
+                &WatchBuild {
+                    out_dirs: effective_output
+                        .as_ref()
+                        .map(|o| (target_path.to_path_buf(), PathBuf::from(o))),
+                    discover_new_files: true,
+                    ..Default::default()
+                },
             );
         } else {
             let (_, included) = compile(
@@ -2077,6 +2181,10 @@ fn main() {
                 None,
                 0,
                 config.debounce_ms,
+                &WatchBuild {
+                    out_file: effective_output.as_ref().map(PathBuf::from),
+                    ..Default::default()
+                },
             );
         }
         return;
@@ -2191,12 +2299,15 @@ fn main() {
              <title>{}</title>\n\
              <link>{}</link>\n\
              <description>RSS feed generated by htmlang</description>\n",
-            site_title, base_url
+            xml_escape(&site_title),
+            xml_escape(base_url)
         );
         for (title, url, description) in &items {
             rss.push_str(&format!(
                 "<item>\n<title>{}</title>\n<link>{}</link>\n<description>{}</description>\n</item>\n",
-                title, url, description
+                xml_escape(title),
+                xml_escape(url),
+                xml_escape(description)
             ));
         }
         rss.push_str("</channel>\n</rss>\n");
@@ -2888,8 +2999,8 @@ compile();
                             })
                             .collect();
                         if !text.trim().is_empty() {
-                            let display = if text.len() > 40 {
-                                format!("{}...", &text[..37])
+                            let display = if text.chars().count() > 40 {
+                                format!("{}...", text.chars().take(37).collect::<String>())
                             } else {
                                 text
                             };
@@ -3480,10 +3591,14 @@ compile();
                     migrated = migrated.replace("align-center", "center-x");
                     changes += 1;
                 }
-                // Migrate spacing -> gap (modern naming)
-                if migrated.contains("spacing ") && migrated.contains('[') {
-                    migrated = migrated.replace("spacing ", "gap ");
-                    changes += 1;
+                // Migrate spacing -> gap (modern naming). Only the whole
+                // attribute key: `letter-spacing` must stay as it is.
+                if migrated.contains('[') {
+                    let renamed = rename_attr_key(&migrated, "spacing", "gap");
+                    if renamed != migrated {
+                        migrated = renamed;
+                        changes += 1;
+                    }
                 }
                 output.push_str(&migrated);
                 output.push('\n');
@@ -3559,7 +3674,7 @@ compile();
         template.push_str("  @el [padding 16, rounded 8, border 1 #e5e7eb]\n");
         if !params.is_empty() {
             for p in &params {
-                template.push_str(&format!("    @text ${}\\n", p));
+                template.push_str(&format!("    @text ${}\n", p));
             }
         }
         template.push_str("    @children\n");
@@ -3739,10 +3854,12 @@ compile();
             return;
         }
 
-        // For directory serve mode, serve the directory with route mapping
+        // For directory serve mode, serve the output directory with route mapping
         let reload_tx = if serve {
             let (tx, _) = tokio::sync::broadcast::channel::<()>(16);
-            let serve_dir = dir.to_path_buf();
+            let serve_dir = output_path
+                .as_ref()
+                .map_or_else(|| dir.to_path_buf(), PathBuf::from);
             let server_tx = tx.clone();
             std::thread::spawn(move || {
                 let rt = tokio::runtime::Runtime::new().expect("failed to create runtime");
@@ -3765,6 +3882,16 @@ compile();
             reload_tx,
             port,
             50,
+            &WatchBuild {
+                out_dirs: output_path
+                    .as_ref()
+                    .map(|o| (dir.to_path_buf(), PathBuf::from(o))),
+                discover_new_files: true,
+                compat,
+                strict,
+                partial,
+                ..Default::default()
+            },
         );
         return;
     }
@@ -3831,6 +3958,13 @@ compile();
         reload_tx,
         port,
         50,
+        &WatchBuild {
+            out_file: output_path.as_ref().map(PathBuf::from),
+            compat,
+            strict,
+            partial,
+            ..Default::default()
+        },
     );
 }
 
@@ -3850,6 +3984,38 @@ fn collect_hl_files(dir: &Path) -> Vec<PathBuf> {
     files
 }
 
+/// How watch-mode recompiles are built: where each source's output goes and
+/// which flags apply, so recompiles match the initial build.
+#[derive(Default)]
+struct WatchBuild {
+    /// `(source root, output root)`: `<src>/a/b.hl` compiles to `<out>/a/b.html`.
+    out_dirs: Option<(PathBuf, PathBuf)>,
+    /// Output file for a single watched source (`-o page.html`).
+    out_file: Option<PathBuf>,
+    /// Pick up `.hl` files created in the watch directory (directory mode).
+    discover_new_files: bool,
+    minify: bool,
+    compat: bool,
+    strict: bool,
+    partial: bool,
+}
+
+impl WatchBuild {
+    /// Output path for `source`, or `None` to write next to the source.
+    fn output_for(&self, source: &Path) -> Option<PathBuf> {
+        if let Some(file) = &self.out_file {
+            return Some(file.clone());
+        }
+        let (src_root, out_root) = self.out_dirs.as_ref()?;
+        let src_root = fs::canonicalize(src_root).unwrap_or_else(|_| src_root.clone());
+        let rel = source
+            .strip_prefix(&src_root)
+            .ok()
+            .or_else(|| source.file_name().map(Path::new))?;
+        Some(out_root.join(rel).with_extension("html"))
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn watch_loop(
     watch_dir: &Path,
@@ -3860,9 +4026,17 @@ fn watch_loop(
     reload_tx: Option<tokio::sync::broadcast::Sender<()>>,
     serve_port: u16,
     debounce_ms: u64,
+    build: &WatchBuild,
 ) {
     use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
     use std::sync::mpsc;
+
+    // `Path::new("page.hl").parent()` is `Some("")`, which can't be watched.
+    let watch_dir = if watch_dir.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        watch_dir
+    };
 
     let (tx, rx) = mpsc::channel();
     let mut watcher = RecommendedWatcher::new(
@@ -3975,7 +4149,7 @@ fn watch_loop(
         }
 
         // Check for new .hl files in directory
-        if watch_dir.is_dir() {
+        if build.discover_new_files && watch_dir.is_dir() {
             let current_files = collect_hl_files(watch_dir);
             for file in &current_files {
                 let canonical = fs::canonicalize(file).unwrap_or_else(|_| file.clone());
@@ -4001,7 +4175,7 @@ fn watch_loop(
                 .iter()
                 .map(|f| fs::canonicalize(f).unwrap_or_else(|_| f.clone()))
                 .collect();
-            if watch_dir.is_dir() {
+            if build.discover_new_files && watch_dir.is_dir() {
                 for file in &collect_hl_files(watch_dir) {
                     let c = fs::canonicalize(file).unwrap_or_else(|_| file.clone());
                     if !s.contains(&c) {
@@ -4037,11 +4211,21 @@ fn watch_loop(
         let mut recompiled = 0usize;
         for file in &files_to_compile {
             let path_str = file.to_string_lossy().to_string();
+            let out_path = build.output_for(file);
+            if let Some(parent) = out_path.as_deref().and_then(Path::parent) {
+                let _ = fs::create_dir_all(parent);
+            }
+            let out_str = out_path.map(|p| p.to_string_lossy().to_string());
             let (_, new_includes) = compile(
                 &path_str,
                 &CompileConfig {
                     dev,
                     error_overlay: serve,
+                    output_path: out_str.as_deref(),
+                    minify: build.minify,
+                    compat: build.compat,
+                    strict: build.strict,
+                    partial: build.partial,
                     ..Default::default()
                 },
             );
@@ -4081,5 +4265,43 @@ fn watch_loop(
         if let Some(ref tx) = reload_tx {
             let _ = tx.send(());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rename_attr_key_only_touches_whole_keys() {
+        assert_eq!(
+            rename_attr_key(
+                "@row [spacing 10, letter-spacing 2, hover:spacing 4]",
+                "spacing",
+                "gap"
+            ),
+            "@row [gap 10, letter-spacing 2, hover:gap 4]"
+        );
+    }
+
+    #[test]
+    fn json_escape_handles_control_characters() {
+        assert_eq!(
+            json_escape_string("a\tb\r\u{1}\"\\"),
+            "\"a\\tb\\r\\u0001\\\"\\\\\""
+        );
+    }
+
+    #[test]
+    fn css_segments_split_on_rule_boundaries_only() {
+        let css = "body{line-height:1.5}.a{content:\"→\"}@media(x){.a{b:c}}";
+        assert_eq!(
+            css_segments(css),
+            vec![
+                "body{line-height:1.5}",
+                ".a{content:\"→\"}",
+                "@media(x){.a{b:c}}"
+            ]
+        );
     }
 }

@@ -280,13 +280,13 @@ impl LanguageServer for Backend {
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         // If we still don't have a workspace root, fall back to the parent of
         // the first opened file. Common case for `code path/to/file.hl`.
-        if self.index.read().await.root.is_none() {
-            if let Ok(path) = params.text_document.uri.to_file_path()
-                && let Some(parent) = path.parent()
-            {
-                self.index.write().await.set_root(parent.to_path_buf());
-                self.index.write().await.scan();
-            }
+        if self.index.read().await.root.is_none()
+            && let Ok(path) = params.text_document.uri.to_file_path()
+            && let Some(parent) = path.parent()
+        {
+            let mut idx = self.index.write().await;
+            idx.set_root(parent.to_path_buf());
+            idx.scan();
         }
         self.set_doc(
             params.text_document.uri,

@@ -1485,18 +1485,39 @@ fn no_warning_different_attributes() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn fmt_sorts_attributes() {
-    let formatted = htmlang::fmt::format("@el [color red, width 200, padding 10]");
-    // width (sizing) should come before padding (spacing) which should come before color (visual)
-    assert!(formatted.contains("[width 200, padding 10, color red]"));
+fn fmt_preserves_attribute_order() {
+    // Later attributes may override earlier ones, so order is significant.
+    let formatted = htmlang::fmt::format("@el [color red,width 200,  padding 10]");
+    assert!(formatted.contains("[color red, width 200, padding 10]"));
 }
 
 #[test]
 fn fmt_multiline_brackets() {
     let input = "@el [\n  color red,\n  width 200\n]\n  @text hello";
     let formatted = htmlang::fmt::format(input);
-    assert!(formatted.contains("[width 200, color red]"));
+    assert!(formatted.contains("[color red, width 200]"));
     assert!(formatted.contains("  @text hello"));
+}
+
+#[test]
+fn fmt_examples_idempotent_and_semantics_preserving() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples");
+    for entry in fs::read_dir(&dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_none_or(|e| e != "hl") {
+            continue;
+        }
+        let src = fs::read_to_string(&path).unwrap();
+        let once = htmlang::fmt::format(&src);
+        let twice = htmlang::fmt::format(&once);
+        assert_eq!(once, twice, "formatter not idempotent on {}", path.display());
+        assert_eq!(
+            compile_with_base(&src, &dir),
+            compile_with_base(&once, &dir),
+            "formatting changed the output of {}",
+            path.display()
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

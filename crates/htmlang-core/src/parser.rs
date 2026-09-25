@@ -260,6 +260,57 @@ fn preprocess(input: &str) -> Vec<Line> {
 
         let indent = line.len() - line.trim_start().len();
 
+        // Inline `@markdown` and `@script` blocks keep their bodies verbatim:
+        // in Markdown, blank lines separate paragraphs, `---` is a rule (not
+        // a comment) and code indentation matters; in JavaScript, newlines,
+        // `{...}` and `$` must reach the output untouched.
+        let verbatim_body = trimmed == "@markdown"
+            || trimmed == "@script"
+            || trimmed.starts_with("@script ")
+            || trimmed.starts_with("@script[");
+        if verbatim_body {
+            lines.push(Line {
+                indent,
+                content: LineContent::Normal(trimmed.to_string()),
+                line_num: i + 1,
+            });
+            let body_start = i + 1;
+            let mut body_end = body_start;
+            let mut j = body_start;
+            while j < raw_lines.len() {
+                let l = raw_lines[j];
+                if l.trim().is_empty() {
+                    j += 1;
+                    continue;
+                }
+                if l.len() - l.trim_start().len() <= indent {
+                    break;
+                }
+                j += 1;
+                body_end = j;
+            }
+            let body = &raw_lines[body_start..body_end];
+            let body_indent = body
+                .iter()
+                .filter(|l| !l.trim().is_empty())
+                .map(|l| l.len() - l.trim_start().len())
+                .min()
+                .unwrap_or(0);
+            if !body.is_empty() {
+                let text: Vec<&str> = body
+                    .iter()
+                    .map(|l| l.get(body_indent..).unwrap_or("").trim_end())
+                    .collect();
+                lines.push(Line {
+                    indent: indent + 1,
+                    content: LineContent::Raw(text.join("\n")),
+                    line_num: body_start + 1,
+                });
+            }
+            i = body_end.max(body_start);
+            continue;
+        }
+
         // Handle @raw """..."""
         if let Some(raw_rest) = trimmed.strip_prefix("@raw") {
             let after_raw = raw_rest.trim_start();
@@ -305,9 +356,7 @@ fn preprocess(input: &str) -> Vec<Line> {
         // Join continuation lines for multi-line attribute brackets
         let first_line_num = i + 1;
         let mut full = trimmed.to_string();
-        let mut depth: i32 = full.chars().filter(|&c| c == '[').count() as i32
-            - full.chars().filter(|&c| c == ']').count() as i32;
-        while depth > 0 && i + 1 < raw_lines.len() {
+        while open_attr_depth(&full) > 0 && i + 1 < raw_lines.len() {
             i += 1;
             let next = raw_lines[i].trim();
             if next.is_empty() || next.starts_with("--") {
@@ -315,8 +364,6 @@ fn preprocess(input: &str) -> Vec<Line> {
             }
             full.push(' ');
             full.push_str(next);
-            depth += next.chars().filter(|&c| c == '[').count() as i32;
-            depth -= next.chars().filter(|&c| c == ']').count() as i32;
         }
 
         lines.push(Line {
@@ -328,6 +375,48 @@ fn preprocess(input: &str) -> Vec<Line> {
     }
 
     lines
+}
+
+/// Bracket depth left open at the end of `line`, counting only attribute
+/// lists: a `[` that starts the line or follows an `@name` token (optionally
+/// with one more word, as in `@let name [`). Brackets in text content, such
+/// as `@text [bold] Use [ to open`, are ignored.
+fn open_attr_depth(line: &str) -> i32 {
+    if !line.starts_with('@') && !line.starts_with('[') {
+        return 0;
+    }
+    let bytes = line.as_bytes();
+    let mut depth: i32 = 0;
+    for (i, &b) in bytes.iter().enumerate() {
+        match b {
+            b'[' if depth > 0 => depth += 1,
+            b'[' => {
+                // Is this the start of an attribute list?
+                let before = line[..i].trim_end();
+                let last_directive = before
+                    .rsplit([']', '>'])
+                    .next()
+                    .unwrap_or("")
+                    .trim();
+                let tokens: Vec<&str> = last_directive.split_whitespace().collect();
+                let starts_list = match tokens.as_slice() {
+                    [] => before.is_empty() || before.ends_with('>'),
+                    [name] => name.starts_with('@'),
+                    [name, _] => name.starts_with('@'),
+                    _ => false,
+                };
+                if starts_list {
+                    depth = 1;
+                } else if before.ends_with(']') {
+                    // Text after a closed attribute list: stop scanning.
+                    return 0;
+                }
+            }
+            b']' if depth > 0 => depth -= 1,
+            _ => {}
+        }
+    }
+    depth
 }
 
 // ---------------------------------------------------------------------------
@@ -419,9 +508,16 @@ impl Parser {
         if let Some(rest) = content.strip_prefix("@let ") {
             let rest = rest.trim();
 
+            // A `"""` value opens a multi-line string, whose indented lines
+            // are its content — not a function body.
+            let opens_triple_quote = rest.split_once(' ').is_some_and(|(_, v)| {
+                let v = v.trim();
+                v.strip_prefix("= ").unwrap_or(v).trim_start().starts_with("\"\"\"")
+            });
             // Check if next lines are indented (function/component definition)
-            let has_body =
-                self.pos < self.lines.len() && self.lines[self.pos].indent > current_indent;
+            let has_body = !opens_triple_quote
+                && self.pos < self.lines.len()
+                && self.lines[self.pos].indent > current_indent;
 
             if has_body {
                 // Function definition: @let name $param1 $param2=default
@@ -485,6 +581,8 @@ impl Parser {
 
                 // Multi-line @let with triple quotes: @let name """..."""
                 let value_str;
+                let quoted = value.starts_with('"') && value.ends_with('"') && value.len() >= 2
+                    || value.starts_with("\"\"\"");
                 let value = if let Some(after_open) = value.strip_prefix("\"\"\"") {
                     if after_open.ends_with("\"\"\"") && after_open.len() >= 3 {
                         // Single-line triple-quote: @let name """value"""
@@ -525,7 +623,13 @@ impl Parser {
                 };
                 track_var_refs(value, &mut ctx.used_variables);
                 let value = substitute_vars(value, &ctx.variables);
-                let value = evaluate_arithmetic(&value);
+                // Quoted values are literal strings; only bare values are
+                // evaluated as arithmetic (so `"1 / -1"` stays as written).
+                let value = if quoted {
+                    value
+                } else {
+                    evaluate_arithmetic(&value)
+                };
                 if name.starts_with("--") {
                     // CSS custom property
                     ctx.css_vars.push((name.to_string(), value.clone()));
@@ -682,7 +786,7 @@ impl Parser {
                 while self.pos < self.lines.len() && self.lines[self.pos].indent > current_indent {
                     match &self.lines[self.pos].content {
                         LineContent::Normal(s) => md_lines.push(s.clone()),
-                        LineContent::Raw(s) => md_lines.push(s.clone()),
+                        LineContent::Raw(s) => md_lines.extend(s.lines().map(String::from)),
                     }
                     self.pos += 1;
                 }
@@ -1636,6 +1740,7 @@ impl Parser {
 
         if let Some(rest) = content.strip_prefix("@if ") {
             let rest = rest.trim();
+            track_var_refs(rest, &mut ctx.used_variables);
             let condition = substitute_vars(rest, &ctx.variables);
             let result = evaluate_condition(&condition);
 
@@ -1658,6 +1763,7 @@ impl Parser {
                     let trimmed = s.trim();
                     if let Some(else_if_cond) = trimmed.strip_prefix("@else if ") {
                         self.pos += 1; // consume @else if
+                        track_var_refs(else_if_cond, &mut ctx.used_variables);
                         let cond = substitute_vars(else_if_cond.trim(), &ctx.variables);
                         let cond_result = evaluate_condition(&cond);
                         let mut body = Vec::new();
@@ -1722,6 +1828,7 @@ impl Parser {
 
         if let Some(rest) = content.strip_prefix("@unless ") {
             let rest = rest.trim();
+            track_var_refs(rest, &mut ctx.used_variables);
             let condition = substitute_vars(rest, &ctx.variables);
             let result = !evaluate_condition(&condition);
             let mut body_lines = Vec::new();
@@ -1781,8 +1888,16 @@ impl Parser {
             let var_name = var_names[0].clone();
             let index_var = var_names.get(1).cloned();
 
-            let list_str = substitute_vars(&list_str, &ctx.variables);
+            // Strip a trailing `[page N]` pagination suffix so it doesn't end
+            // up in the last item; it's parsed from the raw line below.
+            let list_str = match list_str.rfind("[page ") {
+                Some(pos) if list_str.trim_end().ends_with(']') => {
+                    list_str[..pos].trim_end().to_string()
+                }
+                _ => list_str,
+            };
             track_var_refs(&list_str, &mut ctx.used_variables);
+            let list_str = substitute_vars(&list_str, &ctx.variables);
             // Support range syntax: @each $i in 1..5  or  @each $i in 0..100 step 10
             let items: Vec<String> = if let Some((start_s, rest)) = list_str.split_once("..") {
                 let (end_s, step) = if let Some((e, s)) = rest.split_once(" step ") {
@@ -1792,23 +1907,7 @@ impl Parser {
                 };
                 if let (Ok(start), Ok(end)) = (start_s.trim().parse::<i64>(), end_s.parse::<i64>())
                 {
-                    if start <= end {
-                        let mut items = Vec::new();
-                        let mut n = start;
-                        while n <= end {
-                            items.push(n.to_string());
-                            n += step;
-                        }
-                        items
-                    } else {
-                        let mut items = Vec::new();
-                        let mut n = start;
-                        while n >= end {
-                            items.push(n.to_string());
-                            n -= step;
-                        }
-                        items
-                    }
+                    numeric_range(start, end, step)
                 } else {
                     list_str
                         .split(',')
@@ -1847,11 +1946,13 @@ impl Parser {
                         .variables
                         .get("_page")
                         .and_then(|v| v.parse().ok())
-                        .unwrap_or(1);
+                        .unwrap_or(1)
+                        .max(1);
+                    let size = size.max(1);
                     let total_items = items.len();
                     let total_pages = total_items.div_ceil(size);
-                    let start = (current_page - 1) * size;
-                    let end = (start + size).min(total_items);
+                    let start = (current_page - 1).saturating_mul(size);
+                    let end = start.saturating_add(size).min(total_items);
                     let page_items: Vec<String> = if start < total_items {
                         items[start..end].to_vec()
                     } else {
@@ -1909,7 +2010,9 @@ impl Parser {
                     lines: adjusted,
                     pos: 0,
                 };
+                let saved_vars = ctx.variables.clone();
                 let nodes = body_parser.parse_children(0, ctx);
+                ctx.variables = saved_vars;
                 return Ok(Some(nodes));
             }
 
@@ -1986,8 +2089,8 @@ impl Parser {
                     message: "@for requires: @for $var in start..end".to_string(),
                 });
             };
-            let range_str = substitute_vars(&range_str, &ctx.variables);
             track_var_refs(&range_str, &mut ctx.used_variables);
+            let range_str = substitute_vars(&range_str, &ctx.variables);
 
             let items: Vec<String> = if let Some((start_s, rest_range)) = range_str.split_once("..")
             {
@@ -1998,23 +2101,7 @@ impl Parser {
                 };
                 if let (Ok(start), Ok(end)) = (start_s.trim().parse::<i64>(), end_s.parse::<i64>())
                 {
-                    if start <= end {
-                        let mut items = Vec::new();
-                        let mut n = start;
-                        while n <= end {
-                            items.push(n.to_string());
-                            n += step;
-                        }
-                        items
-                    } else {
-                        let mut items = Vec::new();
-                        let mut n = start;
-                        while n >= end {
-                            items.push(n.to_string());
-                            n -= step;
-                        }
-                        items
-                    }
+                    numeric_range(start, end, step)
                 } else {
                     return Err(ParseError {
                         line: line_num,
@@ -2920,8 +3007,10 @@ impl Parser {
 
         // --- Bare text ---
 
-        let var_warnings = check_undefined_vars(&content, &ctx.variables, line_num);
+        let var_warnings =
+            check_undefined_vars(&content, &ctx.variables, line_num, current_indent);
         ctx.diagnostics.extend(var_warnings);
+        track_var_refs(&content, &mut ctx.used_variables);
         let segments = parse_text_segments(&content, ctx);
         Ok(Some(vec![Node::Text(segments)]))
     }
@@ -2997,7 +3086,13 @@ impl Parser {
                 .iter()
                 .find(|a| a.key == *param)
                 .and_then(|a| a.value.clone())
-                .or_else(|| args.get(i).and_then(|a| a.value.clone()))
+                .or_else(|| {
+                    // Positional fallback, unless that argument is named for
+                    // a different parameter.
+                    args.get(i)
+                        .filter(|a| !fn_def.params.contains(&a.key))
+                        .and_then(|a| a.value.clone())
+                })
                 .or_else(|| fn_def.defaults.get(param).cloned())
                 .unwrap_or_default();
             ctx.variables.insert(param.clone(), value);
@@ -3196,6 +3291,7 @@ fn parse_single_element(
     };
 
     let rest = rest.trim().to_string();
+    track_var_refs(&rest, &mut ctx.used_variables);
 
     // For @link, first token of rest is URL, remainder is inline text
     let mut children = Vec::new();
@@ -3588,10 +3684,13 @@ fn suggest_var_name(input: &str, vars: &HashMap<String, String>) -> Option<Strin
 }
 
 /// Check for undefined `$var` references and return "did you mean?" diagnostics.
+/// `indent` is the line's leading whitespace, which `input` has had trimmed;
+/// reported columns and source lines include it.
 fn check_undefined_vars(
     input: &str,
     vars: &HashMap<String, String>,
     line_num: usize,
+    indent: usize,
 ) -> Vec<Diagnostic> {
     let mut warnings = Vec::new();
     if !input.contains('$') {
@@ -3625,13 +3724,13 @@ fn check_undefined_vars(
             {
                 warnings.push(Diagnostic {
                     line: line_num,
-                    column: Some(col),
+                    column: Some(indent + col),
                     message: format!(
                         "undefined variable '${}', did you mean '${}'?",
                         name, closest
                     ),
                     severity: Severity::Warning,
-                    source_line: Some(input.to_string()),
+                    source_line: Some(format!("{}{}", " ".repeat(indent), input)),
                 });
             }
             i = end;
@@ -4006,8 +4105,8 @@ const NUMERIC_ATTRS: &[&str] = &[
 ];
 
 const CSS_UNIT_SUFFIXES: &[&str] = &[
-    "%", "rem", "em", "vh", "vw", "vmin", "vmax", "dvh", "svh", "lvh", "ch", "ex", "cm", "mm",
-    "in", "pt", "pc", "fr",
+    "px", "%", "rem", "em", "vh", "vw", "vmin", "vmax", "dvh", "svh", "lvh", "ch", "ex", "cm",
+    "mm", "in", "pt", "pc", "fr",
 ];
 
 fn has_css_unit(value: &str) -> bool {
@@ -4559,9 +4658,12 @@ fn split_commas(input: &str) -> Vec<&str> {
     let mut parts = Vec::new();
     let mut start = 0;
     let mut depth = 0;
+    let mut in_quotes = false;
 
     for (i, c) in input.char_indices() {
         match c {
+            '"' => in_quotes = !in_quotes,
+            _ if in_quotes => {}
             '[' | '(' => depth += 1,
             ']' | ')' => depth -= 1,
             ',' if depth == 0 => {
@@ -4692,6 +4794,31 @@ fn parse_text_segments(input: &str, ctx: &mut ParseContext) -> Vec<TextSegment> 
 // ---------------------------------------------------------------------------
 // Condition evaluation for @if
 // ---------------------------------------------------------------------------
+
+/// Inclusive integer range from `start` to `end` (counting down when
+/// `start > end`), stepping by `step`. Stops instead of overflowing.
+fn numeric_range(start: i64, end: i64, step: i64) -> Vec<String> {
+    let mut items = Vec::new();
+    let mut n = start;
+    if start <= end {
+        while n <= end {
+            items.push(n.to_string());
+            match n.checked_add(step) {
+                Some(next) => n = next,
+                None => break,
+            }
+        }
+    } else {
+        while n >= end {
+            items.push(n.to_string());
+            match n.checked_sub(step) {
+                Some(next) => n = next,
+                None => break,
+            }
+        }
+    }
+    items
+}
 
 fn evaluate_condition(condition: &str) -> bool {
     // Ternary expression support: condition ? true_val : false_val
@@ -5381,6 +5508,9 @@ fn validate_tree(
 
 fn parse_hex_rgb(s: &str) -> Option<(u8, u8, u8)> {
     let s = s.strip_prefix('#')?;
+    if !s.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
     match s.len() {
         3 => {
             let r = u8::from_str_radix(&s[0..1], 16).ok()?;
@@ -5535,7 +5665,7 @@ fn parse_keyframe_line(line: &str) -> Option<String> {
     let inner = &rest[1..rest.len() - 1];
     // Parse comma-separated key-value pairs into CSS
     let mut css = String::new();
-    for part in inner.split(',') {
+    for part in split_commas(inner) {
         let part = part.trim();
         if part.is_empty() {
             continue;
@@ -5584,9 +5714,9 @@ fn replace_extends_slots(nodes: Vec<Node>, slot_nodes: &HashMap<String, Vec<Node
 fn apply_filter(value: &str, filter: &str) -> String {
     if let Some(arg) = filter.strip_prefix("truncate:") {
         if let Ok(n) = arg.parse::<usize>()
-            && value.len() > n
+            && value.chars().count() > n
         {
-            return format!("{}...", &value[..n]);
+            return format!("{}...", value.chars().take(n).collect::<String>());
         }
         return value.to_string();
     }
@@ -5656,7 +5786,7 @@ fn apply_filter(value: &str, filter: &str) -> String {
             }
         }
         "trim" => value.trim().to_string(),
-        "length" | "len" => value.len().to_string(),
+        "length" | "len" => value.chars().count().to_string(),
         "reverse" => value.chars().rev().collect(),
         _ => value.to_string(),
     }
@@ -5896,7 +6026,7 @@ fn parse_json_value(chars: &[char], mut pos: usize) -> Option<(JsonValue, usize)
 }
 
 fn parse_json_string(chars: &[char], mut pos: usize) -> Option<(String, usize)> {
-    if chars[pos] != '"' {
+    if chars.get(pos) != Some(&'"') {
         return None;
     }
     pos += 1;
@@ -5909,6 +6039,28 @@ fn parse_json_string(chars: &[char], mut pos: usize) -> Option<(String, usize)> 
                 'n' => s.push('\n'),
                 't' => s.push('\t'),
                 'r' => s.push('\r'),
+                'b' => s.push('\u{8}'),
+                'f' => s.push('\u{c}'),
+                'u' => {
+                    let hex4 = |at: usize| -> Option<u32> {
+                        let digits: String = chars.get(at..at + 4)?.iter().collect();
+                        u32::from_str_radix(&digits, 16).ok()
+                    };
+                    let hi = hex4(pos + 1)?;
+                    pos += 4;
+                    let code = if (0xD800..0xDC00).contains(&hi)
+                        && chars.get(pos + 1) == Some(&'\\')
+                        && chars.get(pos + 2) == Some(&'u')
+                        && let Some(lo) = hex4(pos + 3)
+                        && (0xDC00..0xE000).contains(&lo)
+                    {
+                        pos += 6;
+                        0x10000 + ((hi - 0xD800) << 10) + (lo - 0xDC00)
+                    } else {
+                        hi
+                    };
+                    s.push(char::from_u32(code).unwrap_or('\u{FFFD}'));
+                }
                 _ => {
                     s.push('\\');
                     s.push(chars[pos]);
@@ -6115,11 +6267,10 @@ fn fetch_url_blocking(url: &str) -> Result<String, String> {
         .read_to_end(&mut response)
         .map_err(|e| format!("read failed: {}", e))?;
 
-    let response_str = String::from_utf8_lossy(&response);
-    // Split headers and body
-    if let Some(body_start) = response_str.find("\r\n\r\n") {
-        let headers = &response_str[..body_start];
-        let body = &response_str[body_start + 4..];
+    // Split headers and body (on bytes, so chunk sizes stay byte counts)
+    if let Some(body_start) = response.windows(4).position(|w| w == b"\r\n\r\n") {
+        let headers = String::from_utf8_lossy(&response[..body_start]);
+        let body = &response[body_start + 4..];
 
         // Check status code
         if let Some(first_line) = headers.lines().next()
@@ -6136,40 +6287,33 @@ fn fetch_url_blocking(url: &str) -> Result<String, String> {
             .to_lowercase()
             .contains("transfer-encoding: chunked")
         {
-            return Ok(decode_chunked(body));
+            return Ok(String::from_utf8_lossy(&decode_chunked(body)).into_owned());
         }
 
-        Ok(body.to_string())
+        Ok(String::from_utf8_lossy(body).into_owned())
     } else {
         Err("malformed HTTP response".to_string())
     }
 }
 
-fn decode_chunked(body: &str) -> String {
-    let mut result = String::new();
+fn decode_chunked(body: &[u8]) -> Vec<u8> {
+    let mut result = Vec::new();
     let mut rest = body;
-    loop {
-        let rest_trimmed = rest.trim_start();
-        if rest_trimmed.is_empty() {
-            break;
-        }
-        let size_end = rest_trimmed.find("\r\n").unwrap_or(rest_trimmed.len());
-        let size_str = &rest_trimmed[..size_end];
-        let size = usize::from_str_radix(size_str.trim(), 16).unwrap_or(0);
+    while let Some(size_end) = rest.windows(2).position(|w| w == b"\r\n") {
+        let size_line = String::from_utf8_lossy(&rest[..size_end]);
+        // Chunk extensions (`;name=value`) may follow the size.
+        let size_str = size_line.split(';').next().unwrap_or("").trim();
+        let size = usize::from_str_radix(size_str, 16).unwrap_or(0);
         if size == 0 {
             break;
         }
-        let chunk_start = size_end + 2;
-        if chunk_start + size <= rest_trimmed.len() {
-            result.push_str(&rest_trimmed[chunk_start..chunk_start + size]);
-            rest = &rest_trimmed[chunk_start + size..];
-            if rest.starts_with("\r\n") {
-                rest = &rest[2..];
-            }
-        } else {
-            result.push_str(&rest_trimmed[chunk_start..]);
+        let chunk = &rest[size_end + 2..];
+        if size > chunk.len() {
+            result.extend_from_slice(chunk);
             break;
         }
+        result.extend_from_slice(&chunk[..size]);
+        rest = chunk[size..].strip_prefix(b"\r\n").unwrap_or(&chunk[size..]);
     }
     result
 }
@@ -6179,35 +6323,52 @@ fn decode_chunked(body: &str) -> String {
 // ---------------------------------------------------------------------------
 
 fn set_svg_attr(svg: &str, attr_name: &str, value: &str) -> String {
-    // If the SVG already has this attribute, replace it
+    // Only the opening <svg ...> tag is touched, so child attributes such as
+    // `stroke-width` are left alone.
+    let Some(tag_start) = svg.find("<svg") else {
+        return svg.to_string();
+    };
+    let tag_end = svg[tag_start..]
+        .find('>')
+        .map(|p| tag_start + p)
+        .unwrap_or(svg.len());
+    let tag = &svg[tag_start..tag_end];
+
+    // Replace an existing attribute (must be preceded by whitespace so that
+    // `width` doesn't match `stroke-width`).
     let pattern = format!("{}=\"", attr_name);
-    if let Some(pos) = svg.find(&pattern) {
-        let after = &svg[pos + pattern.len()..];
-        if let Some(end) = after.find('"') {
+    let existing = tag.match_indices(&pattern).find(|(pos, _)| {
+        tag[..*pos]
+            .chars()
+            .next_back()
+            .is_some_and(char::is_whitespace)
+    });
+    if let Some((pos, _)) = existing {
+        let value_start = tag_start + pos + pattern.len();
+        if let Some(end) = svg[value_start..tag_end].find('"') {
             let mut result = String::with_capacity(svg.len());
-            result.push_str(&svg[..pos]);
-            result.push_str(attr_name);
-            result.push_str("=\"");
+            result.push_str(&svg[..value_start]);
             result.push_str(value);
-            result.push('"');
-            result.push_str(&after[end + 1..]);
+            result.push_str(&svg[value_start + end..]);
             return result;
         }
     }
-    // Otherwise inject it into the opening <svg tag
-    if let Some(pos) = svg.find("<svg") {
-        let tag_end = svg[pos..].find('>').map(|p| pos + p).unwrap_or(svg.len());
-        let mut result = String::with_capacity(svg.len() + attr_name.len() + value.len() + 4);
-        result.push_str(&svg[..tag_end]);
-        result.push(' ');
-        result.push_str(attr_name);
-        result.push_str("=\"");
-        result.push_str(value);
-        result.push('"');
-        result.push_str(&svg[tag_end..]);
-        return result;
-    }
-    svg.to_string()
+
+    // Otherwise inject it into the opening tag (before a self-closing `/`).
+    let insert_at = if svg[..tag_end].ends_with('/') {
+        tag_end - 1
+    } else {
+        tag_end
+    };
+    let mut result = String::with_capacity(svg.len() + attr_name.len() + value.len() + 4);
+    result.push_str(svg[..insert_at].trim_end());
+    result.push(' ');
+    result.push_str(attr_name);
+    result.push_str("=\"");
+    result.push_str(value);
+    result.push('"');
+    result.push_str(&svg[insert_at..]);
+    result
 }
 
 // ---------------------------------------------------------------------------
@@ -6216,7 +6377,8 @@ fn set_svg_attr(svg: &str, attr_name: &str, value: &str) -> String {
 
 fn markdown_to_html(lines: &[String]) -> String {
     let mut html = String::new();
-    let mut in_list = false;
+    // Tag of the list currently open ("ul" or "ol"), if any.
+    let mut list: Option<&'static str> = None;
     let mut in_code_block = false;
     let mut code_lang = String::new();
     let mut code_buf = String::new();
@@ -6230,6 +6392,20 @@ fn markdown_to_html(lines: &[String]) -> String {
             out.push_str("</p>\n");
         }
         para.clear();
+    };
+    let close_list = |list: &mut Option<&'static str>, out: &mut String| {
+        if let Some(tag) = list.take() {
+            out.push_str(&format!("</{}>\n", tag));
+        }
+    };
+    let open_list = |list: &mut Option<&'static str>, tag: &'static str, out: &mut String| {
+        if *list != Some(tag) {
+            if let Some(prev) = list.take() {
+                out.push_str(&format!("</{}>\n", prev));
+            }
+            out.push_str(&format!("<{}>\n", tag));
+            *list = Some(tag);
+        }
     };
 
     for line in lines {
@@ -6250,6 +6426,7 @@ fn markdown_to_html(lines: &[String]) -> String {
                 in_code_block = false;
             } else {
                 flush_para(&mut para_buf, &mut html);
+                close_list(&mut list, &mut html);
                 code_lang = after_fence.trim().to_string();
                 in_code_block = true;
             }
@@ -6259,32 +6436,24 @@ fn markdown_to_html(lines: &[String]) -> String {
             if !code_buf.is_empty() {
                 code_buf.push('\n');
             }
-            code_buf.push_str(trimmed);
+            // Keep indentation inside code blocks.
+            code_buf.push_str(line.trim_end());
             continue;
         }
 
         // Blank line ends paragraph
         if trimmed.is_empty() {
             flush_para(&mut para_buf, &mut html);
-            if in_list {
-                html.push_str("</ul>\n");
-                in_list = false;
-            }
+            close_list(&mut list, &mut html);
             continue;
         }
 
         // Headings
-        if trimmed.starts_with("###### /* ") {
-            // skip
-        }
         let heading_level = trimmed.bytes().take_while(|&b| b == b'#').count();
         if (1..=6).contains(&heading_level) && trimmed.as_bytes().get(heading_level) == Some(&b' ')
         {
             flush_para(&mut para_buf, &mut html);
-            if in_list {
-                html.push_str("</ul>\n");
-                in_list = false;
-            }
+            close_list(&mut list, &mut html);
             let text = &trimmed[heading_level + 1..];
             html.push_str(&format!(
                 "<h{}>{}</h{}>\n",
@@ -6295,28 +6464,30 @@ fn markdown_to_html(lines: &[String]) -> String {
             continue;
         }
 
+        // Horizontal rule (checked before list items so `---`/`***` aren't
+        // mistaken for bullets)
+        if trimmed == "---" || trimmed == "***" || trimmed == "___" {
+            flush_para(&mut para_buf, &mut html);
+            close_list(&mut list, &mut html);
+            html.push_str("<hr>\n");
+            continue;
+        }
+
         // Unordered list items
         if (trimmed.starts_with("- ") || trimmed.starts_with("* ")) && trimmed.len() > 2 {
             flush_para(&mut para_buf, &mut html);
-            if !in_list {
-                html.push_str("<ul>\n");
-                in_list = true;
-            }
+            open_list(&mut list, "ul", &mut html);
             html.push_str(&format!("<li>{}</li>\n", md_inline(&trimmed[2..])));
             continue;
         }
 
         // Ordered list items
         if let Some(dot_pos) = trimmed.find(". ")
-            && dot_pos <= 3
+            && (1..=3).contains(&dot_pos)
             && trimmed[..dot_pos].chars().all(|c| c.is_ascii_digit())
         {
             flush_para(&mut para_buf, &mut html);
-            if in_list {
-                html.push_str("</ul>\n");
-                in_list = false;
-            }
-            // We use <ol> but just emit <li> for simplicity
+            open_list(&mut list, "ol", &mut html);
             html.push_str(&format!(
                 "<li>{}</li>\n",
                 md_inline(&trimmed[dot_pos + 2..])
@@ -6324,20 +6495,10 @@ fn markdown_to_html(lines: &[String]) -> String {
             continue;
         }
 
-        // Horizontal rule
-        if trimmed == "---" || trimmed == "***" || trimmed == "___" {
-            flush_para(&mut para_buf, &mut html);
-            if in_list {
-                html.push_str("</ul>\n");
-                in_list = false;
-            }
-            html.push_str("<hr>\n");
-            continue;
-        }
-
         // Blockquote
         if let Some(quote_content) = trimmed.strip_prefix("> ") {
             flush_para(&mut para_buf, &mut html);
+            close_list(&mut list, &mut html);
             html.push_str(&format!(
                 "<blockquote><p>{}</p></blockquote>\n",
                 md_inline(quote_content)
@@ -6346,6 +6507,7 @@ fn markdown_to_html(lines: &[String]) -> String {
         }
 
         // Otherwise, accumulate paragraph text
+        close_list(&mut list, &mut html);
         if !para_buf.is_empty() {
             para_buf.push(' ');
         }
@@ -6353,9 +6515,7 @@ fn markdown_to_html(lines: &[String]) -> String {
     }
 
     // Flush remaining
-    if in_list {
-        html.push_str("</ul>\n");
-    }
+    close_list(&mut list, &mut html);
     flush_para(&mut para_buf, &mut html);
 
     html
@@ -6575,5 +6735,16 @@ mod tests {
         // Guards the `op.trim().chars().next().unwrap()` fix.
         let r = parse("@let x 1 + 2\n");
         assert_eq!(r.document.variables.get("x").map(|s| s.as_str()), Some("3"));
+    }
+
+    #[test]
+    fn decode_chunked_handles_bytes_and_malformed_input() {
+        // Chunk sizes are byte counts: "é" is 2 bytes.
+        let body = "3\r\naé\r\n2\r\nbc\r\n0\r\n\r\n".as_bytes();
+        assert_eq!(decode_chunked(body), "aébc".as_bytes());
+        // No CRLF after the size line — must not panic.
+        assert_eq!(decode_chunked(b"5"), b"");
+        // Declared size larger than the data — take what's there.
+        assert_eq!(decode_chunked(b"a\r\nabc"), b"abc");
     }
 }

@@ -4,152 +4,112 @@ const MAX_LINE_WIDTH: usize = 100;
 /// prevents format→format→format oscillation around the wrap threshold.
 const WRAP_MIN_WIDTH: usize = 80;
 
-/// Attribute category for sorting.
-fn attr_category(key: &str) -> u8 {
-    // Strip pseudo-state/responsive/media prefixes for categorization
-    let base = key
-        .strip_prefix("hover:")
-        .or_else(|| key.strip_prefix("active:"))
-        .or_else(|| key.strip_prefix("focus:"))
-        .or_else(|| key.strip_prefix("focus-visible:"))
-        .or_else(|| key.strip_prefix("focus-within:"))
-        .or_else(|| key.strip_prefix("disabled:"))
-        .or_else(|| key.strip_prefix("checked:"))
-        .or_else(|| key.strip_prefix("placeholder:"))
-        .or_else(|| key.strip_prefix("first:"))
-        .or_else(|| key.strip_prefix("last:"))
-        .or_else(|| key.strip_prefix("odd:"))
-        .or_else(|| key.strip_prefix("even:"))
-        .or_else(|| key.strip_prefix("sm:"))
-        .or_else(|| key.strip_prefix("md:"))
-        .or_else(|| key.strip_prefix("lg:"))
-        .or_else(|| key.strip_prefix("xl:"))
-        .or_else(|| key.strip_prefix("dark:"))
-        .or_else(|| key.strip_prefix("print:"))
-        .or_else(|| key.strip_prefix("2xl:"))
-        .or_else(|| key.strip_prefix("motion-safe:"))
-        .or_else(|| key.strip_prefix("motion-reduce:"))
-        .or_else(|| key.strip_prefix("landscape:"))
-        .or_else(|| key.strip_prefix("portrait:"))
-        .or_else(|| key.strip_prefix("visited:"))
-        .or_else(|| key.strip_prefix("empty:"))
-        .or_else(|| key.strip_prefix("target:"))
-        .or_else(|| key.strip_prefix("valid:"))
-        .or_else(|| key.strip_prefix("invalid:"))
-        .unwrap_or(key);
-
-    match base {
-        // Layout (parent)
-        "spacing" | "gap" | "gap-x" | "gap-y" | "wrap" | "grid" | "grid-cols" | "grid-rows"
-        | "column-count" | "column-gap" | "column-width" | "column-rule" => 0,
-        // Sizing
-        "width" | "height" | "min-width" | "max-width" | "min-height" | "max-height"
-        | "flex-grow" | "flex-shrink" | "flex-basis" => 1,
-        // Padding & margin
-        "padding" | "padding-x" | "padding-y" | "padding-inline" | "padding-block" | "margin"
-        | "margin-x" | "margin-y" | "margin-inline" | "margin-block" => 2,
-        // Alignment
-        "center-x" | "center-y" | "align-left" | "align-right" | "align-top" | "align-bottom"
-        | "justify-content" | "align-items" | "place-items" | "place-self" | "place-content" => 3,
-        // Positioning
-        "position" | "top" | "right" | "bottom" | "left" | "z-index" | "order" | "inset"
-        | "col-span" | "row-span" | "display" | "visibility" | "overflow" | "overflow-x"
-        | "overflow-y" | "hidden" => 4,
-        // Visual style
-        "background"
-        | "background-size"
-        | "background-position"
-        | "background-repeat"
-        | "color"
-        | "opacity"
-        | "accent-color"
-        | "caret-color"
-        | "background-image"
-        | "background-blend-mode"
-        | "mix-blend-mode"
-        | "isolation" => 5,
-        // Border & shape
-        "border" | "border-top" | "border-bottom" | "border-left" | "border-right" | "rounded"
-        | "outline" | "shadow" | "text-shadow" | "border-collapse" | "border-spacing" => 6,
-        // Typography
-        "bold"
-        | "italic"
-        | "underline"
-        | "size"
-        | "font"
-        | "text-align"
-        | "line-height"
-        | "letter-spacing"
-        | "text-transform"
-        | "white-space"
-        | "text-overflow"
-        | "word-break"
-        | "overflow-wrap"
-        | "text-decoration"
-        | "text-decoration-color"
-        | "text-decoration-thickness"
-        | "text-decoration-style"
-        | "text-underline-offset"
-        | "list-style"
-        | "text-indent"
-        | "hyphens"
-        | "writing-mode" => 7,
-        // Effects & interaction
-        "transform" | "transition" | "animation" | "cursor" | "backdrop-filter" | "filter"
-        | "pointer-events" | "user-select" | "aspect-ratio" | "object-fit" | "object-position"
-        | "resize" | "clip-path" => 8,
-        // Container queries & scroll
-        "container" | "container-name" | "container-type" | "scroll-snap-type"
-        | "scroll-snap-align" | "scroll-behavior" => 9,
-        // Identity
-        "id" | "class" => 10,
-        // HTML passthrough / form / accessibility
-        _ => 11,
-    }
-}
-
-/// Sort a comma-separated attribute string by category.
-fn sort_attrs(attrs_str: &str) -> String {
-    let mut parts: Vec<&str> = attrs_str.split(',').collect();
-    // Preserve order within same category (stable sort)
-    parts.sort_by_key(|part| {
-        let key = part.split_whitespace().next().unwrap_or("");
-        attr_category(key)
-    });
-    parts
-        .iter()
-        .map(|p| p.trim())
-        .filter(|p| !p.is_empty())
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-/// Count unescaped `[` and `]` outside quoted strings. Handles both `"..."` and
-/// `'...'` with `\"` / `\'` escapes. Returns (open_count, close_count).
-fn count_brackets(s: &str) -> (i32, i32) {
-    let mut open = 0i32;
-    let mut close = 0i32;
-    let mut chars = s.chars().peekable();
-    let mut in_str: Option<char> = None;
-    while let Some(c) = chars.next() {
-        match in_str {
-            Some(q) => {
-                if c == '\\' {
-                    // consume next char (escape)
-                    chars.next();
-                } else if c == q {
-                    in_str = None;
-                }
+/// Split an attribute list on top-level commas: commas inside `(...)`,
+/// `[...]`, `{...}` or `"..."` belong to the value (e.g. `rgba(0,0,0,0.1)`).
+fn split_attrs(attrs_str: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut depth = 0i32;
+    let mut in_str = false;
+    let mut start = 0;
+    for (i, c) in attrs_str.char_indices() {
+        match c {
+            '"' => in_str = !in_str,
+            '(' | '[' | '{' if !in_str => depth += 1,
+            ')' | ']' | '}' if !in_str => depth -= 1,
+            ',' if !in_str && depth <= 0 => {
+                parts.push(&attrs_str[start..i]);
+                start = i + 1;
             }
-            None => match c {
-                '"' | '\'' => in_str = Some(c),
-                '[' => open += 1,
-                ']' => close += 1,
-                _ => {}
-            },
+            _ => {}
         }
     }
-    (open, close)
+    parts.push(&attrs_str[start..]);
+    parts
+        .into_iter()
+        .map(|p| p.trim())
+        .filter(|p| !p.is_empty())
+        .collect()
+}
+
+/// Normalize spacing in a comma-separated attribute string. Attribute order
+/// is preserved: later attributes can override earlier ones (e.g.
+/// `center-x, margin 0`), so reordering could change the output.
+fn normalize_attrs(attrs_str: &str) -> String {
+    split_attrs(attrs_str).join(", ")
+}
+
+/// Bracket depth left open by the attribute lists on a (possibly joined)
+/// line. Only brackets that start an attribute list count: one at the start
+/// of the line, one right after the `@name` (or `@let name`) head, or one
+/// after a chained `> @name`. Brackets in trailing text are ignored, so
+/// `@text Use [ to open` does not start a multi-line block.
+fn open_attr_depth(line: &str) -> i32 {
+    let mut depth = 0i32;
+    let mut region_seen = false;
+    for (i, b) in line.bytes().enumerate() {
+        if depth > 0 {
+            match b {
+                b'[' => depth += 1,
+                b']' => depth -= 1,
+                _ => {}
+            }
+            continue;
+        }
+        if b != b'[' {
+            continue;
+        }
+        let before = line[..i].trim_end();
+        let starts_region = if !region_seen {
+            // Only `@name` or `@name word` may precede the first list.
+            let mut tokens = before.split_whitespace();
+            match (tokens.next(), tokens.next(), tokens.next()) {
+                (None, _, _) => true,
+                (Some(t), None, _) | (Some(t), Some(_), None) => t.starts_with('@'),
+                _ => false,
+            }
+        } else {
+            // A later list belongs to a chained element: `... > @link [`.
+            let mut tokens = before.split_whitespace().rev();
+            matches!((tokens.next(), tokens.next()), (Some(t), Some(">")) if t.starts_with('@'))
+        };
+        if starts_region {
+            region_seen = true;
+            depth = 1;
+        } else if !region_seen {
+            // Text precedes the first bracket; nothing on this line opens an
+            // attribute list.
+            return 0;
+        }
+    }
+    depth
+}
+
+/// Directives whose indented body is foreign content (CSS, JS, Markdown,
+/// JSON, raw HTML) that must not be reformatted.
+fn is_raw_body_header(code: &str) -> bool {
+    [
+        "@style",
+        "@script",
+        "@markdown",
+        "@json-ld",
+        "@head",
+        "@scope",
+        "@starting-style",
+    ]
+    .iter()
+    .any(|d| code == *d || code.strip_prefix(d).is_some_and(|r| r.starts_with(' ')))
+}
+
+/// Re-indent a verbatim line by `delta` bytes, keeping its relative
+/// indentation. Removes at most the existing leading whitespace.
+fn shift_line(line: &str, delta: i32) -> String {
+    if delta >= 0 {
+        format!("{}{}", " ".repeat(delta as usize), line)
+    } else {
+        let lead = line.len() - line.trim_start().len();
+        let remove = (delta.unsigned_abs() as usize).min(lead);
+        line[remove..].to_string()
+    }
 }
 
 /// Split a line into (code, trailing_comment). The comment starts at the first `--`
@@ -192,19 +152,115 @@ fn split_trailing_comment(line: &str) -> (&str, Option<&str>) {
     (line, None)
 }
 
-/// Format an htmlang source file with normalized indentation (2 spaces per level),
-/// sorted attributes, and cleaned-up whitespace.
+/// Format an htmlang source file with normalized indentation (2 spaces per level)
+/// and cleaned-up whitespace. Bodies of `"""` strings and raw-content directives
+/// (`@style`, `@script`, ...) are kept verbatim apart from a uniform shift.
 pub fn format(input: &str) -> String {
     let mut output = String::new();
     let mut indent_stack: Vec<i32> = vec![-1]; // sentinel
     let mut bracket_depth: i32 = 0;
     let mut bracket_base_level: usize = 0;
     let mut bracket_content = String::new();
-    let mut bracket_was_wrapped = false;
+    // Original lines of the pending multi-line bracket block, emitted as-is
+    // (re-indented) if the block holds comments, or verbatim if it never closes.
+    let mut bracket_raw: Vec<&str> = Vec::new();
+    let mut bracket_has_comment = false;
+    let mut bracket_delta: i32 = 0;
     let mut pending_comment: Option<String> = None;
+    // Inside a `"""` string: copy lines verbatim until the closing `"""`.
+    let mut in_triple_quote = false;
+    // Inside a raw-content body: (header raw indent, indent delta).
+    let mut raw_body: Option<(i32, i32)> = None;
 
     for line in input.lines() {
         let trimmed = line.trim();
+
+        if in_triple_quote {
+            output.push_str(line);
+            output.push('\n');
+            if trimmed.contains("\"\"\"") {
+                in_triple_quote = false;
+            }
+            continue;
+        }
+
+        if let Some((header_indent, delta)) = raw_body {
+            if trimmed.is_empty() {
+                output.push('\n');
+                continue;
+            }
+            let raw_indent = (line.len() - line.trim_start().len()) as i32;
+            if raw_indent > header_indent {
+                output.push_str(&shift_line(line, delta));
+                output.push('\n');
+                continue;
+            }
+            raw_body = None;
+        }
+
+        // Inside multi-line bracket continuation — collect content. Blank and
+        // comment lines are skipped by the parser here, so they must not end
+        // up in the attribute list.
+        if bracket_depth > 0 {
+            bracket_raw.push(line);
+            if trimmed.is_empty() {
+                continue;
+            }
+            if trimmed.starts_with("--") {
+                bracket_has_comment = true;
+                continue;
+            }
+            bracket_content.push(' ');
+            bracket_content.push_str(trimmed);
+            bracket_depth = open_attr_depth(&bracket_content);
+            if bracket_depth <= 0 {
+                let level = bracket_base_level;
+                let raw_lines = std::mem::take(&mut bracket_raw);
+                let full = std::mem::take(&mut bracket_content);
+                if bracket_has_comment {
+                    // Keep the block as written (re-indented) so comments stay
+                    // where the author put them.
+                    bracket_has_comment = false;
+                    pending_comment = None;
+                    for (i, raw) in raw_lines.iter().enumerate() {
+                        if i == 0 {
+                            output.push_str(&"  ".repeat(level));
+                            output.push_str(raw.trim());
+                        } else if !raw.trim().is_empty() {
+                            output.push_str(&shift_line(raw, bracket_delta));
+                        }
+                        output.push('\n');
+                    }
+                    continue;
+                }
+                let formatted = format_line_with_brackets(&full);
+                let attrs_count = count_attrs(&formatted);
+                let indented_len = level * 2 + formatted.len();
+                // The original was wrapped, so stay wrapped above WRAP_MIN_WIDTH (hysteresis).
+                let should_wrap = (indented_len > MAX_LINE_WIDTH)
+                    || (attrs_count > 1 && indented_len > WRAP_MIN_WIDTH);
+                if should_wrap && let Some(mut wrapped) = wrap_attrs(&formatted, level) {
+                    if let Some(cmt) = pending_comment.take() {
+                        if wrapped.ends_with('\n') {
+                            wrapped.pop();
+                        }
+                        wrapped.push(' ');
+                        wrapped.push_str(&cmt);
+                        wrapped.push('\n');
+                    }
+                    output.push_str(&wrapped);
+                    continue;
+                }
+                output.push_str(&"  ".repeat(level));
+                output.push_str(&formatted);
+                if let Some(cmt) = pending_comment.take() {
+                    output.push(' ');
+                    output.push_str(&cmt);
+                }
+                output.push('\n');
+            }
+            continue;
+        }
 
         // Preserve blank lines
         if trimmed.is_empty() {
@@ -226,42 +282,6 @@ pub fn format(input: &str) -> String {
             continue;
         }
 
-        // Inside multi-line bracket continuation — collect content (no comment
-        // handling here; trailing comments inside a multi-line bracket block are
-        // uncommon and intentionally preserved by the collector).
-        if bracket_depth > 0 {
-            bracket_content.push(' ');
-            bracket_content.push_str(trimmed);
-            let (open, close) = count_brackets(trimmed);
-            bracket_depth += open - close;
-            if bracket_depth <= 0 {
-                // Bracket block is complete — format it
-                let level = bracket_base_level;
-                let full = bracket_content.clone();
-                bracket_content.clear();
-                let formatted = format_line_with_brackets(&full);
-                let attrs_count = count_attrs(&formatted);
-                let indented_len = level * 2 + formatted.len();
-                // Stay wrapped if the original was wrapped (hysteresis).
-                let should_wrap = (indented_len > MAX_LINE_WIDTH)
-                    || (bracket_was_wrapped && attrs_count > 1 && indented_len > WRAP_MIN_WIDTH);
-                if should_wrap && let Some(wrapped) = wrap_attrs(&formatted, level) {
-                    output.push_str(&wrapped);
-                    bracket_was_wrapped = false;
-                    continue;
-                }
-                output.push_str(&"  ".repeat(level));
-                output.push_str(&formatted);
-                if let Some(cmt) = pending_comment.take() {
-                    output.push(' ');
-                    output.push_str(&cmt);
-                }
-                output.push('\n');
-                bracket_was_wrapped = false;
-            }
-            continue;
-        }
-
         let raw_indent = (line.len() - line.trim_start().len()) as i32;
 
         // Pop stack to find parent
@@ -270,31 +290,52 @@ pub fn format(input: &str) -> String {
         }
 
         let level = indent_stack.len() - 1;
+        let is_code = trimmed.starts_with('@') || trimmed.starts_with('[');
 
-        // Split off a trailing `-- comment` before doing bracket math / sorting.
+        // An opening `"""` without its closing partner starts a verbatim block.
+        if trimmed.matches("\"\"\"").count() % 2 == 1 {
+            output.push_str(&"  ".repeat(level));
+            output.push_str(trimmed);
+            output.push('\n');
+            indent_stack.push(raw_indent);
+            in_triple_quote = true;
+            continue;
+        }
+
+        // Split off a trailing `-- comment` before doing bracket math.
         let (code, trailing) = split_trailing_comment(trimmed);
         let code = code.trim_end();
         let trailing = trailing.map(|s| s.trim().to_string());
 
-        let (open, close) = count_brackets(code);
-        bracket_depth = open - close;
+        bracket_depth = if is_code { open_attr_depth(code) } else { 0 };
         if bracket_depth > 0 {
             // Start of multi-line bracket
             bracket_base_level = level;
             bracket_content = code.to_string();
-            bracket_was_wrapped = true;
+            bracket_raw = vec![line];
+            bracket_has_comment = false;
+            bracket_delta = (level * 2) as i32 - raw_indent;
             pending_comment = trailing;
             indent_stack.push(raw_indent);
             continue;
         }
 
-        // Single-line: format brackets inline
-        let formatted = format_line_with_brackets(code);
-        let attrs_count = count_attrs(&formatted);
+        // Only element/attribute lines have attribute lists; text lines are
+        // left untouched so bracketed prose isn't rewritten.
+        let formatted = if is_code {
+            format_line_with_brackets(code)
+        } else {
+            code.to_string()
+        };
+
+        if is_raw_body_header(code) {
+            raw_body = Some((raw_indent, (level * 2) as i32 - raw_indent));
+        }
 
         let indented_len = level * 2 + formatted.len();
         // Single-line emission — only wrap when we strictly exceed the ceiling.
-        if indented_len > MAX_LINE_WIDTH
+        if is_code
+            && indented_len > MAX_LINE_WIDTH
             && formatted.contains('[')
             && let Some(mut wrapped) = wrap_attrs(&formatted, level)
         {
@@ -311,7 +352,6 @@ pub fn format(input: &str) -> String {
             indent_stack.push(raw_indent);
             continue;
         }
-        let _ = attrs_count;
 
         output.push_str(&"  ".repeat(level));
         output.push_str(&formatted);
@@ -324,33 +364,36 @@ pub fn format(input: &str) -> String {
         indent_stack.push(raw_indent);
     }
 
+    // An attribute list that never closed: emit what we collected unchanged
+    // rather than dropping it.
+    for raw in bracket_raw {
+        output.push_str(raw);
+        output.push('\n');
+    }
+
     output
 }
 
-/// Format a single line, sorting attributes inside [...] brackets.
-fn format_line_with_brackets(line: &str) -> String {
-    // Find bracket boundaries
-    let Some(bracket_start) = line.find('[') else {
-        return line.to_string();
-    };
+/// Find the byte range of the first top-level `[...]` in `line`, ignoring
+/// brackets inside double-quoted strings.
+fn find_attr_brackets(line: &str) -> Option<(usize, usize)> {
+    let bracket_start = line.find('[')?;
     let mut depth = 0;
-    let mut bracket_end = None;
-    let mut in_str: Option<char> = None;
+    let mut in_str = false;
     let mut prev = '\0';
-    for (i, c) in line.char_indices() {
-        if let Some(q) = in_str {
-            if prev != '\\' && c == q {
-                in_str = None;
+    for (i, c) in line.char_indices().skip_while(|&(i, _)| i < bracket_start) {
+        if in_str {
+            if prev != '\\' && c == '"' {
+                in_str = false;
             }
         } else {
             match c {
-                '"' | '\'' => in_str = Some(c),
+                '"' => in_str = true,
                 '[' => depth += 1,
                 ']' => {
                     depth -= 1;
                     if depth == 0 {
-                        bracket_end = Some(i);
-                        break;
+                        return Some((bracket_start, i));
                     }
                 }
                 _ => {}
@@ -358,72 +401,34 @@ fn format_line_with_brackets(line: &str) -> String {
         }
         prev = c;
     }
-    let Some(bracket_end) = bracket_end else {
+    None
+}
+
+/// Format a single line, normalizing the attribute list inside [...] brackets.
+fn format_line_with_brackets(line: &str) -> String {
+    let Some((bracket_start, bracket_end)) = find_attr_brackets(line) else {
         return line.to_string();
     };
-
     let before = &line[..bracket_start];
     let attrs_inner = &line[bracket_start + 1..bracket_end];
     let after = &line[bracket_end + 1..];
-
-    let sorted = sort_attrs(attrs_inner);
-
-    format!("{}[{}]{}", before, sorted, after)
+    format!("{}[{}]{}", before, normalize_attrs(attrs_inner), after)
 }
 
 fn count_attrs(line: &str) -> usize {
-    let Some(start) = line.find('[') else {
-        return 0;
-    };
-    let Some(end) = line.rfind(']') else { return 0 };
-    if end <= start {
-        return 0;
+    match find_attr_brackets(line) {
+        Some((start, end)) => split_attrs(&line[start + 1..end]).len(),
+        None => 0,
     }
-    line[start + 1..end]
-        .split(',')
-        .map(|p| p.trim())
-        .filter(|p| !p.is_empty())
-        .count()
 }
 
 fn wrap_attrs(line: &str, indent_level: usize) -> Option<String> {
-    let bracket_start = line.find('[')?;
-    let mut depth = 0;
-    let mut bracket_end = None;
-    let mut in_str: Option<char> = None;
-    let mut prev = '\0';
-    for (i, c) in line.char_indices() {
-        if let Some(q) = in_str {
-            if prev != '\\' && c == q {
-                in_str = None;
-            }
-        } else {
-            match c {
-                '"' | '\'' => in_str = Some(c),
-                '[' => depth += 1,
-                ']' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        bracket_end = Some(i);
-                        break;
-                    }
-                }
-                _ => {}
-            }
-        }
-        prev = c;
-    }
-    let bracket_end = bracket_end?;
-
+    let (bracket_start, bracket_end) = find_attr_brackets(line)?;
     let before = &line[..bracket_start];
     let attrs_inner = &line[bracket_start + 1..bracket_end];
     let after = &line[bracket_end + 1..];
 
-    let parts: Vec<&str> = attrs_inner
-        .split(',')
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-        .collect();
+    let parts = split_attrs(attrs_inner);
     if parts.len() <= 1 {
         return None;
     }
@@ -491,5 +496,55 @@ mod tests {
         let src = "@el [content \"--not a comment\"]\n";
         let out = format(src);
         assert!(out.contains("\"--not a comment\""));
+    }
+
+    #[test]
+    fn apostrophe_does_not_swallow_file() {
+        let src = "@button [aria-label Don't click, padding 10] Go\n@text after\n";
+        assert_eq!(format(src), src);
+    }
+
+    #[test]
+    fn unclosed_bracket_is_kept_verbatim() {
+        let src = "@el [padding 10,\n color red\n@text x\n";
+        assert_eq!(format(src), src);
+    }
+
+    #[test]
+    fn bracket_in_text_does_not_join_lines() {
+        let src = "@column\n  Use [ to open a list\n  @text [bold] Second\n";
+        assert_eq!(format(src), src);
+    }
+
+    #[test]
+    fn commas_inside_parens_stay_in_value() {
+        let src = "@el [shadow 0 1px 3px rgba(0,0,0,0.1),bold] hi\n";
+        assert_eq!(format(src), "@el [shadow 0 1px 3px rgba(0,0,0,0.1), bold] hi\n");
+    }
+
+    #[test]
+    fn attribute_order_is_preserved() {
+        let src = "@el [center-x, margin 0, width 200]\n";
+        assert_eq!(format(src), src);
+    }
+
+    #[test]
+    fn raw_blocks_are_verbatim() {
+        let src = "@raw \"\"\"\n<pre>\n        deeply indented\n</pre>\n\"\"\"\n";
+        assert_eq!(format(src), src);
+    }
+
+    #[test]
+    fn script_body_is_not_reformatted() {
+        let src = "@el\n    @script\n        let [x,width] = f();\n";
+        assert_eq!(format(src), "@el\n  @script\n      let [x,width] = f();\n");
+    }
+
+    #[test]
+    fn comment_inside_multiline_brackets_is_idempotent() {
+        let src = "@el [\n  padding 10,\n  -- note\n  color red\n]\n  @text hi\n";
+        let once = format(src);
+        assert_eq!(once, src);
+        assert_eq!(format(&once), once);
     }
 }
