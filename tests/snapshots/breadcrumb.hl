@@ -1,4 +1,4 @@
 @breadcrumb [spacing 10]
-  @link / Home
-  @link /docs Docs
-  @text Current Page
+  @item > @link / Home
+  @item > @link /docs Docs
+  @item > @text Current Page

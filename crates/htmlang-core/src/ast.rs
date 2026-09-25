@@ -85,7 +85,6 @@ pub enum ElementKind {
     Image,
     // Elements generated in a special way
     Script,
-    Breadcrumb,
     Fragment,
     // Function bodies: placeholders for the caller's content
     Children,
@@ -106,7 +105,6 @@ impl ElementKind {
             ElementKind::Link => "link",
             ElementKind::Image => "image",
             ElementKind::Script => "script",
-            ElementKind::Breadcrumb => "breadcrumb",
             ElementKind::Fragment => "fragment",
             ElementKind::Children => "children",
             ElementKind::Slot(_) => "slot",
@@ -137,7 +135,6 @@ impl ElementKind {
             "link" => ElementKind::Link,
             "image" => ElementKind::Image,
             "script" => ElementKind::Script,
-            "breadcrumb" => ElementKind::Breadcrumb,
             "fragment" => ElementKind::Fragment,
             "children" => ElementKind::Children,
             "slot" => ElementKind::Slot(String::new()),
@@ -148,8 +145,8 @@ impl ElementKind {
     /// Every element name, for suggestions and completions.
     pub fn all_names() -> impl Iterator<Item = &'static str> {
         [
-            "row", "column", "el", "text", "paragraph", "link", "image", "script", "breadcrumb",
-            "fragment", "children", "slot",
+            "row", "column", "el", "text", "paragraph", "link", "image", "script", "fragment",
+            "children", "slot",
         ]
         .into_iter()
         .chain(TAGS.iter().map(|spec| spec.name))
@@ -266,13 +263,6 @@ pub static TAGS: &[TagSpec] = &[
     TagSpec { name: "stack", html: "div", css: "position:relative;", wraps_text: true, container: true, ..TagSpec::DEFAULT },
     TagSpec { name: "in-front", html: "div", css: "display:flex;flex-direction:column;position:absolute;inset:0;", container: true, ..TagSpec::DEFAULT },
     TagSpec { name: "behind", html: "div", css: "display:flex;flex-direction:column;position:absolute;inset:0;z-index:-1;", container: true, ..TagSpec::DEFAULT },
-    TagSpec { name: "spacer", html: "div", css: "flex:1;", void: true, ..TagSpec::DEFAULT },
-    TagSpec { name: "badge", html: "span", css: "display:inline-flex;align-items:center;padding:2px 8px;font-size:0.75rem;font-weight:600;justify-content:center;border-radius:9999px;line-height:1;", arg: TagArg::Text, ..TagSpec::DEFAULT },
-    TagSpec { name: "tag", html: "span", css: "display:inline-flex;align-items:center;padding:2px 8px;font-size:0.75rem;font-weight:600;border-radius:4px;", arg: TagArg::Text, ..TagSpec::DEFAULT },
-    TagSpec { name: "chip", html: "span", css: "display:inline-flex;align-items:center;gap:4px;padding:4px 12px;border-radius:9999px;font-size:0.875rem;border:1px solid currentColor;", arg: TagArg::Text, ..TagSpec::DEFAULT },
-    TagSpec { name: "tooltip", html: "span", css: "position:relative;cursor:help;", arg: TagArg::Text, ..TagSpec::DEFAULT },
-    TagSpec { name: "avatar", html: "div", css: "display:inline-flex;align-items:center;justify-content:center;border-radius:9999px;overflow:hidden;flex-shrink:0;", ..TagSpec::DEFAULT },
-    TagSpec { name: "carousel", html: "div", css: "display:flex;flex-direction:row;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none;", container: true, ..TagSpec::DEFAULT },
 ];
 
 /// Elements that print their argument as their text (`@text Hello`,

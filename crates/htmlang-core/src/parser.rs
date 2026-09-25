@@ -129,6 +129,22 @@ struct Parser {
     pos: usize,
 }
 
+/// The standard library (`std.hl`): components and bundles defined in
+/// htmlang itself and available in every file.
+const PRELUDE: &str = include_str!("std.hl");
+
+fn load_prelude(ctx: &mut ParseContext) {
+    let mut prelude = Parser {
+        lines: preprocess(PRELUDE),
+        pos: 0,
+    };
+    let _ = prelude.parse_children(0, ctx);
+    // Library definitions aren't the file's own: never report them unused.
+    ctx.fn_lines.clear();
+    ctx.define_lines.clear();
+    ctx.let_lines.clear();
+}
+
 pub fn parse(input: &str) -> ParseResult {
     parse_with_base(input, None)
 }
@@ -174,6 +190,7 @@ pub fn parse_with_base(input: &str, base_path: Option<&Path>) -> ParseResult {
         translations: HashMap::new(),
         active_locale: None,
     };
+    load_prelude(&mut ctx);
     let nodes = parser.parse_children(0, &mut ctx);
     validate_tree(&nodes, None, &mut ctx.diagnostics);
     check_unused(&mut ctx);
@@ -2506,11 +2523,10 @@ impl Parser {
         let rest = &content[1 + name.len()..];
         let rest = rest.trim_start();
 
-        let args = if rest.starts_with('[') {
-            let (attrs, _) = parse_attr_brackets_no_validate(rest, line_num, ctx)?;
-            attrs
+        let (args, trailing_text) = if rest.starts_with('[') {
+            parse_attr_brackets_no_validate(rest, line_num, ctx)?
         } else {
-            Vec::new()
+            (Vec::new(), rest.to_string())
         };
 
         // Clone function definition (releases borrow on ctx). If the function is
@@ -2544,25 +2560,47 @@ impl Parser {
             }
             caller_children.push(child);
         }
+        // Text after the call, as in `@badge [color red] New`, is content:
+        // it goes first among the caller's children.
+        let trailing_text = trailing_text.trim();
+        if !trailing_text.is_empty() {
+            caller_children.insert(0, Node::Text(parse_text_segments(trailing_text, ctx)));
+        }
 
         // Save variable state, inject function parameters
         let saved_vars = ctx.variables.clone();
+        let mut consumed = vec![false; args.len()];
         for (i, param) in fn_def.params.iter().enumerate() {
-            let value = args
-                .iter()
-                .find(|a| a.key == *param)
-                .and_then(|a| a.value.clone())
-                .or_else(|| {
-                    // Positional fallback, unless that argument is named for
-                    // a different parameter.
-                    args.get(i)
-                        .filter(|a| !fn_def.params.contains(&a.key))
-                        .and_then(|a| a.value.clone())
+            let named = args.iter().position(|a| a.key == *param);
+            // Positional fallback, unless that argument is named for a
+            // different parameter.
+            let positional = args
+                .get(i)
+                .filter(|a| !fn_def.params.contains(&a.key) && a.value.is_some())
+                .map(|_| i);
+            let value = named
+                .filter(|&j| args[j].value.is_some())
+                .or(positional)
+                .and_then(|j| {
+                    consumed[j] = true;
+                    args[j].value.clone()
                 })
                 .or_else(|| fn_def.defaults.get(param).cloned())
                 .unwrap_or_default();
+            if let Some(j) = named {
+                consumed[j] = true;
+            }
             ctx.variables.insert(param.clone(), value);
         }
+        // Arguments that aren't parameters are attributes for the
+        // function's root element, so a function can be styled like an
+        // element: `@badge [background red] New`.
+        let forwarded: Vec<Attribute> = args
+            .iter()
+            .zip(&consumed)
+            .filter(|&(_, &used)| !used)
+            .map(|(a, _)| a.clone())
+            .collect();
 
         // Normalize body indentation so it parses from indent 0
         let min_indent = fn_def
@@ -2595,6 +2633,32 @@ impl Parser {
         // Replace @children with caller's children and @slot with slot content
         let mut result_nodes =
             replace_children_and_slots(body_nodes, &caller_children, &slot_contents);
+
+        if !forwarded.is_empty() {
+            let mut roots = result_nodes.iter_mut().filter_map(|n| match n {
+                Node::Element(e) => Some(e),
+                _ => None,
+            });
+            match (roots.next(), roots.next()) {
+                (Some(root), None) => root.attrs.extend(forwarded),
+                _ => ctx.diagnostics.push(Diagnostic {
+                    line: line_num,
+                    column: None,
+                    message: format!(
+                        "attributes {} on @{} are not parameters, and its body has no single \
+                         root element to receive them",
+                        forwarded
+                            .iter()
+                            .map(|a| format!("'{}'", a.key))
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        name
+                    ),
+                    severity: Severity::Warning,
+                    source_line: Some(content.to_string()),
+                }),
+            }
+        }
 
         // If this is a @component, wrap output in a scoped container
         let scope_key = format!("__component_scope_{}", name);
@@ -2911,6 +2975,18 @@ const REMOVED_SYNTAX: &[(&str, &str)] = &[
     ("@opt", "use `@option`"),
 ];
 
+/// Attributes that became standard-library bundles or plain CSS.
+fn removed_attribute_hint(name: &str) -> Option<&'static str> {
+    match name {
+        "skeleton" => Some("use the `$skeleton` bundle"),
+        "no-scrollbar" => Some("use the `$no-scrollbar` bundle"),
+        "gradient" => Some("use `background linear-gradient(...)`"),
+        "animate" => Some("use `animation`"),
+        "inset-area" => Some("use `position-area`"),
+        _ => None,
+    }
+}
+
 /// If `content` starts with removed syntax, the error message for it.
 fn removed_syntax_hint(content: &str) -> Option<String> {
     let trimmed = content.trim_start();
@@ -3143,7 +3219,7 @@ const NUMERIC_OR_KEYWORD_ATTRS: &[&str] = &["width", "height"];
 const SIZE_KEYWORDS: &[&str] = &["fill", "shrink"];
 
 fn validate_attr_value(attr: &Attribute, line_num: usize, ctx: &mut ParseContext) {
-    let base_key = strip_all_prefixes(attr.key.as_str());
+    let base_key = crate::vocab::base_attribute(attr.key.as_str());
 
     if let Some(val) = &attr.value {
         if NUMERIC_ATTRS.contains(&base_key) {
@@ -3615,7 +3691,7 @@ fn parse_attr_list(
             }
 
             // Color validation for hex colors
-            if matches!(strip_all_prefixes(&attr.key), "background" | "color")
+            if matches!(crate::vocab::base_attribute(&attr.key), "background" | "color")
                 && let Some(ref val) = attr.value
                 && val.starts_with('#')
                 && !is_valid_hex_color(val)
@@ -3632,8 +3708,19 @@ fn parse_attr_list(
 
         // Warn on unknown attributes
         if validate {
-            let base_key = strip_all_prefixes(attr.key.as_str());
-            if !crate::vocab::is_known_attribute(base_key) {
+            let base_key = crate::vocab::base_attribute(attr.key.as_str());
+            if let Some(hint) = removed_attribute_hint(base_key) {
+                ctx.diagnostics.push(Diagnostic {
+                    line: line_num,
+                    column: None,
+                    message: format!(
+                        "attribute '{}' was removed: {} (run `htmlang upgrade`)",
+                        base_key, hint
+                    ),
+                    severity: Severity::Warning,
+                    source_line: None,
+                });
+            } else if !crate::vocab::is_known_attribute(base_key) {
                 let suggestion = suggest_closest(base_key, &crate::vocab::all_attributes());
                 let msg = match suggestion {
                     Some(closest) => {
@@ -4006,79 +4093,6 @@ fn evaluate_arithmetic(input: &str) -> String {
 // Post-parse validation (context-dependent warnings)
 // ---------------------------------------------------------------------------
 
-fn strip_all_prefixes(key: &str) -> &str {
-    // Strip pseudo-state prefixes
-    let key = key
-        .strip_prefix("hover:")
-        .or_else(|| key.strip_prefix("active:"))
-        .or_else(|| key.strip_prefix("focus:"))
-        .or_else(|| key.strip_prefix("focus-visible:"))
-        .or_else(|| key.strip_prefix("focus-within:"))
-        .or_else(|| key.strip_prefix("disabled:"))
-        .or_else(|| key.strip_prefix("checked:"))
-        .or_else(|| key.strip_prefix("placeholder:"))
-        .or_else(|| key.strip_prefix("first:"))
-        .or_else(|| key.strip_prefix("last:"))
-        .or_else(|| key.strip_prefix("odd:"))
-        .or_else(|| key.strip_prefix("even:"))
-        .or_else(|| key.strip_prefix("selection:"))
-        .or_else(|| key.strip_prefix("before:"))
-        .or_else(|| key.strip_prefix("after:"))
-        .or_else(|| key.strip_prefix("visited:"))
-        .or_else(|| key.strip_prefix("empty:"))
-        .or_else(|| key.strip_prefix("target:"))
-        .or_else(|| key.strip_prefix("valid:"))
-        .or_else(|| key.strip_prefix("invalid:"))
-        .or_else(|| {
-            // Handle nth:EXPR: prefix (e.g., nth:3:background -> background)
-            if let Some(rest) = key.strip_prefix("nth:") {
-                rest.find(':').map(|pos| &rest[pos + 1..])
-            } else {
-                None
-            }
-        })
-        .or_else(|| {
-            // Handle has(...): prefix (e.g., has(.active):background -> background)
-            if key.starts_with("has(") {
-                if let Some(close) = key.find("):") {
-                    Some(&key[close + 2..])
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        })
-        .unwrap_or(key);
-    // Strip responsive prefixes
-    let key = key
-        .strip_prefix("sm:")
-        .or_else(|| key.strip_prefix("md:"))
-        .or_else(|| key.strip_prefix("lg:"))
-        .or_else(|| key.strip_prefix("xl:"))
-        .or_else(|| key.strip_prefix("2xl:"))
-        .unwrap_or(key);
-    // Strip media prefixes
-    let key = key
-        .strip_prefix("dark:")
-        .or_else(|| key.strip_prefix("print:"))
-        .unwrap_or(key);
-    let key = key
-        .strip_prefix("motion-safe:")
-        .or_else(|| key.strip_prefix("motion-reduce:"))
-        .or_else(|| key.strip_prefix("landscape:"))
-        .or_else(|| key.strip_prefix("portrait:"))
-        .unwrap_or(key);
-    // Strip container query prefixes (cq-sm:, cq-md:, etc.)
-
-    (key.strip_prefix("cq-sm:")
-        .or_else(|| key.strip_prefix("cq-md:"))
-        .or_else(|| key.strip_prefix("cq-lg:"))
-        .or_else(|| key.strip_prefix("cq-xl:"))
-        .or_else(|| key.strip_prefix("cq-2xl:"))
-        .unwrap_or(key)) as _
-}
-
 /// Attributes that only make sense on container elements (@row, @column, @el).
 const CONTAINER_ONLY_ATTRS: &[&str] = &[
     "spacing",
@@ -4099,10 +4113,8 @@ fn element_kind_name(kind: &ElementKind) -> String {
 }
 
 fn is_container(kind: &ElementKind) -> bool {
-    matches!(
-        kind,
-        ElementKind::Row | ElementKind::Column | ElementKind::El | ElementKind::Breadcrumb
-    ) || kind.spec().is_some_and(|spec| spec.container)
+    matches!(kind, ElementKind::Row | ElementKind::Column | ElementKind::El)
+        || kind.spec().is_some_and(|spec| spec.container)
 }
 
 fn validate_tree(
@@ -4113,7 +4125,7 @@ fn validate_tree(
     for node in nodes {
         if let Node::Element(elem) = node {
             for attr in &elem.attrs {
-                let base = strip_all_prefixes(&attr.key);
+                let base = crate::vocab::base_attribute(&attr.key);
                 if base == "width"
                     && attr.value.as_deref() == Some("fill")
                     && !matches!(parent_kind, Some(ElementKind::Row))
@@ -4288,12 +4300,12 @@ fn validate_tree(
                 let bg_color = elem
                     .attrs
                     .iter()
-                    .find(|a| strip_all_prefixes(&a.key) == "background")
+                    .find(|a| crate::vocab::base_attribute(&a.key) == "background")
                     .and_then(|a| a.value.as_deref());
                 let fg_color = elem
                     .attrs
                     .iter()
-                    .find(|a| strip_all_prefixes(&a.key) == "color")
+                    .find(|a| crate::vocab::base_attribute(&a.key) == "color")
                     .and_then(|a| a.value.as_deref());
                 if let (Some(bg), Some(fg)) = (bg_color, fg_color)
                     && let (Some(bg_rgb), Some(fg_rgb)) = (parse_hex_rgb(bg), parse_hex_rgb(fg))

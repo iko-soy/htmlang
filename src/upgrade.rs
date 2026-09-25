@@ -79,7 +79,7 @@ pub fn upgrade(input: &str) -> Upgrade {
 
         // --- Block rewrites ---
         if attr_depth == 0
-            && let Some(block) = rewrite_block(&lines, i, &mut manual)
+            && let Some(block) = rewrite_block(&lines, i, &mut manual, &user_defined)
         {
             out.extend(block.lines);
             changes += 1;
@@ -119,13 +119,72 @@ struct Block {
 }
 
 /// Rewrites of directives that own an indented block.
-fn rewrite_block(lines: &[&str], i: usize, manual: &mut Vec<(usize, String)>) -> Option<Block> {
+fn rewrite_block(
+    lines: &[&str],
+    i: usize,
+    manual: &mut Vec<(usize, String)>,
+    user_defined: &[&str],
+) -> Option<Block> {
     let line = lines[i];
     let trimmed = line.trim();
     let indent = indent_of(line);
     let pad = " ".repeat(indent);
     let end = block_end(lines, i);
     let body = &lines[i + 1..end];
+
+    // @tooltip TEXT (text shown and used as the hover tip) →
+    // @tooltip [tip TEXT] TEXT
+    if let Some(rest) = trimmed.strip_prefix("@tooltip ")
+        && !user_defined.contains(&"tooltip")
+        && !has_attr_key(rest, "tip")
+    {
+        let (attrs, text) = match rest.strip_prefix('[') {
+            Some(after) => {
+                let close = after.find(']')?;
+                (Some(&after[..close]), after[close + 1..].trim())
+            }
+            None => (None, rest.trim()),
+        };
+        if text.is_empty() {
+            return None;
+        }
+        let attrs = match attrs {
+            Some(a) if !a.trim().is_empty() => format!("[tip {}, {}]", text, a.trim()),
+            _ => format!("[tip {}]", text),
+        };
+        let mut out = vec![format!("{pad}@tooltip {} {}", attrs, text)];
+        out.extend(body.iter().map(|l| l.to_string()));
+        return Some(Block { lines: out, end });
+    }
+
+    // @breadcrumb: each crumb is now an explicit @item
+    if (trimmed == "@breadcrumb" || trimmed.starts_with("@breadcrumb "))
+        && !user_defined.contains(&"breadcrumb")
+    {
+        let child_indent = body.iter().find(|l| !l.trim().is_empty()).map(|l| indent_of(l));
+        if body.iter().all(|l| {
+            l.trim().is_empty()
+                || Some(indent_of(l)) != child_indent
+                || l.trim().starts_with("@item")
+        }) {
+            return None;
+        }
+        let mut out = vec![line.to_string()];
+        for l in body {
+            let t = l.trim();
+            if Some(indent_of(l)) == child_indent && !t.is_empty() && !t.starts_with("@item") {
+                let wrapped = if t.starts_with('@') {
+                    format!("@item > {}", t)
+                } else {
+                    format!("@item {}", t)
+                };
+                out.push(format!("{}{}", " ".repeat(indent_of(l)), wrapped));
+            } else {
+                out.push(l.to_string());
+            }
+        }
+        return Some(Block { lines: out, end });
+    }
 
     // @switch $v / @case x [attrs] → @match $v / @case x / @let __switch [attrs]
     if let Some(rest) = trimmed.strip_prefix("@switch ") {
@@ -391,6 +450,28 @@ fn rewrite_attr_list(list: &str) -> String {
         out.push_str(ws);
         // `...$bundle` spread → `$bundle`
         let body = body.strip_prefix("...$").map_or(body.to_string(), |b| format!("${b}"));
+        // Built-in style attributes that became standard-library bundles
+        let body = match body.trim_end() {
+            "skeleton" | "no-scrollbar" => format!("${}", body),
+            _ => body,
+        };
+        // `gradient A B [ANGLE]` → the `background` it generated
+        let body = match body.strip_prefix("gradient ") {
+            Some(v) => {
+                let parts: Vec<&str> = v.split_whitespace().collect();
+                let angle = parts
+                    .get(2)
+                    .filter(|a| a.ends_with("deg") || a.ends_with("turn") || a.ends_with("rad"));
+                let gradient = match (parts.as_slice(), angle) {
+                    ([a, b, ..], Some(angle)) => format!("{},{},{}", angle, a, b),
+                    ([a, b, ..], None) => format!("{},{}", a, b),
+                    ([a], _) => format!("{},transparent", a),
+                    _ => String::new(),
+                };
+                format!("background linear-gradient({})", gradient)
+            }
+            None => body,
+        };
         // Renamed keys (keeping any `hover:` / `md:` style prefix)
         let key_end = body.find(char::is_whitespace).unwrap_or(body.len());
         let (key, value) = body.split_at(key_end);
@@ -408,6 +489,16 @@ fn rewrite_attr_list(list: &str) -> String {
         }
     }
     out
+}
+
+/// Does the attribute list at the start of `rest` (if any) have `key`?
+fn has_attr_key(rest: &str, key: &str) -> bool {
+    let Some(list) = rest.strip_prefix('[').and_then(|r| r.split(']').next()) else {
+        return false;
+    };
+    split_top_level_commas(list)
+        .iter()
+        .any(|attr| attr.split_whitespace().next() == Some(key))
 }
 
 fn split_top_level_commas(s: &str) -> Vec<&str> {
@@ -616,6 +707,25 @@ mod tests {
         assert_eq!(up("@text $name|upper|len"), "@text $name|uppercase|length");
         // Text that merely mentions a renamed word is untouched.
         assert_eq!(up("@text [bold] please animate this"), "@text [bold] please animate this");
+    }
+
+    #[test]
+    fn standard_library_migrations() {
+        assert_eq!(
+            up("@el [skeleton, height 20]\n@el [no-scrollbar]"),
+            "@el [$skeleton, height 20]\n@el [$no-scrollbar]"
+        );
+        assert_eq!(
+            up("@el [gradient #f00 #00f 45deg, padding 4]"),
+            "@el [background linear-gradient(45deg,#f00,#00f), padding 4]"
+        );
+        assert_eq!(up("@tooltip Hover me"), "@tooltip [tip Hover me] Hover me");
+        assert_eq!(up("@tooltip A tooltip text"), "@tooltip [tip A tooltip text] A tooltip text");
+        assert_eq!(up("@tooltip [tip X] Y"), "@tooltip [tip X] Y");
+        assert_eq!(
+            up("@breadcrumb\n  @link / Home\n  Current"),
+            "@breadcrumb\n  @item > @link / Home\n  @item Current"
+        );
     }
 
     #[test]

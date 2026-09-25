@@ -10,9 +10,9 @@
 /// HTML attribute).
 pub const HTMLANG_ATTRIBUTES: &[&str] = &[
     "align-bottom", "align-left", "align-right", "align-top", "backdrop-blur", "blur", "bold",
-    "center-x", "center-y", "col-span", "critical", "gap-x", "gap-y", "gradient", "grid-cols",
-    "grid-rows", "inline", "italic", "margin-x", "margin-y", "no-scrollbar", "ordered",
-    "padding-x", "padding-y", "responsive", "rounded", "row-span", "shadow", "skeleton",
+    "center-x", "center-y", "col-span", "critical", "gap-x", "gap-y", "grid-cols",
+    "grid-rows", "inline", "italic", "margin-x", "margin-y", "ordered",
+    "padding-x", "padding-y", "responsive", "rounded", "row-span", "shadow", 
     "spacing", "truncate", "underline",
 ];
 
@@ -166,6 +166,81 @@ pub fn is_length_property(name: &str) -> bool {
         || SUFFIXES.iter().any(|s| name.ends_with(s))
 }
 
+/// State prefixes and the selector each adds: `hover:color red` styles
+/// `.x:hover`, `children:flex-shrink 0` styles `.x > *`.
+pub const PSEUDO_PREFIXES: &[(&str, &str)] = &[
+    ("hover:", ":hover"),
+    ("active:", ":active"),
+    ("focus:", ":focus"),
+    ("focus-visible:", ":focus-visible"),
+    ("focus-within:", ":focus-within"),
+    ("disabled:", ":disabled"),
+    ("checked:", ":checked"),
+    ("placeholder:", "::placeholder"),
+    ("first:", ":first-child"),
+    ("last:", ":last-child"),
+    ("odd:", ":nth-child(odd)"),
+    ("even:", ":nth-child(even)"),
+    ("before:", "::before"),
+    ("after:", "::after"),
+    ("selection:", "::selection"),
+    ("visited:", ":visited"),
+    ("empty:", ":empty"),
+    ("target:", ":target"),
+    ("valid:", ":valid"),
+    ("invalid:", ":invalid"),
+    ("children:", " > *"),
+];
+
+/// Viewport-width prefixes (`md:padding 32`).
+pub const RESPONSIVE_PREFIXES: &[&str] = &["sm:", "md:", "lg:", "xl:", "2xl:"];
+pub const MEDIA_PREFIXES: &[&str] = &[
+    "dark:",
+    "print:",
+    "motion-safe:",
+    "motion-reduce:",
+    "landscape:",
+    "portrait:",
+];
+pub const CONTAINER_QUERY_PREFIXES: &[&str] = &["cq-sm:", "cq-md:", "cq-lg:", "cq-xl:", "cq-2xl:"];
+
+/// Does `key` carry any state, media, responsive or container prefix?
+pub fn is_prefixed(key: &str) -> bool {
+    PSEUDO_PREFIXES.iter().any(|&(p, _)| key.starts_with(p))
+        || RESPONSIVE_PREFIXES.iter().any(|p| key.starts_with(p))
+        || MEDIA_PREFIXES.iter().any(|p| key.starts_with(p))
+        || CONTAINER_QUERY_PREFIXES.iter().any(|p| key.starts_with(p))
+        || key.starts_with("nth:")
+        || key.starts_with("has(")
+}
+
+/// The attribute name without its prefixes: `hover:md:background` →
+/// `background`, `nth:2n:color` → `color`, `has(.x):padding` → `padding`.
+pub fn base_attribute(key: &str) -> &str {
+    let mut key = key;
+    loop {
+        let stripped = PSEUDO_PREFIXES
+            .iter()
+            .map(|&(p, _)| p)
+            .chain(RESPONSIVE_PREFIXES.iter().copied())
+            .chain(MEDIA_PREFIXES.iter().copied())
+            .chain(CONTAINER_QUERY_PREFIXES.iter().copied())
+            .find_map(|p| key.strip_prefix(p))
+            .or_else(|| {
+                let rest = key.strip_prefix("nth:")?;
+                rest.find(':').map(|pos| &rest[pos + 1..])
+            })
+            .or_else(|| {
+                let rest = key.strip_prefix("has(")?;
+                rest.find("):").map(|pos| &rest[pos + 2..])
+            });
+        match stripped {
+            Some(rest) => key = rest,
+            None => return key,
+        }
+    }
+}
+
 pub fn is_css_property(name: &str) -> bool {
     CSS_PROPERTIES.binary_search(&name).is_ok()
 }
@@ -195,6 +270,15 @@ pub fn all_attributes() -> Vec<&'static str> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn base_attribute_strips_every_prefix() {
+        assert_eq!(super::base_attribute("hover:md:background"), "background");
+        assert_eq!(super::base_attribute("nth:2n:color"), "color");
+        assert_eq!(super::base_attribute("has(.a):dark:padding"), "padding");
+        assert_eq!(super::base_attribute("children:flex-shrink"), "flex-shrink");
+        assert_eq!(super::base_attribute("width"), "width");
+    }
+
     #[test]
     fn css_properties_are_sorted() {
         assert!(super::CSS_PROPERTIES.windows(2).all(|w| w[0] < w[1]));

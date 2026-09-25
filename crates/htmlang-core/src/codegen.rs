@@ -1224,7 +1224,7 @@ fn build_element_css(doc: &Document, styles: &StyleCollector, dev: bool) -> Stri
         }
     }
 
-    // Auto-inject skeleton keyframe if skeleton attribute is used
+    // Keyframes for the standard library's `$skeleton` bundle, when used
     if element_css.contains("hl-skeleton") {
         if dev {
             element_css.push_str("@keyframes hl-skeleton {\n  0% { background-position: 200% 0; }\n  100% { background-position: -200% 0; }\n}\n");
@@ -1460,44 +1460,6 @@ fn generate_element(
         out.push_str(ctx.nl());
         return;
     }
-    // @breadcrumb generates semantic <nav aria-label="breadcrumb"><ol>...</ol></nav>
-    if elem.kind == ElementKind::Breadcrumb {
-        let gen_class = compute_class(&elem.attrs, &elem.kind, parent_kind, styles, false);
-        let (id, user_class) = extract_id_class(&elem.attrs);
-        out.push_str(&ctx.indent());
-        out.push_str("<nav aria-label=\"breadcrumb\"");
-        emit_class_attr(out, gen_class.as_deref(), user_class.as_deref());
-        if let Some(id) = id {
-            out.push_str(" id=\"");
-            out.push_str(&html_escape(&id));
-            out.push('"');
-        }
-        out.push('>');
-        out.push_str(ctx.nl());
-        ctx.depth += 1;
-        out.push_str(&ctx.indent());
-        out.push_str("<ol>");
-        out.push_str(ctx.nl());
-        ctx.depth += 1;
-        for child in &elem.children {
-            out.push_str(&ctx.indent());
-            out.push_str("<li>");
-            let mut buf = String::new();
-            generate_node(child, Some(&elem.kind), &mut buf, styles, ctx);
-            out.push_str(buf.trim());
-            out.push_str("</li>");
-            out.push_str(ctx.nl());
-        }
-        ctx.depth -= 1;
-        out.push_str(&ctx.indent());
-        out.push_str("</ol>");
-        out.push_str(ctx.nl());
-        ctx.depth -= 1;
-        out.push_str(&ctx.indent());
-        out.push_str("</nav>");
-        out.push_str(ctx.nl());
-        return;
-    }
     if elem.kind == ElementKind::Children {
         return;
     }
@@ -1582,15 +1544,6 @@ fn generate_element(
     }
 
     emit_argument_attr(out, elem);
-
-    // Tooltip title
-    if elem.kind.is_tag("tooltip")
-        && let Some(text) = &elem.argument
-    {
-        out.push_str(" title=\"");
-        out.push_str(&html_escape(text));
-        out.push('"');
-    }
 
     // Critical CSS: inline styles directly instead of using a class
     let is_critical = elem.attrs.iter().any(|a| a.key == "critical");
@@ -1863,19 +1816,11 @@ fn compute_class(
 
     // Collect pseudo-state overrides
     let mut pseudo = Vec::new();
-    for &(prefix, selector) in PSEUDO_PREFIXES {
+    for &(prefix, selector) in crate::vocab::PSEUDO_PREFIXES {
         let css = attrs_to_css(attrs, prefix, kind, parent_kind, has_overlay_children);
         if !css.is_empty() {
             pseudo.push((selector.to_string(), css));
         }
-    }
-
-    // Auto-add ::-webkit-scrollbar pseudo for no-scrollbar attribute
-    if attrs.iter().any(|a| a.key == "no-scrollbar") {
-        pseudo.push((
-            "::-webkit-scrollbar".to_string(),
-            "display:none;".to_string(),
-        ));
     }
 
     // Collect nth:EXPR: dynamic pseudo selectors
@@ -2089,48 +2034,6 @@ fn emit_class_attr(out: &mut String, gen_class: Option<&str>, user_class: Option
 // ---------------------------------------------------------------------------
 
 /// (htmlang prefix, CSS selector suffix)
-const PSEUDO_PREFIXES: &[(&str, &str)] = &[
-    ("hover:", ":hover"),
-    ("active:", ":active"),
-    ("focus:", ":focus"),
-    ("focus-visible:", ":focus-visible"),
-    ("focus-within:", ":focus-within"),
-    ("disabled:", ":disabled"),
-    ("checked:", ":checked"),
-    ("placeholder:", "::placeholder"),
-    ("first:", ":first-child"),
-    ("last:", ":last-child"),
-    ("odd:", ":nth-child(odd)"),
-    ("even:", ":nth-child(even)"),
-    ("before:", "::before"),
-    ("after:", "::after"),
-    ("selection:", "::selection"),
-    ("visited:", ":visited"),
-    ("empty:", ":empty"),
-    ("target:", ":target"),
-    ("valid:", ":valid"),
-    ("invalid:", ":invalid"),
-];
-const RESPONSIVE_PREFIXES: &[&str] = &["sm:", "md:", "lg:", "xl:", "2xl:"];
-const MEDIA_PREFIXES: &[&str] = &[
-    "dark:",
-    "print:",
-    "motion-safe:",
-    "motion-reduce:",
-    "landscape:",
-    "portrait:",
-];
-const CONTAINER_QUERY_PREFIXES: &[&str] = &["cq-sm:", "cq-md:", "cq-lg:", "cq-xl:", "cq-2xl:"];
-
-fn is_prefixed_attr(key: &str) -> bool {
-    PSEUDO_PREFIXES.iter().any(|&(p, _)| key.starts_with(p))
-        || RESPONSIVE_PREFIXES.iter().any(|p| key.starts_with(p))
-        || MEDIA_PREFIXES.iter().any(|p| key.starts_with(p))
-        || CONTAINER_QUERY_PREFIXES.iter().any(|p| key.starts_with(p))
-        || key.starts_with("nth:")
-        || key.starts_with("has(")
-}
-
 /// `display:flex;flex-direction:column;` — base layout for `@el` and every
 /// semantic wrapper that behaves like a column.
 const FLEX_COLUMN: &str = "display:flex;flex-direction:column;";
@@ -2161,16 +2064,12 @@ fn attrs_to_css(
             ElementKind::Tag(spec) => css.push_str(spec.css),
             _ => {}
         }
-        // Children of @carousel get scroll-snap-align and flex-shrink
-        if parent_kind.is_some_and(|k| k.is_tag("carousel")) {
-            css.push_str("scroll-snap-align:start;flex-shrink:0;");
-        }
     }
 
     for attr in attrs {
         // Determine the effective key for this pass
         let effective_key = if state_prefix.is_empty() {
-            if is_prefixed_attr(&attr.key) {
+            if crate::vocab::is_prefixed(&attr.key) {
                 continue;
             }
             attr.key.as_str()
@@ -2740,41 +2639,6 @@ fn attrs_to_css(
             "backdrop-blur" => {
                 if let Some(v) = val {
                     push_css(&mut css, "backdrop-filter", &format!("blur({})", css_px(v)));
-                }
-            }
-            "no-scrollbar" => {
-                push_css(&mut css, "scrollbar-width", "none");
-                push_css(&mut css, "-ms-overflow-style", "none");
-            }
-            "skeleton" => {
-                push_css(
-                    &mut css,
-                    "background",
-                    "linear-gradient(90deg,#e5e7eb 25%,#f3f4f6 50%,#e5e7eb 75%)",
-                );
-                push_css(&mut css, "background-size", "200% 100%");
-                push_css(
-                    &mut css,
-                    "animation",
-                    "hl-skeleton 1.5s ease-in-out infinite",
-                );
-            }
-            "gradient" => {
-                if let Some(v) = val {
-                    // Parse: "from to [angle]" or "color1 color2 [angle]"
-                    let parts: Vec<&str> = v.split_whitespace().collect();
-                    let bg = if parts.len() >= 3
-                        && (parts[2].ends_with("deg")
-                            || parts[2].ends_with("turn")
-                            || parts[2].ends_with("rad"))
-                    {
-                        format!("linear-gradient({},{},{})", parts[2], parts[0], parts[1])
-                    } else if parts.len() >= 2 {
-                        format!("linear-gradient({},{})", parts[0], parts[1])
-                    } else {
-                        format!("linear-gradient({},transparent)", parts[0])
-                    };
-                    push_css(&mut css, "background", &bg);
                 }
             }
 

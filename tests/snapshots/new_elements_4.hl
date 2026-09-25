@@ -29,7 +29,7 @@
 
 -- Tooltip element
 @row [spacing 16]
-  @tooltip Hover me for info
+  @tooltip [tip Hover me for info] Hover me for info
     @text [underline] Helpful text
-  @tooltip This is a tooltip message
+  @tooltip [tip This is a tooltip message] This is a tooltip message
     @text [bold] Important

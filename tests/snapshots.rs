@@ -2724,7 +2724,7 @@ fn element_badge() {
 
 #[test]
 fn element_tooltip() {
-    let output = compile("@page T\n@tooltip Hover for info\n  @text Help");
+    let output = compile("@page T\n@tooltip [tip Hover for info]\n  @text Help");
     assert!(
         output.contains("title=\"Hover for info\""),
         "tooltip should have title attr: {}",
@@ -3109,7 +3109,7 @@ fn test_css_shorthands_output() {
         html
     );
 
-    let result = htmlang::parser::parse("@el [no-scrollbar] Content");
+    let result = htmlang::parser::parse("@el [$no-scrollbar] Content");
     let html = htmlang::codegen::generate(&result.document);
     assert!(
         html.contains("scrollbar-width:none"),
@@ -3117,7 +3117,7 @@ fn test_css_shorthands_output() {
         html
     );
 
-    let result = htmlang::parser::parse("@el [skeleton, width 100, height 20] Content");
+    let result = htmlang::parser::parse("@el [$skeleton, width 100, height 20] Content");
     let html = htmlang::codegen::generate(&result.document);
     assert!(
         html.contains("hl-skeleton"),
@@ -3130,20 +3130,15 @@ fn test_css_shorthands_output() {
         html
     );
 
+    // `gradient` became plain CSS: the compiler points to the replacement.
     let result = htmlang::parser::parse("@el [gradient #fff #000] Content");
-    let html = htmlang::codegen::generate(&result.document);
     assert!(
-        html.contains("linear-gradient(#fff,#000)"),
-        "gradient should work, got: {}",
-        html
-    );
-
-    let result = htmlang::parser::parse("@el [gradient #fff #000 45deg] Content");
-    let html = htmlang::codegen::generate(&result.document);
-    assert!(
-        html.contains("linear-gradient(45deg,#fff,#000)"),
-        "gradient with angle should work, got: {}",
-        html
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("linear-gradient") && d.message.contains("upgrade")),
+        "gradient should point to linear-gradient: {:?}",
+        result.diagnostics
     );
 }
 
@@ -3633,14 +3628,10 @@ fn search_element() {
 
 #[test]
 fn breadcrumb_generates_nav_ol() {
-    let output = compile("@breadcrumb\n  @text Home\n  @text About");
-    assert!(
-        output.contains("<nav aria-label=\"breadcrumb\">"),
-        "nav: {}",
-        output
-    );
-    assert!(output.contains("<ol>"), "ol: {}", output);
-    assert!(output.contains("<li>"), "li: {}", output);
+    let output = compile("@breadcrumb\n  @item > @text Home\n  @item About");
+    assert!(output.contains("aria-label=\"breadcrumb\""), "nav: {}", output);
+    assert!(output.contains("<ol class="), "ol: {}", output);
+    assert!(output.contains("<li class="), "li: {}", output);
 }
 
 #[test]
@@ -5326,4 +5317,57 @@ fn markdown_file_missing_reports_error() {
         "expected missing file error, got: {:?}",
         result.diagnostics
     );
+}
+
+// ---------------------------------------------------------------------------
+// Standard library and function calls behaving like elements
+// ---------------------------------------------------------------------------
+
+#[test]
+fn function_call_text_becomes_children() {
+    let output = compile("@let box\n  @el [padding 4]\n    @children\n@box Hello {@text [bold] world}");
+    assert!(output.contains("Hello"), "{}", output);
+    assert!(output.contains(">world</span>"), "{}", output);
+}
+
+#[test]
+fn function_call_extra_attributes_style_the_root() {
+    let output = compile("@let box $label\n  @el [padding 4] $label\n@box [label Hi, background red, hover:color blue]");
+    assert!(output.contains("background:red"), "{}", output);
+    assert!(output.contains(":hover{color:blue"), "{}", output);
+    assert!(output.contains("Hi"), "{}", output);
+}
+
+#[test]
+fn function_call_extra_attributes_need_a_single_root() {
+    let diags = parse_diagnostics("@let two\n  @text A\n  @text B\n@two [background red]");
+    assert!(
+        diags.iter().any(|d| d.message.contains("no single root element")),
+        "{:?}",
+        diags
+    );
+}
+
+#[test]
+fn children_prefix_styles_direct_children() {
+    let output = compile("@row [children:flex-shrink 0]\n  @el A");
+    assert!(output.contains(" > *{flex-shrink:0;}"), "{}", output);
+}
+
+#[test]
+fn standard_library_components_compile_cleanly() {
+    let src = "@badge [background red] 3\n@tag v2\n@chip Rust\n@avatar\n  AB\n@spacer\n@tooltip [tip More] Hover\n@carousel\n  @el A\n@breadcrumb\n  @item Home\n@el [$skeleton]\n@el [$no-scrollbar]";
+    let diags = parse_diagnostics(src);
+    assert!(diags.is_empty(), "standard library produced diagnostics: {:?}", diags);
+    let output = compile(src);
+    assert!(output.contains("<span class=\"a\">3</span>"), "{}", output);
+    assert!(output.contains("title=\"More\""), "{}", output);
+    assert!(output.contains("@keyframes hl-skeleton"), "{}", output);
+}
+
+#[test]
+fn own_definition_overrides_standard_library() {
+    let output = compile("@let badge $label\n  @text [color green] $label\n@badge [label Mine]");
+    assert!(output.contains("color:green"), "{}", output);
+    assert!(!output.contains("border-radius:9999px"), "{}", output);
 }

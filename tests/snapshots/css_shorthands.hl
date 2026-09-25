@@ -17,17 +17,17 @@
     Frosted glass effect
 
   -- No scrollbar
-  @el [overflow-x auto, no-scrollbar, max-width 300]
+  @el [overflow-x auto, $no-scrollbar, max-width 300]
     @row [spacing 20]
       @el [width 200, padding 20] Item 1
       @el [width 200, padding 20] Item 2
       @el [width 200, padding 20] Item 3
 
   -- Skeleton
-  @el [width fill, height 20, rounded 4, skeleton]
+  @el [width fill, height 20, rounded 4, $skeleton]
 
   -- Gradient
-  @el [gradient #3b82f6 #8b5cf6, padding 20, rounded 8]
+  @el [background linear-gradient(#3b82f6,#8b5cf6), padding 20, rounded 8]
     @text [color white] Gradient background
-  @el [gradient #ff6b6b #feca57 45deg, padding 20, rounded 8]
+  @el [background linear-gradient(45deg,#ff6b6b,#feca57), padding 20, rounded 8]
     @text [color white] Angled gradient
