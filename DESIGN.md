@@ -30,7 +30,7 @@ Children are indented under their parent. Attributes are comma-separated inside
   padding 20,
   background white,
   rounded 8,
-  shadow 0 2px 4px rgba(0,0,0,0.1)
+  box-shadow 0 2px 4px rgba(0,0,0,0.1)
 ]
   Content
 ```
@@ -164,7 +164,7 @@ Use them like elements; your own `@let` with the same name takes precedence.
 | `@tooltip [tip TEXT]` | Text that shows `TEXT` when hovered |
 | `@carousel` | Horizontally scrolling row that snaps to each child |
 | `@breadcrumb` | Breadcrumb trail of `@item`s |
-| `$skeleton`, `$no-scrollbar` | Attribute bundles: loading placeholder, hidden scrollbars |
+| `$skeleton`, `$truncate`, `$no-scrollbar` | Attribute bundles: loading placeholder, one-line ellipsis, hidden scrollbars |
 
 ```
 @row [spacing 8, align-items center]
@@ -184,7 +184,7 @@ Use them like elements; your own `@let` with the same name takes precedence.
 
 | Attribute | Effect |
 |---|---|
-| `spacing N` | Gap between children (also `gap-x N`, `gap-y N`) |
+| `spacing N` | Gap between children |
 | `padding N` / `padding Y X` / `padding T R B L` | Padding (also `padding-x`, `padding-y`) |
 | `margin ...` | Margin, same forms as padding (also `margin-x`, `margin-y`) |
 | `width fill` / `width N` / `width shrink` | Take remaining space, exact size, or fit content |
@@ -201,12 +201,10 @@ Use them like elements; your own `@let` with the same name takes precedence.
 |---|---|
 | `border N COLOR` (also `border-top` etc.) | Solid border |
 | `rounded N` | Border radius |
-| `shadow VALUE` | Box shadow |
 | `bold`, `italic`, `underline` | Text style |
 | `size N` | Font size |
 | `font NAME` | Font family |
-| `truncate`, `line-clamp N` | Cut text off with an ellipsis |
-| `blur N`, `backdrop-blur N` | Blur filters |
+| `line-clamp N` | Cut text off after N lines |
 
 **Any standard CSS property** can also be used as an attribute, with the same
 name and value: `background red`, `opacity 0.5`, `cursor pointer`,

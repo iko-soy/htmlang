@@ -1532,24 +1532,7 @@ fn generate_element(
 
     emit_argument_attr(out, elem);
 
-    // Critical CSS: inline styles directly instead of using a class
-    let is_critical = elem.attrs.iter().any(|a| a.key == "critical");
-    if is_critical {
-        let inline_css = attrs_to_css(&elem.attrs, "", &elem.kind, parent_kind, overlay_children);
-        if !inline_css.is_empty() {
-            out.push_str(" style=\"");
-            out.push_str(&html_escape(&inline_css));
-            out.push('"');
-        }
-        // Still use class for non-base styles (pseudo, responsive, etc.)
-        if gen_class.as_deref().is_some_and(|c| !c.is_empty()) {
-            emit_class_attr(out, gen_class.as_deref(), user_class.as_deref());
-        } else if let Some(ref uc) = user_class {
-            emit_class_attr(out, None, Some(uc));
-        }
-    } else {
-        emit_class_attr(out, gen_class.as_deref(), user_class.as_deref());
-    }
+    emit_class_attr(out, gen_class.as_deref(), user_class.as_deref());
 
     if let Some(id) = id {
         out.push_str(" id=\"");
@@ -2308,24 +2291,9 @@ fn attrs_to_css(
             "hidden" => push_css(&mut css, "display", "none"),
 
             // Effects
-            "shadow" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "box-shadow", v);
-                }
-            }
 
             // Flow
             "wrap" => push_css(&mut css, "flex-wrap", "wrap"),
-            "gap-x" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "column-gap", &css_px(v));
-                }
-            }
-            "gap-y" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "row-gap", &css_px(v));
-                }
-            }
 
             // Grid
             "grid" => {
@@ -2608,11 +2576,6 @@ fn attrs_to_css(
             }
 
             // --- CSS Shorthands ---
-            "truncate" => {
-                push_css(&mut css, "overflow", "hidden");
-                push_css(&mut css, "text-overflow", "ellipsis");
-                push_css(&mut css, "white-space", "nowrap");
-            }
             "line-clamp" => {
                 if let Some(v) = val {
                     push_css(&mut css, "display", "-webkit-box");
@@ -2621,19 +2584,6 @@ fn attrs_to_css(
                     push_css(&mut css, "overflow", "hidden");
                 }
             }
-            "blur" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "filter", &format!("blur({})", css_px(v)));
-                }
-            }
-            "backdrop-blur" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "backdrop-filter", &format!("blur({})", css_px(v)));
-                }
-            }
-
-            // Critical CSS hint — not CSS, handled elsewhere
-            "critical" => {}
 
             // Any other standard CSS property is copied through, with `px`
             // added to bare numbers where the property takes a length.

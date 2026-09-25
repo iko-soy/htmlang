@@ -30,6 +30,9 @@ const ATTR_RENAMES: &[(&str, &str)] = &[
     ("animate", "animation"),
     ("inset-area", "position-area"),
     ("align-center", "center-x"),
+    ("gap-x", "column-gap"),
+    ("gap-y", "row-gap"),
+    ("shadow", "box-shadow"),
 ];
 
 /// Variable filter aliases (`$x|upper`) and their canonical names.
@@ -718,20 +721,47 @@ fn rewrite_attr_list(list: &str, element_attrs: bool) -> String {
     }
     let mut out = String::with_capacity(list.len());
     let mut first = true;
+    let mut dropped_leading = false;
     for segment in split_top_level_commas(list) {
-        if !first {
-            out.push(',');
+        // `critical` (inline styles) was removed without a replacement
+        if segment.trim() == "critical" {
+            dropped_leading |= first;
+            continue;
         }
-        first = false;
         let lead = segment.len() - segment.trim_start().len();
         let (ws, body) = segment.split_at(lead);
-        out.push_str(ws);
+        if !first {
+            out.push(',');
+            out.push_str(ws);
+        } else if !dropped_leading || ws.contains('\n') {
+            out.push_str(ws);
+        }
+        first = false;
         // `...$bundle` spread → `$bundle`
         let body = body.strip_prefix("...$").map_or(body.to_string(), |b| format!("${b}"));
         // Built-in style attributes that became standard-library bundles
         let body = match body.trim_end() {
-            "skeleton" | "no-scrollbar" => format!("${}", body),
+            "skeleton" | "no-scrollbar" | "truncate" => format!("${}", body),
             _ => body,
+        };
+        // `blur N` / `backdrop-blur N` → the filter they generated
+        let body = {
+            let (key, value) = body.split_once(' ').unwrap_or((&body, ""));
+            let (prefix, base) = key.rsplit_once(':').map_or(("", key), |(p, b)| (p, b));
+            let prefix = if prefix.is_empty() { String::new() } else { format!("{prefix}:") };
+            let px = |v: &str| {
+                let v = v.trim();
+                if !v.is_empty() && v.parse::<f64>().is_ok() && v != "0" {
+                    format!("{v}px")
+                } else {
+                    v.to_string()
+                }
+            };
+            match base {
+                "blur" => format!("{prefix}filter blur({})", px(value)),
+                "backdrop-blur" => format!("{prefix}backdrop-filter blur({})", px(value)),
+                _ => body.clone(),
+            }
         };
         // `gradient A B [ANGLE]` → the `background` it generated
         let body = match body.strip_prefix("gradient ") {
@@ -1093,6 +1123,15 @@ mod tests {
         );
         assert_eq!(upgrade("@translations\n  en:\n    hi Hello\n  fr:\n    hi Salut").manual.len(), 1);
         assert_eq!(upgrade("@fetch $d http://x").manual.len(), 1);
+    }
+
+    #[test]
+    fn css_alias_attributes() {
+        assert_eq!(
+            up("@el [gap-x 4, hover:shadow 0 1px red, blur 4, backdrop-blur 2px, truncate, critical]"),
+            "@el [column-gap 4, hover:box-shadow 0 1px red, filter blur(4px), backdrop-filter blur(2px), $truncate]"
+        );
+        assert_eq!(up("@el [critical, padding 4]"), "@el [padding 4]");
     }
 
     #[test]

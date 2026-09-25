@@ -2633,6 +2633,13 @@ fn removed_attribute_hint(name: &str) -> Option<&'static str> {
         "gradient" => Some("use `background linear-gradient(...)`"),
         "animate" => Some("use `animation`"),
         "inset-area" => Some("use `position-area`"),
+        "gap-x" => Some("use `column-gap`"),
+        "gap-y" => Some("use `row-gap`"),
+        "shadow" => Some("use `box-shadow`"),
+        "blur" => Some("use `filter blur(...)`"),
+        "backdrop-blur" => Some("use `backdrop-filter blur(...)`"),
+        "truncate" => Some("use the `$truncate` bundle"),
+        "critical" => Some("remove it"),
         _ => None,
     }
 }
@@ -2841,8 +2848,8 @@ const NUMERIC_ATTRS: &[&str] = &[
     "max-height",
     "rounded",
     "size",
-    "gap-x",
-    "gap-y",
+    "column-gap",
+    "row-gap",
     "top",
     "right",
     "bottom",
@@ -3664,8 +3671,6 @@ fn split_if_args(input: &str) -> Vec<&str> {
 const CONTAINER_ONLY_ATTRS: &[&str] = &[
     "spacing",
     "gap",
-    "gap-x",
-    "gap-y",
     "wrap",
     "grid",
     "grid-cols",

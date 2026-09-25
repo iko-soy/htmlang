@@ -10,10 +10,10 @@
 /// htmlang's own attributes (those that are neither a CSS property nor an
 /// HTML attribute).
 pub const HTMLANG_ATTRIBUTES: &[&str] = &[
-    "align-bottom", "align-left", "align-right", "align-top", "backdrop-blur", "blur", "bold",
-    "center-x", "center-y", "col-span", "critical", "gap-x", "gap-y", "grid-cols", "grid-rows",
+    "align-bottom", "align-left", "align-right", "align-top", "bold",
+    "center-x", "center-y", "col-span", "grid-cols", "grid-rows",
     "hidden", "inline", "italic", "margin-x", "margin-y", "ordered", "padding-x", "padding-y",
-    "responsive", "rounded", "row-span", "shadow", "size", "spacing", "truncate", "underline",
+    "responsive", "rounded", "row-span", "size", "spacing", "underline",
     "wrap",
 ];
 

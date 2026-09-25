@@ -3070,7 +3070,7 @@ fn test_new_elements_parse() {
 
 #[test]
 fn test_css_shorthands_output() {
-    let result = htmlang::parser::parse("@text [truncate] Hello");
+    let result = htmlang::parser::parse("@text [$truncate] Hello");
     let html = htmlang::codegen::generate(&result.document);
     assert!(
         html.contains("text-overflow:ellipsis"),
@@ -3090,7 +3090,7 @@ fn test_css_shorthands_output() {
         html
     );
 
-    let result = htmlang::parser::parse("@el [blur 4] Content");
+    let result = htmlang::parser::parse("@el [filter blur(4px)] Content");
     let html = htmlang::codegen::generate(&result.document);
     assert!(
         html.contains("filter:blur(4px)"),
@@ -3098,7 +3098,7 @@ fn test_css_shorthands_output() {
         html
     );
 
-    let result = htmlang::parser::parse("@el [backdrop-blur 10] Content");
+    let result = htmlang::parser::parse("@el [backdrop-filter blur(10px)] Content");
     let html = htmlang::codegen::generate(&result.document);
     assert!(
         html.contains("backdrop-filter:blur(10px)"),
@@ -3538,7 +3538,7 @@ fn fn_named_slot_default() {
 #[test]
 fn no_warning_new_attrs_batch6() {
     let diags = parse_diagnostics(
-        "@el [grid-template-areas \"a b\", grid-area a, view-transition-name hero, animation fade 1s, critical]",
+        "@el [grid-template-areas \"a b\", grid-area a, view-transition-name hero, animation fade 1s]",
     );
     assert!(
         !diags
@@ -4111,9 +4111,13 @@ fn minified_strips_comments() {
 // -----------------------------------------------------------------------
 
 #[test]
-fn critical_attr_inlines_styles() {
-    let html = compile("@el [critical, padding 20, background red]\n  test\n");
-    assert!(html.contains("style=\""));
+fn critical_attr_was_removed() {
+    let diags = parse_diagnostics("@el [critical, padding 20]\n  test\n");
+    assert!(
+        diags.iter().any(|d| d.message.contains("'critical' was removed")),
+        "{:?}",
+        diags
+    );
 }
 
 // -----------------------------------------------------------------------

@@ -1,8 +1,8 @@
 @page Attributes
 @el [width 200, height 100, padding 10 20, background #fff, color #333, border 1 #ccc, rounded 8, opacity 0.9]
   @text [bold, italic, underline, size 16, font monospace] Styled
-@row [wrap, gap-x 10, gap-y 5, spacing 8]
+@row [wrap, column-gap 10, row-gap 5, spacing 8]
   @el [min-width 50, max-width 200, min-height 30, max-height 100]
 @column [overflow hidden, position relative, z-index 10]
   @text [text-align center, line-height 1.5] Aligned
-@el [shadow 0 2px 4px rgba(0,0,0,0.1), transition all 0.2s, cursor pointer]
+@el [box-shadow 0 2px 4px rgba(0,0,0,0.1), transition all 0.2s, cursor pointer]

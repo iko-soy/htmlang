@@ -28,7 +28,7 @@
     @text $label
 
 @let card $title
-  @el [background white, dark:background #1e293b, rounded $--radius, padding $--gap, border 1 $--border, dark:border 1 #334155, hover:shadow 0 4 12 rgba(0,0,0,0.1), transition all 0.2s, animation fade-in 0.3s ease]
+  @el [background white, dark:background #1e293b, rounded $--radius, padding $--gap, border 1 $--border, dark:border 1 #334155, hover:box-shadow 0 4 12 rgba(0,0,0,0.1), transition all 0.2s, animation fade-in 0.3s ease]
     @text [bold, size 18, color $--dark, dark:color white] $title
     @el [margin-top 8]
       @children

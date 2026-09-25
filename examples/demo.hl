@@ -22,13 +22,13 @@
   background white,
   rounded $base,
   border 1 #e5e7eb,
-  shadow 0 1px 3px rgba(0,0,0,0.05)
+  box-shadow 0 1px 3px rgba(0,0,0,0.05)
 ]
 
 -- Composable style group (used with spread)
 @let interactive [
   cursor pointer,
-  hover:shadow 0 4px 12px rgba(0,0,0,0.08),
+  hover:box-shadow 0 4px 12px rgba(0,0,0,0.08),
   transition all 0.2s ease
 ]
 

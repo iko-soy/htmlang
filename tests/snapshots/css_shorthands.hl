@@ -2,18 +2,18 @@
 
 @column [spacing 20]
   -- Truncate
-  @text [max-width 200, truncate] This text will be truncated with an ellipsis
+  @text [max-width 200, $truncate] This text will be truncated with an ellipsis
 
   -- Line clamp
   @paragraph [line-clamp 3]
     This is a long paragraph that spans multiple lines and should be clamped at three lines.
 
   -- Blur
-  @el [blur 4, padding 20]
+  @el [filter blur(4px), padding 20]
     Blurred content
 
   -- Backdrop blur
-  @el [backdrop-blur 10, padding 20, background rgba(255,255,255,0.5)]
+  @el [backdrop-filter blur(10px), padding 20, background rgba(255,255,255,0.5)]
     Frosted glass effect
 
   -- No scrollbar
