@@ -1,10 +1,10 @@
 @page Arithmetic
 
 @let base 10
-@let double $base * 2
-@let sum $base + 5
-@let diff 100 - 30
-@let half 200 / 4
+@let double = $base * 2
+@let sum = $base + 5
+@let diff = 100 - 30
+@let half = 200 / 4
 
 @el [width $double]
   @text double is $double

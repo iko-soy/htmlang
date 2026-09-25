@@ -1021,7 +1021,7 @@ fn comparison_operators_starts_with() {
 #[test]
 fn string_concat_operator() {
     let output = compile(
-        "@page T\n@let first Hello\n@let last World\n@let full $first ~ \" \" ~ $last\n@text $full",
+        "@page T\n@let first Hello\n@let last World\n@let full = $first ~ \" \" ~ $last\n@text $full",
     );
     assert!(output.contains("Hello World"), "got: {}", output);
 }
@@ -2109,19 +2109,19 @@ fn og_tags_in_output() {
 
 #[test]
 fn let_arithmetic_multiply() {
-    let output = compile("@page T\n@let x 10\n@let y $x * 2\n@el [width $y]\n  @text test");
+    let output = compile("@page T\n@let x 10\n@let y = $x * 2\n@el [width $y]\n  @text test");
     assert!(output.contains("width:20px"));
 }
 
 #[test]
 fn let_arithmetic_add() {
-    let output = compile("@page T\n@let a 10\n@let b $a + 5\n@el [padding $b]\n  @text test");
+    let output = compile("@page T\n@let a 10\n@let b = $a + 5\n@el [padding $b]\n  @text test");
     assert!(output.contains("padding:15px"));
 }
 
 #[test]
 fn let_arithmetic_divide() {
-    let output = compile("@page T\n@let x 200 / 4\n@el [height $x]\n  @text test");
+    let output = compile("@page T\n@let x = 200 / 4\n@el [height $x]\n  @text test");
     assert!(output.contains("height:50px"));
 }
 

@@ -131,6 +131,38 @@ struct Parser {
     pos: usize,
 }
 
+impl ParseContext {
+    /// Evaluate an expression (see `expr.rs`), reporting errors at `line`.
+    fn eval(&mut self, src: &str, line: usize) -> Option<crate::expr::Value> {
+        track_var_refs(src, &mut self.used_variables);
+        let vars = &self.variables;
+        let resolve = |reference: &str| {
+            let name = reference.split('|').next().unwrap_or(reference);
+            vars.contains_key(name)
+                .then(|| substitute_vars(&format!("${}", reference), vars))
+        };
+        let result = crate::expr::eval(src, &resolve);
+        match result {
+            Ok(value) => Some(value),
+            Err(message) => {
+                self.diagnostics.push(Diagnostic {
+                    line,
+                    column: None,
+                    message: format!("invalid expression: {}", message),
+                    severity: Severity::Error,
+                    source_line: Some(src.to_string()),
+                });
+                None
+            }
+        }
+    }
+
+    /// Evaluate a condition; an invalid one is reported and counts as false.
+    fn condition(&mut self, src: &str, line: usize) -> bool {
+        self.eval(src, line).is_some_and(|value| value.truthy())
+    }
+}
+
 /// The standard library (`std.hl`): components and bundles defined in
 /// htmlang itself and available in every file.
 const PRELUDE: &str = include_str!("std.hl");
@@ -629,14 +661,20 @@ impl Parser {
 
             if let Some((name, value)) = rest.split_once(' ') {
                 let value = value.trim();
-                // Support @let name = expr syntax (strip leading =)
-                let value = if let Some(after_eq) = value.strip_prefix("= ") {
-                    after_eq.trim()
-                } else if value == "=" {
-                    ""
-                } else {
-                    value
-                };
+                // `@let name = EXPR` computes its value (see expr.rs); any
+                // other value is literal text with `$var` interpolation.
+                if let Some(expression) = value.strip_prefix('=') {
+                    let value = ctx
+                        .eval(expression.trim(), line_num)
+                        .map(|v| v.to_string())
+                        .unwrap_or_default();
+                    if name.starts_with("--") {
+                        ctx.css_vars.push((name.to_string(), value.clone()));
+                    }
+                    ctx.variables.insert(name.to_string(), value);
+                    ctx.let_lines.entry(name.to_string()).or_insert(line_num);
+                    return Ok(None);
+                }
 
                 // Attribute bundle: @let name [attr1, attr2, ...]
                 if value.starts_with('[') {
@@ -648,8 +686,6 @@ impl Parser {
 
                 // Multi-line @let with triple quotes: @let name """..."""
                 let value_str;
-                let quoted = value.starts_with('"') && value.ends_with('"') && value.len() >= 2
-                    || value.starts_with("\"\"\"");
                 let value = if let Some(after_open) = value.strip_prefix("\"\"\"") {
                     if after_open.ends_with("\"\"\"") && after_open.len() >= 3 {
                         // Single-line triple-quote: @let name """value"""
@@ -690,13 +726,6 @@ impl Parser {
                 };
                 track_var_refs(value, &mut ctx.used_variables);
                 let value = substitute_vars(value, &ctx.variables);
-                // Quoted values are literal strings; only bare values are
-                // evaluated as arithmetic (so `"1 / -1"` stays as written).
-                let value = if quoted {
-                    value
-                } else {
-                    evaluate_arithmetic(&value)
-                };
                 if name.starts_with("--") {
                     // CSS custom property
                     ctx.css_vars.push((name.to_string(), value.clone()));
@@ -889,9 +918,7 @@ impl Parser {
 
         if let Some(rest) = content.strip_prefix("@assert ") {
             let rest = rest.trim();
-            let condition = substitute_vars(rest, &ctx.variables);
-            track_var_refs(rest, &mut ctx.used_variables);
-            if !evaluate_condition(&condition) {
+            if !ctx.condition(rest, line_num) {
                 ctx.diagnostics.push(Diagnostic {
                     line: line_num,
                     column: None,
@@ -1568,10 +1595,7 @@ impl Parser {
         // --- @if / @else ---
 
         if let Some(rest) = content.strip_prefix("@if ") {
-            let rest = rest.trim();
-            track_var_refs(rest, &mut ctx.used_variables);
-            let condition = substitute_vars(rest, &ctx.variables);
-            let result = evaluate_condition(&condition);
+            let result = ctx.condition(rest.trim(), line_num);
 
             // Collect then-body lines
             let mut then_lines = Vec::new();
@@ -1592,9 +1616,8 @@ impl Parser {
                     let trimmed = s.trim();
                     if let Some(else_if_cond) = trimmed.strip_prefix("@else if ") {
                         self.pos += 1; // consume @else if
-                        track_var_refs(else_if_cond, &mut ctx.used_variables);
-                        let cond = substitute_vars(else_if_cond.trim(), &ctx.variables);
-                        let cond_result = evaluate_condition(&cond);
+                        let cond_result =
+                            ctx.condition(else_if_cond.trim(), self.lines[self.pos - 1].line_num);
                         let mut body = Vec::new();
                         while self.pos < self.lines.len()
                             && self.lines[self.pos].indent > current_indent
@@ -3433,54 +3456,31 @@ fn parse_attr_list(
             continue;
         }
 
-        // Substitute variables in value
         track_var_refs(part, &mut ctx.used_variables);
-        let part = substitute_vars(part, &ctx.variables);
 
-        // Conditional attribute: `key if condition` or `key value if condition`
-        let (part, is_conditional) = {
-            // Check for " if " not inside parentheses
-            let check = part.as_str();
-            let mut found_if = None;
-            let mut depth = 0;
-            for (i, c) in check.char_indices() {
-                match c {
-                    '(' => depth += 1,
-                    ')' => depth -= 1,
-                    _ => {}
+        // Conditional attribute: `key if condition` or `key value if condition`.
+        // Conditions are evaluated on the source text, before substitution.
+        let part = match split_trailing_if(part) {
+            (attr, Some(condition)) => {
+                if !ctx.condition(condition, line_num) {
+                    continue;
                 }
-                if depth == 0 && check[i..].starts_with(" if ") {
-                    found_if = Some(i);
-                    break;
-                }
+                attr
             }
-            if let Some(if_pos) = found_if {
-                let attr_part = &check[..if_pos];
-                let condition = &check[if_pos + 4..];
-                let cond_result = evaluate_condition(condition.trim());
-                if cond_result {
-                    (attr_part.to_string(), false)
-                } else {
-                    (String::new(), true)
-                }
-            } else {
-                (part.to_string(), false)
-            }
+            (attr, None) => attr,
         };
-
-        // Skip this attribute if the condition was false
-        if is_conditional {
-            continue;
-        }
+        // A value `if(cond, a, b)` picks `a` or `b` (free text) by `cond`.
+        let part = choose_if_value(part, ctx, line_num);
+        let part = substitute_vars(&part, &ctx.variables);
 
         let attr = if let Some((key, value)) = split_html_attribute(&part) {
             Attribute {
                 key: key.to_string(),
-                value: Some(evaluate_if_expr(value)),
+                value: Some(value.to_string()),
                 html: true,
             }
         } else if let Some((key, value)) = part.split_once(' ') {
-            let value = evaluate_if_expr(value.trim());
+            let value = value.trim().to_string();
             Attribute {
                 key: key.trim().to_string(),
                 value: Some(value),
@@ -3779,78 +3779,47 @@ fn numeric_range(start: i64, end: i64, step: i64) -> Vec<String> {
     items
 }
 
-fn evaluate_condition(condition: &str) -> bool {
-    if let Some(rest) = condition.trim_start().strip_prefix("not ") {
-        return !evaluate_condition(rest);
-    }
-
-    if let Some((left, right)) = condition.split_once("!=") {
-        left.trim() != right.trim()
-    } else if let Some((left, right)) = condition.split_once("==") {
-        left.trim() == right.trim()
-    } else if let Some((left, right)) = condition.split_once(">=") {
-        // Numeric comparison with fallback to string comparison
-        let l = left.trim();
-        let r = right.trim();
-        match (l.parse::<f64>(), r.parse::<f64>()) {
-            (Ok(ln), Ok(rn)) => ln >= rn,
-            _ => l >= r,
-        }
-    } else if let Some((left, right)) = condition.split_once("<=") {
-        let l = left.trim();
-        let r = right.trim();
-        match (l.parse::<f64>(), r.parse::<f64>()) {
-            (Ok(ln), Ok(rn)) => ln <= rn,
-            _ => l <= r,
-        }
-    } else if let Some((left, right)) = condition.split_once('>') {
-        let l = left.trim();
-        let r = right.trim();
-        match (l.parse::<f64>(), r.parse::<f64>()) {
-            (Ok(ln), Ok(rn)) => ln > rn,
-            _ => l > r,
-        }
-    } else if let Some((left, right)) = condition.split_once('<') {
-        let l = left.trim();
-        let r = right.trim();
-        match (l.parse::<f64>(), r.parse::<f64>()) {
-            (Ok(ln), Ok(rn)) => ln < rn,
-            _ => l < r,
-        }
-    } else if let Some((left, right)) = condition.split_once(" contains ") {
-        left.trim().contains(right.trim())
-    } else if let Some((left, right)) = condition.split_once(" starts-with ") {
-        left.trim().starts_with(right.trim())
-    } else if let Some((left, right)) = condition.split_once(" ends-with ") {
-        left.trim().ends_with(right.trim())
-    } else {
-        // Truthy check: non-empty, not "false", not "0"
-        let trimmed = condition.trim();
-        !trimmed.is_empty() && trimmed != "false" && trimmed != "0"
-    }
-}
 
 
 /// Evaluate `if(condition, true_val, false_val)` expressions in attribute values.
-fn evaluate_if_expr(input: &str) -> String {
-    let trimmed = input.trim();
-    if !trimmed.starts_with("if(") || !trimmed.ends_with(')') {
-        return input.to_string();
+/// Split `key value if condition` into the attribute and its condition
+/// (ignoring ` if ` inside parentheses).
+fn split_trailing_if(part: &str) -> (&str, Option<&str>) {
+    let mut depth = 0;
+    for (i, c) in part.char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            _ if depth == 0 && part[i..].starts_with(" if ") => {
+                return (&part[..i], Some(part[i + 4..].trim()));
+            }
+            _ => {}
+        }
     }
-    let inner = &trimmed[3..trimmed.len() - 1];
-    let parts = split_if_args(inner);
-    if parts.len() != 3 {
-        return input.to_string();
-    }
-    let condition = parts[0].trim();
-    let true_val = parts[1].trim();
-    let false_val = parts[2].trim();
+    (part, None)
+}
 
-    if evaluate_condition(condition) {
-        true_val.to_string()
-    } else {
-        false_val.to_string()
+/// Resolve a value written `if(cond, a, b)`: evaluate `cond` and keep the
+/// chosen branch's text. Other attributes are returned unchanged.
+fn choose_if_value(part: &str, ctx: &mut ParseContext, line: usize) -> String {
+    let (head, value) = match part.find(['=', ' ']) {
+        Some(pos) => part.split_at(pos + 1),
+        None => return part.to_string(),
+    };
+    let value = value.trim();
+    let Some(inner) = value.strip_prefix("if(").and_then(|v| v.strip_suffix(')')) else {
+        return part.to_string();
+    };
+    let args = split_if_args(inner);
+    if args.len() != 3 {
+        return part.to_string();
     }
+    let branch = if ctx.condition(args[0].trim(), line) {
+        args[1]
+    } else {
+        args[2]
+    };
+    format!("{}{}", head, branch.trim())
 }
 
 fn split_if_args(input: &str) -> Vec<&str> {
@@ -3870,54 +3839,6 @@ fn split_if_args(input: &str) -> Vec<&str> {
     }
     parts.push(&input[start..]);
     parts
-}
-
-fn evaluate_arithmetic(input: &str) -> String {
-    let input = input.trim();
-
-    // String concatenation with ~ operator: @let full $first ~ " " ~ $last
-    if input.contains(" ~ ") {
-        let parts: Vec<&str> = input.split(" ~ ").collect();
-        if parts.len() >= 2 {
-            return parts
-                .iter()
-                .map(|p| {
-                    let t = p.trim();
-                    // Strip quotes from string literals
-                    if t.len() >= 2 && t.starts_with('"') && t.ends_with('"') {
-                        &t[1..t.len() - 1]
-                    } else {
-                        t
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("");
-        }
-    }
-
-    for op in &[" * ", " / ", " + ", " - "] {
-        if let Some((left, right)) = input.split_once(op) {
-            let left = left.trim();
-            let right = right.trim();
-            let Some(op_char) = op.trim().chars().next() else {
-                continue;
-            };
-            if let (Ok(l), Ok(r)) = (left.parse::<f64>(), right.parse::<f64>()) {
-                let result = match op_char {
-                    '+' => l + r,
-                    '-' => l - r,
-                    '*' => l * r,
-                    '/' if r != 0.0 => l / r,
-                    _ => return input.to_string(),
-                };
-                if result == result.floor() && result.abs() < i64::MAX as f64 {
-                    return format!("{}", result as i64);
-                }
-                return format!("{}", result);
-            }
-        }
-    }
-    input.to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -5474,7 +5395,7 @@ mod tests {
     #[test]
     fn arithmetic_empty_operator_does_not_panic() {
         // Guards the `op.trim().chars().next().unwrap()` fix.
-        let r = parse("@let x 1 + 2\n");
+        let r = parse("@let x = 1 + 2\n");
         assert_eq!(r.document.variables.get("x").map(|s| s.as_str()), Some("3"));
     }
 

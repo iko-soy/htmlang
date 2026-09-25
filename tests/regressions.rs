@@ -332,3 +332,32 @@ fn space_form_html_attribute_points_to_equals() {
         result.diagnostics
     );
 }
+
+#[test]
+fn conditions_do_not_reparse_variable_values() {
+    // The value contains `==`; the condition compares it as a whole.
+    let out = compile("@let v \"a == b\"\n@if $v == \"a == b\"\n  @text yes");
+    assert!(out.contains(">yes<"), "{}", out);
+    let out = compile("@let n 5\n@if $n > 2 and not $missing\n  @text big");
+    assert!(out.contains(">big<"), "{}", out);
+}
+
+#[test]
+fn computed_values_need_equals_and_have_precedence() {
+    let out = compile("@let x = 2 + 3 * 4\n@text $x");
+    assert!(out.contains(">14<"), "{}", out);
+    // Without `=`, a value is literal text: `1 / 3` stays as written.
+    let out = compile("@let area 1 / 3\n@el [grid-row $area] x");
+    assert!(out.contains("grid-row:1 / 3"), "{}", out);
+}
+
+#[test]
+fn invalid_expressions_are_errors() {
+    let result = parser::parse("@let x = dark * 2\n@if (1\n  @text y");
+    let errors: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.severity == Severity::Error && d.message.contains("invalid expression"))
+        .collect();
+    assert_eq!(errors.len(), 2, "{:?}", result.diagnostics);
+}

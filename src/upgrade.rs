@@ -427,6 +427,13 @@ fn rewrite_directive_line(
             .collect();
         return format!("{pad}@warn {}", shown.join(", "));
     }
+    // `@let x $a + 4` computed its value; computing now needs `=`.
+    if let Some(rest) = trimmed.strip_prefix("@let ")
+        && let Some((name, value)) = rest.split_once(' ')
+        && is_old_arithmetic(value.trim())
+    {
+        return format!("{pad}@let {} = {}", name, value.trim());
+    }
     if let Some(rest) = trimmed.strip_prefix("@unless ") {
         return format!("{pad}@if not {}", rest);
     }
@@ -449,6 +456,26 @@ fn rewrite_directive_line(
         return format!("{pad}@import {}", file);
     }
     line.to_string()
+}
+
+/// Did the old `@let` evaluate this bare value? It did for one arithmetic
+/// operator between two operands (`$base * 2`) and for `~` concatenation.
+fn is_old_arithmetic(value: &str) -> bool {
+    if value.starts_with(['=', '[', '"']) {
+        return false;
+    }
+    if value.contains(" ~ ") {
+        return true;
+    }
+    [" * ", " / ", " + ", " - "].iter().any(|op| {
+        value.split_once(op).is_some_and(|(l, r)| {
+            let operand = |s: &str| {
+                let s = s.trim();
+                s.parse::<f64>().is_ok() || (s.starts_with('$') && !s.contains(' '))
+            };
+            operand(l) && operand(r)
+        })
+    })
 }
 
 /// Rename element aliases wherever an element name can appear: at the start
@@ -913,6 +940,15 @@ mod tests {
         assert_eq!(up("@page [lang en] Home"), "@page [lang en] Home");
         // Multi-line lists keep their element context.
         assert_eq!(up("@input [\n  type email,\n  padding 8\n]"), "@input [\n  type=email,\n  padding 8\n]");
+    }
+
+    #[test]
+    fn computed_let_needs_equals() {
+        assert_eq!(up("@let gap $base + 4"), "@let gap = $base + 4");
+        assert_eq!(up("@let full $a ~ \" \" ~ $b"), "@let full = $a ~ \" \" ~ $b");
+        assert_eq!(up("@let x = 1 + 2"), "@let x = 1 + 2");
+        assert_eq!(up("@let area 1 / span 2"), "@let area 1 / span 2");
+        assert_eq!(up("@let card $title $tone=primary\n  @text $title"), "@let card $title $tone=primary\n  @text $title");
     }
 
     #[test]
