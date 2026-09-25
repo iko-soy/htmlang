@@ -111,7 +111,7 @@
   "Grid with named areas": {
     "prefix": "@grid-areas",
     "body": [
-      "@el [grid, grid-template-areas \"${1:header header}\" \"${2:sidebar main}\" \"${3:footer footer}\", gap ${4:20}]",
+      "@grid [grid-template-areas \"${1:header header}\" \"${2:sidebar main}\" \"${3:footer footer}\", gap ${4:20}]",
       "  @el [grid-area ${5:header}]",
       "    ${6:Header}",
       "  @el [grid-area ${7:sidebar}]",

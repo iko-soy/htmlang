@@ -1,5 +1,5 @@
 @page Grid Areas
-@el [grid, grid-template-areas "header header" "sidebar main" "footer footer", gap 20]
+@el [display grid, grid-template-areas "header header" "sidebar main" "footer footer", gap 20]
   @el [grid-area header, padding 10, background #3b82f6, color white]
     Header
   @el [grid-area sidebar, padding 10, background #e5e7eb]

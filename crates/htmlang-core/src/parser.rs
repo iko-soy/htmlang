@@ -2324,6 +2324,7 @@ fn removed_attribute_hint(name: &str) -> Option<&'static str> {
         "backdrop-blur" => Some("use `backdrop-filter blur(...)`"),
         "truncate" => Some("use the `$truncate` bundle"),
         "critical" => Some("remove it"),
+        "grid" => Some("use `@grid`, or `display grid`"),
         _ => None,
     }
 }
@@ -3038,7 +3039,22 @@ fn parse_attr_list(
             let base_key = crate::vocab::base_attribute(attr.key.as_str());
             let is_boolean_html =
                 attr.value.is_none() && crate::vocab::BOOLEAN_HTML_ATTRS.contains(&base_key);
-            if is_boolean_html || crate::vocab::is_style_attribute(base_key) {
+            // A removed attribute that shares its name with a CSS property
+            // (bare `grid`) still gets its hint.
+            let removed = removed_attribute_hint(base_key)
+                .filter(|_| attr.value.is_none() || !crate::vocab::is_css_property(base_key));
+            if let Some(hint) = removed {
+                ctx.diagnostics.push(Diagnostic {
+                    line: line_num,
+                    column: None,
+                    message: format!(
+                        "attribute '{}' was removed: {} (run `htmlang upgrade`)",
+                        base_key, hint
+                    ),
+                    severity: Severity::Warning,
+                    source_line: None,
+                });
+            } else if is_boolean_html || crate::vocab::is_style_attribute(base_key) {
                 validate_attr_value(&attr, line_num, ctx);
             } else if crate::vocab::HTML_ATTRIBUTES.contains(&base_key)
                 || base_key.starts_with("aria-")
@@ -3052,17 +3068,6 @@ fn parse_attr_list(
                         attr.key,
                         attr.key,
                         attr.value.as_deref().unwrap_or("")
-                    ),
-                    severity: Severity::Warning,
-                    source_line: None,
-                });
-            } else if let Some(hint) = removed_attribute_hint(base_key) {
-                ctx.diagnostics.push(Diagnostic {
-                    line: line_num,
-                    column: None,
-                    message: format!(
-                        "attribute '{}' was removed: {} (run `htmlang upgrade`)",
-                        base_key, hint
                     ),
                     severity: Severity::Warning,
                     source_line: None,
@@ -3356,7 +3361,6 @@ const CONTAINER_ONLY_ATTRS: &[&str] = &[
     "spacing",
     "gap",
     "wrap",
-    "grid",
     "grid-cols",
     "grid-rows",
     "container",

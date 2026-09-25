@@ -466,6 +466,7 @@ removed form with its replacement.
 | `@fn`, `@define`, `@mixin`, `@component` | `@let` (function, bundle; `@style` in a function body is scoped) |
 | `@unless COND` | `@if not COND` |
 | `@for $i in A..B`, `@repeat N` | `@each $i in A..B`, `@each $_ in 1..N` |
+| `grid` (attribute) | `@grid`, or `display grid` |
 | `@switch`, `@match` | `@if $x == a` / `@else if` / `@else` |
 | `@use "file" names`, `@import file` | `@include file` |
 | `@collection`, `@env`, `@translations`, `@fetch` | `@data $name SOURCE` (glob, `env:NAME`, or a JSON file per locale) |

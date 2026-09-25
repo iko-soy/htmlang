@@ -876,6 +876,7 @@ fn rewrite_attr_list(list: &str, element_attrs: bool) -> String {
         // Built-in style attributes that became standard-library bundles
         let body = match body.trim_end() {
             "skeleton" | "no-scrollbar" | "truncate" => format!("${}", body),
+            "grid" => "display grid".to_string(),
             _ => body,
         };
         // `blur N` / `backdrop-blur N` → the filter they generated
@@ -1336,6 +1337,7 @@ mod tests {
             "@el [column-gap 4, hover:box-shadow 0 1px red, filter blur(4px), backdrop-filter blur(2px), $truncate]"
         );
         assert_eq!(up("@el [critical, padding 4]"), "@el [padding 4]");
+        assert_eq!(up("@el [grid, grid-cols 3]"), "@el [display grid, grid-cols 3]");
     }
 
     #[test]

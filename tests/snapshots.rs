@@ -1714,7 +1714,7 @@ fn css_text_decoration_full() {
 
 #[test]
 fn css_place_items() {
-    let output = compile("@page T\n@el [grid, place-items center]");
+    let output = compile("@page T\n@el [display grid, place-items center]");
     assert!(output.contains("place-items:center"));
 }
 
@@ -2015,7 +2015,7 @@ fn css_isolation() {
 
 #[test]
 fn css_place_content() {
-    let output = compile("@page T\n@el [grid, place-content center]");
+    let output = compile("@page T\n@el [display grid, place-content center]");
     assert!(output.contains("place-content:center"));
 }
 
@@ -3375,7 +3375,7 @@ fn snapshot_layer_wrapping() {
 #[test]
 fn grid_template_areas_passthrough() {
     let output =
-        compile("@page T\n@el [grid, grid-template-areas \"a b\"]\n  @el [grid-area a]\n    A");
+        compile("@page T\n@el [display grid, grid-template-areas \"a b\"]\n  @el [grid-area a]\n    A");
     assert!(
         output.contains("grid-template-areas:\"a b\""),
         "grid-template-areas should pass through: {}",

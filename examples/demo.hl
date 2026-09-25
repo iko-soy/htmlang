@@ -280,7 +280,7 @@
 
     -- Implicit @el via bare [attrs] line
     [
-      grid,
+      display grid,
       grid-template-columns 1fr 2fr,
       grid-template-areas "h h" "s m" "f f",
       gap $base,

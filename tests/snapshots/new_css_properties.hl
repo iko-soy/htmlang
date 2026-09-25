@@ -20,7 +20,7 @@
 
 @text [text-decoration underline, text-decoration-color red, text-decoration-thickness 2, text-decoration-style wavy] Decorated
 
-@el [grid, place-items center]
+@el [display grid, place-items center]
   @text Centered
 
 @el [place-self center]

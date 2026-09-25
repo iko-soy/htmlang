@@ -9,7 +9,7 @@
     Typography
   @el [border-bottom 1 #ccc, border-top 2 red]
     Borders
-  @el [grid, grid-cols 3, gap 10]
+  @el [display grid, grid-cols 3, gap 10]
     @el [col-span 2]
       Wide
     @el

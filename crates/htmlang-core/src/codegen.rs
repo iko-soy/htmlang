@@ -1973,9 +1973,6 @@ fn attrs_to_css(
             "wrap" => push_css(&mut css, "flex-wrap", "wrap"),
 
             // Grid
-            "grid" => {
-                push_css(&mut css, "display", "grid");
-            }
             "grid-cols" => {
                 if let Some(v) = val {
                     if let Ok(n) = v.parse::<u32>() {
