@@ -70,12 +70,6 @@ fn json_unicode_escapes_are_decoded() {
 }
 
 #[test]
-fn page_zero_does_not_underflow() {
-    let out = compile("@let _page 0\n@each $x in a, b, c [page 2]\n  @text $x");
-    assert!(out.contains(">a<") && out.contains(">b<"), "{}", out);
-}
-
-#[test]
 fn range_at_integer_limit_terminates() {
     let out = compile("@each $i in 9223372036854775806..9223372036854775807\n  @text $i");
     assert!(out.contains("9223372036854775807"), "{}", out);
@@ -183,12 +177,6 @@ fn triple_quoted_let_is_a_string_not_a_function() {
     assert!(out.contains("hello"), "{}", out);
     assert!(!out.contains("\"\"\""), "{}", out);
     assert!(!out.contains("$msg"), "{}", out);
-}
-
-#[test]
-fn pagination_suffix_is_not_an_item() {
-    let out = compile("@each $x in a, b [page 5]\n  @text $x");
-    assert!(!out.contains("[page"), "{}", out);
 }
 
 #[test]

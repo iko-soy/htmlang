@@ -1325,14 +1325,14 @@ impl Parser {
             let var_name = var_names[0].clone();
             let index_var = var_names.get(1).cloned();
 
-            // Strip a trailing `[page N]` pagination suffix so it doesn't end
-            // up in the last item; it's parsed from the raw line below.
-            let list_str = match list_str.rfind("[page ") {
-                Some(pos) if list_str.trim_end().ends_with(']') => {
-                    list_str[..pos].trim_end().to_string()
-                }
-                _ => list_str,
-            };
+            if list_str.trim_end().ends_with(']') && list_str.contains("[page ") {
+                return Err(ParseError {
+                    line: line_num,
+                    message: "@each pagination (`[page N]`) was removed: split the list or \
+                              filter it with @if"
+                        .to_string(),
+                });
+            }
             track_var_refs(&list_str, &mut ctx.used_variables);
             let list_str = substitute_vars(&list_str, &ctx.variables);
             // Support range syntax: @each $i in 1..5  or  @each $i in 0..100 step 10
@@ -1358,50 +1358,6 @@ impl Parser {
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty())
                     .collect()
-            };
-
-            // Pagination: check for [page N] or [page N per P] suffix
-            // Parse from the original rest before substitution
-            let (items, pagination_info) = {
-                // Check if list_str ended with a page directive (already consumed in items)
-                // Instead, check the raw rest for [page ...] syntax
-                let raw_rest = rest;
-                let page_size = if let Some(page_pos) = raw_rest.find("[page ") {
-                    let after = &raw_rest[page_pos + 6..];
-                    if let Some(close) = after.find(']') {
-                        let page_spec = after[..close].trim();
-                        page_spec.parse::<usize>().ok()
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-
-                if let Some(size) = page_size {
-                    let current_page: usize = ctx
-                        .variables
-                        .get("_page")
-                        .and_then(|v| v.parse().ok())
-                        .unwrap_or(1)
-                        .max(1);
-                    let size = size.max(1);
-                    let total_items = items.len();
-                    let total_pages = total_items.div_ceil(size);
-                    let start = (current_page - 1).saturating_mul(size);
-                    let end = start.saturating_add(size).min(total_items);
-                    let page_items: Vec<String> = if start < total_items {
-                        items[start..end].to_vec()
-                    } else {
-                        Vec::new()
-                    };
-                    (
-                        page_items,
-                        Some((current_page, total_pages, size, total_items)),
-                    )
-                } else {
-                    (items, None)
-                }
             };
 
             // Collect body lines
@@ -1465,17 +1421,6 @@ impl Parser {
 
             let saved_vars = ctx.variables.clone();
             let mut all_nodes = Vec::new();
-
-            // Inject pagination variables if pagination is active
-            if let Some((page, total_pages, page_size, total_items)) = pagination_info {
-                ctx.variables.insert("_page".to_string(), page.to_string());
-                ctx.variables
-                    .insert("_total_pages".to_string(), total_pages.to_string());
-                ctx.variables
-                    .insert("_page_size".to_string(), page_size.to_string());
-                ctx.variables
-                    .insert("_total_items".to_string(), total_items.to_string());
-            }
 
             let has_extra_vars = var_names.len() > 2
                 || (var_names.len() == 2 && items.first().is_some_and(|it| it.contains(' ')));

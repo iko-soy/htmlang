@@ -1,3 +1,0 @@
-@let _page 1
-@each $item in a,b,c,d,e,f [page 2]
-  @text $item

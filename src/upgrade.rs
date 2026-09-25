@@ -653,6 +653,14 @@ fn rewrite_directive_line(
             return format!("{pad}@data ${} {}", name, pattern);
         }
     }
+    if trimmed.starts_with("@each ") && trimmed.trim_end().ends_with(']') && trimmed.contains("[page ") {
+        manual.push((
+            idx + 1,
+            "@each pagination ([page N]) was removed: split the list or filter it with @if"
+                .to_string(),
+        ));
+        return line.to_string();
+    }
     if trimmed.starts_with("@fetch ") {
         manual.push((
             idx + 1,

@@ -4458,8 +4458,9 @@ fn snapshot_translations_i18n() {
 }
 
 #[test]
-fn snapshot_pagination_each() {
-    snapshot_test("pagination_each");
+fn each_pagination_was_removed() {
+    let diags = parse_diagnostics("@each $item in a,b,c [page 2]\n  @text $item");
+    assert!(diags.iter().any(|d| d.message.contains("pagination")), "{:?}", diags);
 }
 
 #[test]
@@ -4487,23 +4488,6 @@ fn translations_point_to_data_files() {
         "{:?}",
         diags
     );
-}
-
-#[test]
-fn pagination_limits_items() {
-    let output = compile("@let _page 1\n@each $item in a,b,c,d,e [page 2]\n  @text $item");
-    // Page 1 with page size 2 should show items a,b only
-    assert!(output.contains(">a<"), "page 1 should contain item a");
-    assert!(output.contains(">b<"), "page 1 should contain item b");
-    assert!(!output.contains(">c<"), "page 1 should NOT contain item c");
-}
-
-#[test]
-fn pagination_page_2() {
-    let output = compile("@let _page 2\n@each $item in a,b,c,d,e [page 2]\n  @text $item");
-    assert!(output.contains(">c<"), "page 2 should contain item c");
-    assert!(output.contains(">d<"), "page 2 should contain item d");
-    assert!(!output.contains(">a<"), "page 2 should NOT contain item a");
 }
 
 #[test]

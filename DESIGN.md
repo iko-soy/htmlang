@@ -488,6 +488,7 @@ removed form with its replacement.
 | `@let x $a + 1` (computed without `=`) | `@let x = $a + 1` |
 | `COND ? A : B` | `if(COND, A, B)` |
 | `$a ~ " " ~ $b` | `"$a $b"` |
+| `@each $x in LIST [page N]` | Split the list, or filter it with `@if` |
 | `...$bundle` | `$bundle` |
 | `animate`, `inset-area` | `animation`, `position-area` |
 | `$x\|uppercase`, `$c\|darken:10` (filters) | `${uppercase($x)}`, `${darken($c, 10)}` |
