@@ -444,7 +444,6 @@ pub struct CodegenOptions {
     pub dev: bool,
     pub partial: bool,
     pub minify: bool,
-    pub compat: bool,
 }
 
 /// Generate HTML from a parsed document using the given options.
@@ -456,9 +455,6 @@ pub fn generate_with(doc: &Document, opts: &CodegenOptions) -> String {
     };
     if opts.minify {
         html = minify_html(&html);
-    }
-    if opts.compat {
-        html = add_vendor_prefixes(&html);
     }
     html
 }
@@ -503,38 +499,6 @@ pub fn generate_minified(doc: &Document) -> String {
         doc,
         &CodegenOptions {
             minify: true,
-            ..Default::default()
-        },
-    )
-}
-
-pub fn generate_compat(doc: &Document) -> String {
-    generate_with(
-        doc,
-        &CodegenOptions {
-            compat: true,
-            ..Default::default()
-        },
-    )
-}
-
-pub fn generate_dev_compat(doc: &Document) -> String {
-    generate_with(
-        doc,
-        &CodegenOptions {
-            dev: true,
-            compat: true,
-            ..Default::default()
-        },
-    )
-}
-
-pub fn generate_minified_compat(doc: &Document) -> String {
-    generate_with(
-        doc,
-        &CodegenOptions {
-            minify: true,
-            compat: true,
             ..Default::default()
         },
     )
@@ -618,109 +582,6 @@ fn minify_html(html: &str) -> String {
     result
 }
 
-/// Add vendor prefixes to CSS within <style> tags for broader browser compatibility.
-fn add_vendor_prefixes(html: &str) -> String {
-    // Find CSS within <style>...</style> and add vendor prefixes
-    let mut result = String::with_capacity(html.len() + 512);
-    let mut rest = html;
-    while let Some(start) = rest.find("<style>") {
-        let after_tag = start + 7;
-        result.push_str(&rest[..after_tag]);
-        rest = &rest[after_tag..];
-        if let Some(end) = rest.find("</style>") {
-            let css = &rest[..end];
-            result.push_str(&prefix_css(css));
-            result.push_str("</style>");
-            rest = &rest[end + 8..];
-        } else {
-            break;
-        }
-    }
-    result.push_str(rest);
-    result
-}
-
-fn prefix_css(css: &str) -> String {
-    let mut out = String::with_capacity(css.len() + 256);
-    let mut i = 0;
-    let bytes = css.as_bytes();
-    while i < bytes.len() {
-        // Find property declarations
-        if let Some(pos) = css[i..].find('{') {
-            let brace = i + pos;
-            out.push_str(&css[i..=brace]);
-            i = brace + 1;
-            // Process declarations within this block
-            if let Some(close) = css[i..].find('}') {
-                let block = &css[i..i + close];
-                out.push_str(&prefix_declarations(block));
-                out.push('}');
-                i = i + close + 1;
-            }
-        } else {
-            out.push_str(&css[i..]);
-            break;
-        }
-    }
-    out
-}
-
-fn prefix_declarations(block: &str) -> String {
-    let mut out = String::with_capacity(block.len() + 128);
-    for decl in block.split(';') {
-        let decl = decl.trim();
-        if decl.is_empty() {
-            continue;
-        }
-        if let Some((prop, val)) = decl.split_once(':') {
-            let prop = prop.trim();
-            let val = val.trim();
-            match prop {
-                "backdrop-filter" => {
-                    out.push_str(&format!("-webkit-backdrop-filter:{};", val));
-                    out.push_str(&format!("backdrop-filter:{};", val));
-                }
-                "user-select" => {
-                    out.push_str(&format!("-webkit-user-select:{};", val));
-                    out.push_str(&format!("-moz-user-select:{};", val));
-                    out.push_str(&format!("user-select:{};", val));
-                }
-                "appearance" => {
-                    out.push_str(&format!("-webkit-appearance:{};", val));
-                    out.push_str(&format!("-moz-appearance:{};", val));
-                    out.push_str(&format!("appearance:{};", val));
-                }
-                "background-clip" if val.contains("text") => {
-                    out.push_str(&format!("-webkit-background-clip:{};", val));
-                    out.push_str(&format!("background-clip:{};", val));
-                }
-                "hyphens" => {
-                    out.push_str(&format!("-webkit-hyphens:{};", val));
-                    out.push_str(&format!("-ms-hyphens:{};", val));
-                    out.push_str(&format!("hyphens:{};", val));
-                }
-                "text-size-adjust" => {
-                    out.push_str(&format!("-webkit-text-size-adjust:{};", val));
-                    out.push_str(&format!("-ms-text-size-adjust:{};", val));
-                    out.push_str(&format!("text-size-adjust:{};", val));
-                }
-                "mask-image" | "mask-size" | "mask-repeat" | "mask-position" => {
-                    out.push_str(&format!("-webkit-{}:{};", prop, val));
-                    out.push_str(&format!("{}:{};", prop, val));
-                }
-                _ => {
-                    out.push_str(decl);
-                    out.push(';');
-                }
-            }
-        } else {
-            out.push_str(decl);
-            out.push(';');
-        }
-    }
-    out
-}
-
 fn generate_full_inner(doc: &Document, dev: bool) -> String {
     let mut styles = StyleCollector::new();
     let mut ctx = GenContext {
@@ -748,8 +609,6 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
         generate_node(node, None, &mut body, &mut styles, &mut ctx);
     }
 
-    // Collect external domains for DNS prefetch
-    let dns_prefetch_html = collect_dns_prefetch(&body, dev);
 
     let element_css = build_element_css(doc, &styles, dev);
 
@@ -932,7 +791,7 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
 <meta charset=\"utf-8\">
 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
 <title>{title}</title>
-{base_html}{canonical_html}{preload_html}{dns_prefetch_html}{meta_html}{og_html}{favicon_html}{head_html}\
+{base_html}{canonical_html}{preload_html}{meta_html}{og_html}{favicon_html}{head_html}\
 <style>
 {reset_css}{element_css}\
 </style>
@@ -947,7 +806,6 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
                     base_html = base_html,
                     canonical_html = canonical_html,
                     preload_html = preload_html,
-                    dns_prefetch_html = dns_prefetch_html,
                     meta_html = meta_html,
                     favicon_html = favicon_html,
                     head_html = head_html,
@@ -958,13 +816,12 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
                 )
             } else {
                 format!(
-                    "<!DOCTYPE html><html{lang_attr}><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>{title}</title>{base_html}{canonical_html}{preload_html}{dns_prefetch_html}{meta_html}{og_html}{favicon_html}{head_html}<style>{reset_css}{element_css}</style></head><body>{body}</body></html>",
+                    "<!DOCTYPE html><html{lang_attr}><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>{title}</title>{base_html}{canonical_html}{preload_html}{meta_html}{og_html}{favicon_html}{head_html}<style>{reset_css}{element_css}</style></head><body>{body}</body></html>",
                     title = html_escape(title),
                     lang_attr = lang_attr,
                     base_html = base_html,
                     canonical_html = canonical_html,
                     preload_html = preload_html,
-                    dns_prefetch_html = dns_prefetch_html,
                     meta_html = meta_html,
                     og_html = og_html,
                     favicon_html = favicon_html,
@@ -1008,16 +865,6 @@ fn build_element_css(doc: &Document, styles: &StyleCollector, dev: bool) -> Stri
     // `var(--name)` references so the generated CSS actually uses the
     // custom properties emitted in `:root`.
     let styles_css = substitute_css_vars(&styles_css, &root_vars);
-    // Further compress the CSS by auto-extracting any remaining literal
-    // values that appear often enough for `var(--hN)` references to come out
-    // shorter overall. Disabled in dev mode to keep the CSS readable.
-    let styles_css = if dev {
-        styles_css
-    } else {
-        let (new_css, auto_vars) = auto_extract_repeats(&styles_css, &root_vars);
-        root_vars.extend(auto_vars);
-        new_css
-    };
 
     // Emit the :root block first so the cascade picks up the custom
     // properties before the class rules consume them.
@@ -2565,118 +2412,6 @@ fn substitute_css_vars(css: &str, vars: &[(String, String)]) -> String {
     out
 }
 
-/// Scan generated CSS for literal property values that repeat often enough
-/// that substituting them with an auto-named custom property would reduce
-/// total byte count. Returns the rewritten CSS and any new vars that should
-/// be appended to `:root`.
-///
-/// The algorithm only promotes a value if it strictly saves bytes after
-/// accounting for the `--xN:value;` declaration overhead plus the
-/// `var(--xN)` reference cost at each call site. Values that are already
-/// `var(...)` references or contain `var(` calls are skipped so we never
-/// nest references. Names avoid collisions with `existing_vars`.
-fn auto_extract_repeats(
-    css: &str,
-    existing_vars: &[(String, String)],
-) -> (String, Vec<(String, String)>) {
-    if css.is_empty() {
-        return (css.to_string(), Vec::new());
-    }
-    // Count occurrences of each distinct property value (the text between
-    // `:` and the next `;` or `}` at the top level of a declaration block,
-    // ignoring balanced parentheses so that e.g. `rgba(...)` stays intact).
-    let bytes = css.as_bytes();
-    let mut counts: HashMap<String, usize> = HashMap::new();
-    let mut depth: i32 = 0;
-    let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'{' => {
-                depth += 1;
-                i += 1;
-                continue;
-            }
-            b'}' => {
-                if depth > 0 {
-                    depth -= 1;
-                }
-                i += 1;
-                continue;
-            }
-            _ => {}
-        }
-        if depth > 0 && bytes[i] == b':' {
-            // Skip past `:` then walk to the terminator.
-            let start = i + 1;
-            let mut end = start;
-            let mut pdepth = 0i32;
-            while end < bytes.len() {
-                match bytes[end] {
-                    b'(' => pdepth += 1,
-                    b')' if pdepth > 0 => pdepth -= 1,
-                    b';' | b'}' if pdepth == 0 => break,
-                    b'{' if pdepth == 0 => break,
-                    _ => {}
-                }
-                end += 1;
-            }
-            let val = css[start..end].trim();
-            if !val.is_empty() && !val.starts_with("var(") && !val.contains("var(") {
-                *counts.entry(val.to_string()).or_default() += 1;
-            }
-            i = end;
-            continue;
-        }
-        i += 1;
-    }
-
-    // Decide which values are worth extracting. A value of length L appearing
-    // N times costs N*L bytes inline; promoting it costs (L + 6) for the
-    // `--hK:V;` declaration plus N * ref_len for the call sites. We estimate
-    // ref_len optimistically as `var(--h0)` (9 bytes) and fall back to 10 for
-    // two-digit indices, which only affects very large extraction counts.
-    let existing: std::collections::HashSet<&str> =
-        existing_vars.iter().map(|(n, _)| n.as_str()).collect();
-    let mut candidates: Vec<(String, usize)> =
-        counts.into_iter().filter(|(_, n)| *n >= 2).collect();
-    // Stable, deterministic ordering — longest values first, tiebreak by text.
-    candidates.sort_by(|a, b| b.0.len().cmp(&a.0.len()).then_with(|| a.0.cmp(&b.0)));
-
-    let mut extracted: Vec<(String, String)> = Vec::new();
-    let mut next_idx: usize = 0;
-    for (value, n) in candidates {
-        let l = value.len();
-        // Allocate the next unused `--hN` name.
-        let (name, ref_len) = loop {
-            let candidate = format!("--h{}", next_idx);
-            next_idx += 1;
-            let rl = candidate.len() + 6; // `var(` + name + `)`
-            if !existing.contains(candidate.as_str())
-                && !extracted.iter().any(|(n, _)| *n == candidate)
-            {
-                break (candidate, rl);
-            }
-        };
-        // Skip if promotion would not strictly reduce byte count.
-        // Before: n * l bytes. After: (l + name.len() + 2) for the :root
-        // declaration (`<name>:<value>;`) plus n * ref_len for the sites.
-        let decl_overhead = l + name.len() + 2;
-        let before = n * l;
-        let after = decl_overhead + n * ref_len;
-        if after < before {
-            extracted.push((name, value));
-        } else {
-            // Rewind the index so the next value can reuse this slot.
-            next_idx -= 1;
-        }
-    }
-
-    if extracted.is_empty() {
-        return (css.to_string(), Vec::new());
-    }
-    let new_css = substitute_css_vars(css, &extracted);
-    (new_css, extracted)
-}
 
 /// Format a `line-height` value. CSS accepts either a unitless multiplier
 /// (e.g. `1.5`) or a length (e.g. `24px`). Plain integers in htmlang source
@@ -2990,34 +2725,4 @@ fn has_tag(nodes: &[Node], name: &str) -> bool {
     })
 }
 
-/// Collect unique external domains from generated HTML for DNS prefetch hints.
-fn collect_dns_prefetch(html: &str, dev: bool) -> String {
-    let mut domains = Vec::new();
-    let mut rest = html;
-    while let Some(pos) = rest.find("https://") {
-        let start = pos + 8; // skip "https://"
-        rest = &rest[start..];
-        let end = rest
-            .find(['/', '"', '\'', ' ', '>', ')'])
-            .unwrap_or(rest.len());
-        let domain = &rest[..end];
-        if !domain.is_empty() && domain.contains('.') && !domains.contains(&domain.to_string()) {
-            domains.push(domain.to_string());
-        }
-    }
-    let mut out = String::new();
-    for domain in &domains {
-        if dev {
-            out.push_str(&format!(
-                "<link rel=\"dns-prefetch\" href=\"//{}\">\n",
-                domain
-            ));
-        } else {
-            out.push_str(&format!(
-                "<link rel=\"dns-prefetch\" href=\"//{}\">",
-                domain
-            ));
-        }
-    }
-    out
-}
+

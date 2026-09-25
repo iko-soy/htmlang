@@ -33,7 +33,6 @@ struct CompileConfig<'a> {
     format_json: bool,
     json_collector: Option<&'a Mutex<Vec<DiagnosticJson>>>,
     minify: bool,
-    compat: bool,
     strict: bool,
     partial: bool,
 }
@@ -113,7 +112,6 @@ fn compile(input_path: &str, cfg: &CompileConfig) -> (bool, Vec<PathBuf>) {
                     dev: cfg.dev,
                     partial: cfg.partial,
                     minify: cfg.minify,
-                    compat: cfg.compat,
                 },
             );
             match fs::write(&out_path, &html) {
@@ -124,7 +122,7 @@ fn compile(input_path: &str, cfg: &CompileConfig) -> (bool, Vec<PathBuf>) {
             if cfg.dev {
                 let map_path = out_path.with_extension("html.map");
                 // Map the HTML that was actually written, so line numbers
-                // match even with --compat or --minify.
+                // match even with --minify.
                 let source_map = htmlang::codegen::source_map_for_html(
                     &html,
                     &Path::new(input_path)
@@ -602,7 +600,6 @@ struct ProjectConfig {
     // Build options (can be overridden by CLI flags)
     dev: Option<bool>,
     minify: Option<bool>,
-    compat: Option<bool>,
     strict: Option<bool>,
     // Watch options
     debounce_ms: u64,
@@ -616,7 +613,6 @@ fn load_config(target: &Path) -> ProjectConfig {
         breakpoints: Vec::new(),
         dev: None,
         minify: None,
-        compat: None,
         strict: None,
         debounce_ms: 50,
     };
@@ -672,11 +668,10 @@ fn load_config(target: &Path) -> ProjectConfig {
                 "build" => match key {
                     "dev" => config.dev = Some(value == "true"),
                     "minify" => config.minify = Some(value == "true"),
-                    "compat" => config.compat = Some(value == "true"),
                     "strict" => config.strict = Some(value == "true"),
                     _ => {
                         eprintln!(
-                            "warning: {}:{}: unknown build key '{}' (expected: dev, minify, compat, strict)",
+                            "warning: {}:{}: unknown build key '{}' (expected: dev, minify, strict)",
                             config_path.display(),
                             line_num + 1,
                             key
@@ -717,7 +712,6 @@ fn main() {
     let mut dev = false;
     let mut check = false;
     let mut format_json = false;
-    let mut compat = false;
     let mut strict = false;
     let mut open_browser = false;
     let mut partial = false;
@@ -775,7 +769,6 @@ fn main() {
         let mut src_dir = None;
         let mut out_dir = None;
         let mut build_minify = false;
-        let mut build_compat = false;
         let mut build_strict = false;
         let mut shared_css = false;
         let mut i = 2;
@@ -786,7 +779,6 @@ fn main() {
                     out_dir = args.get(i).map(|s| s.as_str());
                 }
                 "--minify" => build_minify = true,
-                "--compat" => build_compat = true,
                 "--strict" => build_strict = true,
                 "--shared-css" => shared_css = true,
                 _ if src_dir.is_none() => src_dir = Some(args[i].as_str()),
@@ -806,7 +798,6 @@ fn main() {
         // Load project config — CLI flags override config file
         let config = load_config(dir);
         let build_minify = build_minify || config.minify.unwrap_or(false);
-        let build_compat = build_compat || config.compat.unwrap_or(false);
         let build_strict = build_strict || config.strict.unwrap_or(false);
         let out_dir = out_dir.or(config.output.as_deref()).or(Some("out"));
         let hl_files = collect_hl_files_recursive(dir);
@@ -854,7 +845,7 @@ fn main() {
                     let cache_key = fs::read(file).ok().map(|content| {
                         let mut hasher = std::collections::hash_map::DefaultHasher::new();
                         content.hash(&mut hasher);
-                        (build_minify, build_compat, build_strict, effective_out).hash(&mut hasher);
+                        (build_minify, build_strict, effective_out).hash(&mut hasher);
                         hasher.finish()
                     });
                     if !shared_css
@@ -878,7 +869,6 @@ fn main() {
                         &CompileConfig {
                             output_path: effective_out.as_deref(),
                             minify: build_minify,
-                            compat: build_compat,
                             strict: build_strict,
                             ..Default::default()
                         },
@@ -1475,7 +1465,6 @@ fn main() {
             "--watch" | "-w" => watch = true,
             "--dev" | "-d" => dev = true,
             "--check" | "-c" => check = true,
-            "--compat" => compat = true,
             "--strict" => strict = true,
             "--open" => open_browser = true,
             "--partial" => partial = true,
@@ -1581,7 +1570,6 @@ fn main() {
                     output_path: effective_out.as_deref(),
                     format_json,
                     json_collector: json_collector.as_ref(),
-                    compat,
                     strict,
                     partial,
                     ..Default::default()
@@ -1637,7 +1625,6 @@ fn main() {
                     .as_ref()
                     .map(|o| (dir.to_path_buf(), PathBuf::from(o))),
                 discover_new_files: true,
-                compat,
                 strict,
                 partial,
                 ..Default::default()
@@ -1661,7 +1648,6 @@ fn main() {
             output_path: output_path.as_deref(),
             format_json,
             json_collector: json_collector_single.as_ref(),
-            compat,
             strict,
             partial,
             ..Default::default()
@@ -1710,7 +1696,6 @@ fn main() {
         50,
         &WatchBuild {
             out_file: output_path.as_ref().map(PathBuf::from),
-            compat,
             strict,
             partial,
             ..Default::default()
@@ -1745,7 +1730,6 @@ struct WatchBuild {
     /// Pick up `.hl` files created in the watch directory (directory mode).
     discover_new_files: bool,
     minify: bool,
-    compat: bool,
     strict: bool,
     partial: bool,
 }
@@ -1973,7 +1957,6 @@ fn watch_loop(
                     error_overlay: serve,
                     output_path: out_str.as_deref(),
                     minify: build.minify,
-                    compat: build.compat,
                     strict: build.strict,
                     partial: build.partial,
                     ..Default::default()

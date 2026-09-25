@@ -48,7 +48,7 @@ htmlang serve .              # dev server with live reload
 
 | Command | Purpose |
 |---|---|
-| `build <dir> [-o out] [--minify] [--compat] [--strict]` | Compile every `.hl` file under a directory |
+| `build <dir> [-o out] [--minify] [--strict]` | Compile every `.hl` file under a directory |
 | `serve [dir\|file] [-p PORT] [--open] [--https --cert C --key K]` | Dev server with live reload |
 | `watch [dir\|file] [-o out]` | Recompile on change, without a server |
 | `check <file\|dir> [--format json]` | Report diagnostics without writing output |
@@ -58,7 +58,7 @@ htmlang serve .              # dev server with live reload
 | `upgrade [dir\|file]` | Rewrite syntax from older versions of the language |
 | `lsp` | Run the language server over stdio |
 
-Compiling directly also takes `--dev`, `--compat`, `--strict`, `--partial`,
+Compiling directly also takes `--dev`, `--strict`, `--partial`,
 `--format json`, `-s` / `--serve`, `-p` / `--port` and `--open`.
 
 ## Editor support

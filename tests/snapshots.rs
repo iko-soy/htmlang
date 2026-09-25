@@ -1086,15 +1086,6 @@ fn internal_link_no_noopener() {
 }
 
 #[test]
-fn dns_prefetch_for_external_domains() {
-    let output = compile(
-        "@page T\n@link https://example.com\n  Link\n@image https://cdn.example.org/img.jpg",
-    );
-    assert!(output.contains("dns-prefetch"));
-    assert!(output.contains("example.com"));
-}
-
-#[test]
 fn theme_color_meta_from_theme() {
     let output = compile("@page T\n@let primary #3b82f6\n@let --primary #3b82f6\n@meta theme-color #3b82f6\n@el\n  test");
     assert!(output.contains("theme-color"));
@@ -4241,25 +4232,6 @@ fn test_fetchpriority_attr() {
     assert!(
         html.contains("fetchpriority=\"high\""),
         "should pass through fetchpriority"
-    );
-}
-
-#[test]
-fn test_compat_vendor_prefixes() {
-    let result =
-        htmlang::parser::parse("@el [backdrop-filter blur(10px), user-select none]\n  Test");
-    let html = htmlang::codegen::generate_compat(&result.document);
-    assert!(
-        html.contains("-webkit-backdrop-filter"),
-        "should add webkit prefix for backdrop-filter"
-    );
-    assert!(
-        html.contains("-webkit-user-select"),
-        "should add webkit prefix for user-select"
-    );
-    assert!(
-        html.contains("-moz-user-select"),
-        "should add moz prefix for user-select"
     );
 }
 
