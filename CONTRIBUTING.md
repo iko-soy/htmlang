@@ -27,7 +27,9 @@ Linux, macOS, and Windows. Your change should pass all three.
     every file.
 - `crates/htmlang-wasm/` — thin wrapper exposing `compile` to the web playground.
 - `src/` — CLI, dev server, formatter, and HTML-to-hl converter.
-- `src/bin/htmlang_lsp/` — language server binary (`htmlang-lsp`).
+- `src/bin/htmlang_lsp/` — language server binary (`htmlang-lsp`). Its
+  completions come from the compiler's tables; hover and completion text live
+  in `docs.rs`.
 - `editors/vscode/` — VS Code extension.
 - `tests/snapshots.rs` — integration / snapshot tests for the compiler.
 - `tests/regressions.rs` — one test per fixed bug.
@@ -42,7 +44,8 @@ Linux, macOS, and Windows. Your change should pass all three.
    tests alongside the code.
 2. Prefer the smallest mechanism: a component belongs in `std.hl`, an HTML
    element is a row in `TAGS`, and a CSS property needs no code at all. Only
-   thread a feature through the parser, codegen and LSP when it needs to be.
+   thread a feature through the parser and codegen when it needs to be, and
+   describe it in the LSP's `docs.rs`.
 3. Document it in `DESIGN.md` (the examples there are compiled by the tests).
    If it's user-facing, also update `README.md`.
 4. If it removes or renames syntax, add a rewrite to `src/upgrade.rs` and a

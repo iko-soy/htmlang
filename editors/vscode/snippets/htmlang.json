@@ -155,20 +155,14 @@
     "description": "Hero section with title, description, and CTA"
   },
   "Theme tokens": {
-    "prefix": "@theme",
+    "prefix": "@let-tokens",
     "body": [
-      "@theme",
-      "  primary ${1:#3b82f6}",
-      "  secondary ${2:#10b981}",
-      "  bg ${3:#ffffff}",
-      "  text ${4:#1a1a2e}",
-      "  spacing-sm ${5:8}",
-      "  spacing-md ${6:16}",
-      "  spacing-lg ${7:32}",
-      "  font-body ${8:system-ui, sans-serif}",
+      "@let --primary ${1:#3b82f6}",
+      "@let --secondary ${2:#10b981}",
+      "@let --radius ${3:8}",
       "$0"
     ],
-    "description": "Design token theme definition"
+    "description": "Design tokens as CSS custom properties (use as $--primary)"
   },
   "Keyframes animation": {
     "prefix": "@keyframes",
@@ -183,12 +177,12 @@
     "description": "Keyframe animation with element usage"
   },
   "Include/Import": {
-    "prefix": "@import",
+    "prefix": "@include",
     "body": [
-      "@import ${1:components.hl}",
+      "@include ${1:components.hl}",
       "$0"
     ],
-    "description": "Import definitions from another file"
+    "description": "Include another file (a library of @let definitions emits nothing)"
   },
   "Template inheritance": {
     "prefix": "@extends",
@@ -258,23 +252,22 @@
   "Font face": {
     "prefix": "@font-face",
     "body": [
-      "@font-face ${1:Inter} ${2:fonts/${3:inter.woff2}}",
+      "@style",
+      "  @font-face { font-family: '${1:Inter}'; src: url('${2:fonts/inter.woff2}') format('woff2'); font-display: swap; }",
       "$0"
     ],
-    "description": "Custom font face declaration"
+    "description": "Custom font face in an @style block"
   },
   "JSON-LD structured data": {
     "prefix": "@json-ld",
     "body": [
-      "@json-ld",
-      "  {",
-      "    \"@context\": \"https://schema.org\",",
-      "    \"@type\": \"${1:WebPage}\",",
-      "    \"name\": \"${2:Page Title}\"",
-      "  }",
+      "@head",
+      "  <script type=\"application/ld+json\">",
+      "    {\"@context\": \"https://schema.org\", \"@type\": \"${1:WebPage}\", \"name\": \"${2:Page Title}\"}",
+      "  </script>",
       "$0"
     ],
-    "description": "JSON-LD structured data block"
+    "description": "JSON-LD structured data in @head"
   },
   "Page metadata": {
     "prefix": "@page-meta",

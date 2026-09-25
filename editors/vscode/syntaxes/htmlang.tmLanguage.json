@@ -87,7 +87,7 @@
       }
     },
     "include-directive": {
-      "match": "(@(?:include|import|extends|font-face|markdown|svg|data))\\s+(.*)",
+      "match": "(@(?:include|extends|markdown|svg|data))\\s+(.*)",
       "captures": {
         "1": {
           "name": "keyword.control.directive.htmlang"
@@ -154,7 +154,7 @@
     },
     "attribute-name": {
       "name": "support.type.property-name.htmlang",
-      "match": "\\b(?:spacing|padding|padding-x|padding-y|width|height|min-width|max-width|min-height|max-height|center-x|center-y|align-left|align-right|align-top|align-bottom|background|color|border|rounded|bold|italic|underline|size|font|transition|cursor|opacity|text-align|line-height|overflow|position|z-index|shadow|wrap|gap-x|gap-y|gap|margin|hidden)\\b"
+      "match": "\\b(?:spacing|padding|padding-x|padding-y|width|height|min-width|max-width|min-height|max-height|center-x|center-y|align-left|align-right|align-top|align-bottom|background|color|border|rounded|bold|italic|underline|size|font|transition|cursor|opacity|text-align|line-height|overflow|position|z-index|wrap|gap|margin|hidden)\\b"
     },
     "inline-element": {
       "name": "meta.inline-element.htmlang",
