@@ -733,7 +733,7 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
     };
 
     // Check if document has @main for skip-to-content link
-    let has_main = has_element_kind(&doc.nodes, &ElementKind::Main);
+    let has_main = has_tag(&doc.nodes, "main");
 
     let mut body = String::new();
 
@@ -1307,32 +1307,10 @@ fn generate_node(
         Node::Text(segments) => {
             let needs_wrap = matches!(
                 parent_kind,
-                Some(ElementKind::Row)
-                    | Some(ElementKind::Column)
-                    | Some(ElementKind::El)
-                    | Some(ElementKind::Nav)
-                    | Some(ElementKind::Header)
-                    | Some(ElementKind::Footer)
-                    | Some(ElementKind::Main)
-                    | Some(ElementKind::Section)
-                    | Some(ElementKind::Article)
-                    | Some(ElementKind::Aside)
-                    | Some(ElementKind::ListItem)
-                    | Some(ElementKind::Form)
-                    | Some(ElementKind::Details)
-                    | Some(ElementKind::Figure)
-                    | Some(ElementKind::Blockquote)
-                    | Some(ElementKind::Dialog)
-                    | Some(ElementKind::DefinitionList)
-                    | Some(ElementKind::DefinitionDescription)
-                    | Some(ElementKind::Fieldset)
-                    | Some(ElementKind::Datalist)
-                    | Some(ElementKind::Grid)
-                    | Some(ElementKind::Stack)
-                    | Some(ElementKind::Noscript)
-                    | Some(ElementKind::Address)
-                    | Some(ElementKind::Search)
-            );
+                Some(ElementKind::Row | ElementKind::Column | ElementKind::El)
+            ) || parent_kind
+                .and_then(ElementKind::spec)
+                .is_some_and(|spec| spec.wraps_text);
             if needs_wrap {
                 out.push_str(&ctx.indent());
                 out.push_str("<span>");
@@ -1351,6 +1329,23 @@ fn generate_node(
     }
 }
 
+
+/// Emit the argument of an element whose argument is an HTML attribute
+/// (`@iframe URL` → `src="URL"`, `@form /submit` → `action="/submit"`).
+fn emit_argument_attr(out: &mut String, elem: &Element) {
+    if let Some(TagSpec {
+        arg: TagArg::Attr(attr),
+        ..
+    }) = elem.kind.spec()
+        && let Some(value) = &elem.argument
+    {
+        out.push(' ');
+        out.push_str(attr);
+        out.push_str("=\"");
+        out.push_str(&html_escape(value));
+        out.push('"');
+    }
+}
 
 fn emit_html_passthrough_attrs(out: &mut String, attrs: &[Attribute]) {
     for attr in attrs {
@@ -1399,7 +1394,7 @@ fn has_overlay_children(elem: &Element) -> bool {
     elem.children.iter().any(|child| {
         matches!(
             child,
-            Node::Element(e) if matches!(e.kind, ElementKind::InFront | ElementKind::Behind)
+            Node::Element(e) if e.kind.is_tag("in-front") || e.kind.is_tag("behind")
         )
     })
 }
@@ -1412,14 +1407,7 @@ fn generate_element(
     ctx: &mut GenContext,
 ) {
     // Self-closing elements
-    if matches!(
-        elem.kind,
-        ElementKind::Image
-            | ElementKind::Input
-            | ElementKind::HorizontalRule
-            | ElementKind::Source
-            | ElementKind::Spacer
-    ) {
+    if elem.kind == ElementKind::Image || elem.kind.spec().is_some_and(|spec| spec.void) {
         generate_self_closing(elem, parent_kind, out, styles, ctx);
         return;
     }
@@ -1525,189 +1513,24 @@ fn generate_element(
     }
 
     let tag = match &elem.kind {
-        ElementKind::Row
-        | ElementKind::Column
-        | ElementKind::El
-        | ElementKind::Grid
-        | ElementKind::Stack
-        | ElementKind::InFront
-        | ElementKind::Behind => "div",
+        ElementKind::Row | ElementKind::Column | ElementKind::El => "div",
         ElementKind::Text => "span",
         ElementKind::Paragraph => "p",
         ElementKind::Link => "a",
-        ElementKind::Button => "button",
-        ElementKind::Select => "select",
-        ElementKind::Textarea => "textarea",
-        ElementKind::Option => "option",
-        ElementKind::Label => "label",
-        // Semantic elements
-        ElementKind::Nav => "nav",
-        ElementKind::Header => "header",
-        ElementKind::Footer => "footer",
-        ElementKind::Main => "main",
-        ElementKind::Section => "section",
-        ElementKind::Article => "article",
-        ElementKind::Aside => "aside",
-        // List
-        ElementKind::List => {
-            if elem.attrs.iter().any(|a| a.key == "ordered") {
-                "ol"
-            } else {
-                "ul"
-            }
+        ElementKind::Tag(spec)
+            if spec.name == "list" && elem.attrs.iter().any(|a| a.key == "ordered") =>
+        {
+            "ol"
         }
-        ElementKind::ListItem => "li",
-        // Table
-        ElementKind::Table => "table",
-        ElementKind::TableHead => "thead",
-        ElementKind::TableBody => "tbody",
-        ElementKind::TableRow => "tr",
-        ElementKind::TableCell => "td",
-        ElementKind::TableHeaderCell => "th",
-        // Media
-        ElementKind::Video => "video",
-        ElementKind::Audio => "audio",
-        // Additional semantic elements
-        ElementKind::Form => "form",
-        ElementKind::Details => "details",
-        ElementKind::Summary => "summary",
-        ElementKind::Blockquote => "blockquote",
-        ElementKind::Cite => "cite",
-        ElementKind::Code => "code",
-        ElementKind::Pre => "pre",
-        ElementKind::Figure => "figure",
-        ElementKind::FigCaption => "figcaption",
-        ElementKind::Progress => "progress",
-        ElementKind::Meter => "meter",
-        // New elements
-        ElementKind::Dialog => "dialog",
-        ElementKind::DefinitionList => "dl",
-        ElementKind::DefinitionTerm => "dt",
-        ElementKind::DefinitionDescription => "dd",
-        ElementKind::Fieldset => "fieldset",
-        ElementKind::Legend => "legend",
-        ElementKind::Picture => "picture",
-        ElementKind::Time => "time",
-        ElementKind::Mark => "mark",
-        ElementKind::Kbd => "kbd",
-        ElementKind::Abbr => "abbr",
-        ElementKind::Datalist => "datalist",
-        ElementKind::Iframe => "iframe",
-        ElementKind::Output => "output",
-        ElementKind::Canvas => "canvas",
-        ElementKind::Badge => "span",
-        ElementKind::Tooltip => "span",
-        ElementKind::Avatar => "div",
-        ElementKind::Carousel => "div",
-        ElementKind::Chip => "span",
-        ElementKind::Tag => "span",
-        ElementKind::Noscript => "noscript",
-        ElementKind::Address => "address",
-        ElementKind::Search => "search",
-        // Heading elements
-        ElementKind::H1 => "h1",
-        ElementKind::H2 => "h2",
-        ElementKind::H3 => "h3",
-        ElementKind::H4 => "h4",
-        ElementKind::H5 => "h5",
-        ElementKind::H6 => "h6",
-        ElementKind::Image
-        | ElementKind::Input
-        | ElementKind::HorizontalRule
-        | ElementKind::Children
-        | ElementKind::Slot(_)
-        | ElementKind::Fragment
-        | ElementKind::Source
-        | ElementKind::Spacer
-        | ElementKind::Script
-        | ElementKind::Breadcrumb => unreachable!(),
-    };
-
-    let kind_label = match elem.kind {
-        ElementKind::Row => "row",
-        ElementKind::Column => "column",
-        ElementKind::El => "el",
-        ElementKind::Text => "text",
-        ElementKind::Paragraph => "paragraph",
-        ElementKind::Link => "link",
-        ElementKind::Button => "button",
-        ElementKind::Select => "select",
-        ElementKind::Textarea => "textarea",
-        ElementKind::Option => "option",
-        ElementKind::Label => "label",
-        ElementKind::Nav => "nav",
-        ElementKind::Header => "header",
-        ElementKind::Footer => "footer",
-        ElementKind::Main => "main",
-        ElementKind::Section => "section",
-        ElementKind::Article => "article",
-        ElementKind::Aside => "aside",
-        ElementKind::List => "list",
-        ElementKind::ListItem => "item",
-        ElementKind::Table => "table",
-        ElementKind::TableHead => "thead",
-        ElementKind::TableBody => "tbody",
-        ElementKind::TableRow => "tr",
-        ElementKind::TableCell => "td",
-        ElementKind::TableHeaderCell => "th",
-        ElementKind::Video => "video",
-        ElementKind::Audio => "audio",
-        ElementKind::Form => "form",
-        ElementKind::Details => "details",
-        ElementKind::Summary => "summary",
-        ElementKind::Blockquote => "blockquote",
-        ElementKind::Cite => "cite",
-        ElementKind::Code => "code",
-        ElementKind::Pre => "pre",
-        ElementKind::Figure => "figure",
-        ElementKind::FigCaption => "figcaption",
-        ElementKind::Fragment => "fragment",
-        ElementKind::Dialog => "dialog",
-        ElementKind::DefinitionList => "dl",
-        ElementKind::DefinitionTerm => "dt",
-        ElementKind::DefinitionDescription => "dd",
-        ElementKind::Fieldset => "fieldset",
-        ElementKind::Legend => "legend",
-        ElementKind::Picture => "picture",
-        ElementKind::Time => "time",
-        ElementKind::Mark => "mark",
-        ElementKind::Kbd => "kbd",
-        ElementKind::Abbr => "abbr",
-        ElementKind::Datalist => "datalist",
-        ElementKind::Iframe => "iframe",
-        ElementKind::Output => "output",
-        ElementKind::Canvas => "canvas",
-        ElementKind::Grid => "grid",
-        ElementKind::Stack => "stack",
-        ElementKind::Badge => "badge",
-        ElementKind::Tooltip => "tooltip",
-        ElementKind::Avatar => "avatar",
-        ElementKind::Carousel => "carousel",
-        ElementKind::Chip => "chip",
-        ElementKind::Tag => "tag",
-        ElementKind::Noscript => "noscript",
-        ElementKind::Address => "address",
-        ElementKind::Search => "search",
-        ElementKind::InFront => "in-front",
-        ElementKind::Behind => "behind",
-        ElementKind::H1 => "h1",
-        ElementKind::H2 => "h2",
-        ElementKind::H3 => "h3",
-        ElementKind::H4 => "h4",
-        ElementKind::H5 => "h5",
-        ElementKind::H6 => "h6",
+        ElementKind::Tag(spec) => spec.html,
         _ => "",
     };
+    let kind_label = elem.kind.name();
 
     // Track interactive elements for focus-visible CSS
-    if matches!(
-        elem.kind,
-        ElementKind::Link
-            | ElementKind::Button
-            | ElementKind::Input
-            | ElementKind::Select
-            | ElementKind::Textarea
-    ) {
+    if elem.kind == ElementKind::Link
+        || matches!(kind_label, "button" | "input" | "select" | "textarea")
+    {
         ctx.has_interactive = true;
     }
 
@@ -1734,7 +1557,7 @@ fn generate_element(
     out.push_str(tag);
 
     // @main gets id="hl-main" for skip-to-content link (unless user set an id)
-    if elem.kind == ElementKind::Main && id.is_none() {
+    if elem.kind.is_tag("main") && id.is_none() {
         out.push_str(" id=\"hl-main\"");
     }
 
@@ -1758,35 +1581,10 @@ fn generate_element(
         }
     }
 
-    // Video/Audio src
-    if matches!(elem.kind, ElementKind::Video | ElementKind::Audio)
-        && let Some(src) = &elem.argument
-    {
-        out.push_str(" src=\"");
-        out.push_str(&html_escape(src));
-        out.push('"');
-    }
-
-    // Form action
-    if elem.kind == ElementKind::Form
-        && let Some(action) = &elem.argument
-    {
-        out.push_str(" action=\"");
-        out.push_str(&html_escape(action));
-        out.push('"');
-    }
-
-    // Iframe src
-    if elem.kind == ElementKind::Iframe
-        && let Some(src) = &elem.argument
-    {
-        out.push_str(" src=\"");
-        out.push_str(&html_escape(src));
-        out.push('"');
-    }
+    emit_argument_attr(out, elem);
 
     // Tooltip title
-    if elem.kind == ElementKind::Tooltip
+    if elem.kind.is_tag("tooltip")
         && let Some(text) = &elem.argument
     {
         out.push_str(" title=\"");
@@ -1841,16 +1639,8 @@ fn generate_element(
 
     // Children
     ctx.depth += 1;
-    let is_paragraph = matches!(
-        elem.kind,
-        ElementKind::Paragraph
-            | ElementKind::H1
-            | ElementKind::H2
-            | ElementKind::H3
-            | ElementKind::H4
-            | ElementKind::H5
-            | ElementKind::H6
-    );
+    let is_paragraph = elem.kind == ElementKind::Paragraph
+        || elem.kind.spec().is_some_and(|spec| spec.inline);
     for (i, child) in elem.children.iter().enumerate() {
         generate_node(child, Some(&elem.kind), out, styles, ctx);
         if is_paragraph && i < elem.children.len() - 1 {
@@ -1876,13 +1666,10 @@ fn generate_self_closing(
     let gen_class = compute_class(&elem.attrs, &elem.kind, parent_kind, styles, false);
     let (id, user_class) = extract_id_class(&elem.attrs);
 
-    let (tag, kind_label) = match elem.kind {
+    let (tag, kind_label) = match &elem.kind {
         ElementKind::Image => ("img", "image"),
-        ElementKind::Input => ("input", "input"),
-        ElementKind::HorizontalRule => ("hr", "hr"),
-        ElementKind::Source => ("source", "source"),
-        ElementKind::Spacer => ("div", "spacer"),
-        _ => unreachable!(),
+        ElementKind::Tag(spec) => (spec.html, spec.name),
+        _ => unreachable!("not a void element: {:?}", elem.kind),
     };
 
     if ctx.dev && elem.line_num > 0 {
@@ -1895,6 +1682,7 @@ fn generate_self_closing(
     out.push_str(&ctx.indent());
     out.push('<');
     out.push_str(tag);
+    emit_argument_attr(out, elem);
 
     // Image src (with optional non-SVG base64 inlining)
     if elem.kind == ElementKind::Image {
@@ -2347,14 +2135,7 @@ fn is_prefixed_attr(key: &str) -> bool {
 /// semantic wrapper that behaves like a column.
 const FLEX_COLUMN: &str = "display:flex;flex-direction:column;";
 
-/// Font stack shared by `@pre`, `@code`, `@kbd`.
-const MONOSPACE_STACK: &str = "font-family:ui-monospace,monospace;";
 
-/// Declarations common to `@badge` and `@tag`. They differ only in
-/// `border-radius` (and `@badge` additionally centers content / pins
-/// line-height:1), so keeping the shared base here avoids drift.
-const PILL_BASE: &str =
-    "display:inline-flex;align-items:center;padding:2px 8px;font-size:0.75rem;font-weight:600;";
 
 fn attrs_to_css(
     attrs: &[Attribute],
@@ -2375,81 +2156,13 @@ fn attrs_to_css(
         }
         match kind {
             ElementKind::Row => css.push_str("display:flex;flex-direction:row;"),
-            ElementKind::Column
-            | ElementKind::El
-            // Semantic elements get flex column layout like @el
-            | ElementKind::Nav
-            | ElementKind::Header
-            | ElementKind::Footer
-            | ElementKind::Main
-            | ElementKind::Section
-            | ElementKind::Article
-            | ElementKind::Aside
-            | ElementKind::ListItem
-            | ElementKind::Form
-            | ElementKind::Details
-            | ElementKind::Dialog => css.push_str(FLEX_COLUMN),
-            ElementKind::Paragraph
-            | ElementKind::H1
-            | ElementKind::H2
-            | ElementKind::H3
-            | ElementKind::H4
-            | ElementKind::H5
-            | ElementKind::H6 => css.push_str("margin:0;"),
-            // Lists: reset browser defaults
-            ElementKind::List => css.push_str("margin:0;padding-left:0;list-style:none;"),
-            // Figure / Blockquote: flex column with browser margin reset
-            ElementKind::Figure | ElementKind::Blockquote => {
-                css.push_str(FLEX_COLUMN);
-                css.push_str("margin:0;");
-            }
-            // Pre: preserve whitespace
-            ElementKind::Pre => {
-                css.push_str("margin:0;white-space:pre;");
-                css.push_str(MONOSPACE_STACK);
-            }
-            // Code / Kbd: monospace font
-            ElementKind::Code | ElementKind::Kbd => css.push_str(MONOSPACE_STACK),
-            ElementKind::DefinitionList => css.push_str("margin:0;"),
-            ElementKind::DefinitionDescription => {
-                css.push_str("margin:0;");
-                css.push_str(FLEX_COLUMN);
-            }
-            ElementKind::Fieldset => {
-                css.push_str(FLEX_COLUMN);
-                // Align padding to the px-based scale used by Badge/Tag/Chip
-                // rather than the old 0.5em (which depended on font-size).
-                css.push_str("border:1px solid currentColor;padding:8px;margin:0;");
-            }
-            ElementKind::Grid => css.push_str("display:grid;"),
-            ElementKind::Stack => css.push_str("position:relative;"),
-            ElementKind::Badge => {
-                css.push_str(PILL_BASE);
-                css.push_str("justify-content:center;border-radius:9999px;line-height:1;");
-            }
-            ElementKind::Tag => {
-                css.push_str(PILL_BASE);
-                css.push_str("border-radius:4px;");
-            }
-            ElementKind::Tooltip => css.push_str("position:relative;cursor:help;"),
-            ElementKind::Spacer => css.push_str("flex:1;"),
-            ElementKind::Avatar => css.push_str("display:inline-flex;align-items:center;justify-content:center;border-radius:9999px;overflow:hidden;flex-shrink:0;"),
-            ElementKind::Carousel => css.push_str("display:flex;flex-direction:row;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none;"),
-            ElementKind::Chip => css.push_str("display:inline-flex;align-items:center;gap:4px;padding:4px 12px;border-radius:9999px;font-size:0.875rem;border:1px solid currentColor;"),
-            // Overlay layers fill the parent. Parent gets position:relative
-            // applied automatically (see has_overlay_children check below).
-            ElementKind::InFront => {
-                css.push_str(FLEX_COLUMN);
-                css.push_str("position:absolute;inset:0;");
-            }
-            ElementKind::Behind => {
-                css.push_str(FLEX_COLUMN);
-                css.push_str("position:absolute;inset:0;z-index:-1;");
-            }
+            ElementKind::Column | ElementKind::El => css.push_str(FLEX_COLUMN),
+            ElementKind::Paragraph => css.push_str("margin:0;"),
+            ElementKind::Tag(spec) => css.push_str(spec.css),
             _ => {}
         }
         // Children of @carousel get scroll-snap-align and flex-shrink
-        if matches!(parent_kind, Some(ElementKind::Carousel)) {
+        if parent_kind.is_some_and(|k| k.is_tag("carousel")) {
             css.push_str("scroll-snap-align:start;flex-shrink:0;");
         }
     }
@@ -3633,19 +3346,13 @@ fn vlq_encode(value: i64, out: &mut String) {
     }
 }
 
-/// Check if a specific element kind exists anywhere in the node tree.
-fn has_element_kind(nodes: &[Node], target: &ElementKind) -> bool {
-    for node in nodes {
-        if let Node::Element(elem) = node {
-            if elem.kind == *target {
-                return true;
-            }
-            if has_element_kind(&elem.children, target) {
-                return true;
-            }
-        }
-    }
-    false
+
+/// Does the tree contain the table element `name` (e.g. `"main"`)?
+fn has_tag(nodes: &[Node], name: &str) -> bool {
+    nodes.iter().any(|node| match node {
+        Node::Element(elem) => elem.kind.is_tag(name) || has_tag(&elem.children, name),
+        _ => false,
+    })
 }
 
 /// Collect unique external domains from generated HTML for DNS prefetch hints.

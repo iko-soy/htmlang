@@ -394,7 +394,7 @@ fn lint_nodes(nodes: &[htmlang::ast::Node], path: &str, depth: usize, warnings: 
             }
 
             // @input without type
-            if elem.kind == htmlang::ast::ElementKind::Input
+            if elem.kind.is_tag("input")
                 && !elem.attrs.iter().any(|a| a.key == "type")
             {
                 warnings.push(format!(
@@ -424,7 +424,7 @@ fn lint_nodes(nodes: &[htmlang::ast::Node], path: &str, depth: usize, warnings: 
             }
 
             // @button without type
-            if elem.kind == htmlang::ast::ElementKind::Button
+            if elem.kind.is_tag("button")
                 && !elem.attrs.iter().any(|a| a.key == "type")
             {
                 warnings.push(format!(

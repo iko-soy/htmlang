@@ -2809,103 +2809,11 @@ fn parse_single_element(
 fn argument_is_special(kind: &ElementKind) -> bool {
     matches!(
         kind,
-        ElementKind::Link
-            | ElementKind::Image
-            | ElementKind::Video
-            | ElementKind::Audio
-            | ElementKind::Source
-            | ElementKind::Form
-            | ElementKind::Iframe
-            | ElementKind::Script
-            | ElementKind::Slot(_)
-    )
+        ElementKind::Link | ElementKind::Image | ElementKind::Script | ElementKind::Slot(_)
+    ) || kind
+        .spec()
+        .is_some_and(|spec| matches!(spec.arg, TagArg::Attr(_)))
 }
-
-const KNOWN_ELEMENTS: &[&str] = &[
-    "row",
-    "column",
-    "el",
-    "text",
-    "paragraph",
-    "image",
-    "link",
-    "children",
-    "input",
-    "button",
-    "select",
-    "textarea",
-    "option",
-    "label",
-    "slot",
-    "nav",
-    "header",
-    "footer",
-    "main",
-    "section",
-    "article",
-    "aside",
-    "list",
-    "item",
-    "table",
-    "thead",
-    "tbody",
-    "tr",
-    "td",
-    "th",
-    "video",
-    "audio",
-    "form",
-    "details",
-    "summary",
-    "blockquote",
-    "cite",
-    "code",
-    "pre",
-    "hr",
-    "figure",
-    "figcaption",
-    "progress",
-    "meter",
-    "fragment",
-    "dialog",
-    "dl",
-    "dt",
-    "dd",
-    "fieldset",
-    "legend",
-    "picture",
-    "source",
-    "time",
-    "mark",
-    "kbd",
-    "abbr",
-    "datalist",
-    "iframe",
-    "output",
-    "canvas",
-    "h1",
-    "h2",
-    "h3",
-    "h4",
-    "h5",
-    "h6",
-    "grid",
-    "stack",
-    "spacer",
-    "badge",
-    "tooltip",
-    "avatar",
-    "carousel",
-    "chip",
-    "tag",
-    "script",
-    "noscript",
-    "address",
-    "search",
-    "breadcrumb",
-    "in-front",
-    "behind",
-];
 
 const KNOWN_DIRECTIVES: &[&str] = &[
     "page",
@@ -2946,113 +2854,26 @@ const KNOWN_DIRECTIVES: &[&str] = &[
 ];
 
 fn parse_element_kind(s: &str, line_num: usize) -> Result<ElementKind, ParseError> {
-    match s {
-        "row" => Ok(ElementKind::Row),
-        "column" => Ok(ElementKind::Column),
-        "el" => Ok(ElementKind::El),
-        "text" => Ok(ElementKind::Text),
-        "paragraph" => Ok(ElementKind::Paragraph),
-        "image" => Ok(ElementKind::Image),
-        "link" => Ok(ElementKind::Link),
-        "children" => Ok(ElementKind::Children),
-        "input" => Ok(ElementKind::Input),
-        "button" => Ok(ElementKind::Button),
-        "select" => Ok(ElementKind::Select),
-        "textarea" => Ok(ElementKind::Textarea),
-        "option" => Ok(ElementKind::Option),
-        "label" => Ok(ElementKind::Label),
-        "slot" => Ok(ElementKind::Slot(String::new())), // slot name filled in by parse_single_element
-        "nav" => Ok(ElementKind::Nav),
-        "header" => Ok(ElementKind::Header),
-        "footer" => Ok(ElementKind::Footer),
-        "main" => Ok(ElementKind::Main),
-        "section" => Ok(ElementKind::Section),
-        "article" => Ok(ElementKind::Article),
-        "aside" => Ok(ElementKind::Aside),
-        "list" => Ok(ElementKind::List),
-        "item" => Ok(ElementKind::ListItem),
-        "table" => Ok(ElementKind::Table),
-        "thead" => Ok(ElementKind::TableHead),
-        "tbody" => Ok(ElementKind::TableBody),
-        "tr" => Ok(ElementKind::TableRow),
-        "td" => Ok(ElementKind::TableCell),
-        "th" => Ok(ElementKind::TableHeaderCell),
-        "video" => Ok(ElementKind::Video),
-        "audio" => Ok(ElementKind::Audio),
-        "form" => Ok(ElementKind::Form),
-        "details" => Ok(ElementKind::Details),
-        "summary" => Ok(ElementKind::Summary),
-        "blockquote" => Ok(ElementKind::Blockquote),
-        "cite" => Ok(ElementKind::Cite),
-        "code" => Ok(ElementKind::Code),
-        "pre" => Ok(ElementKind::Pre),
-        "hr" => Ok(ElementKind::HorizontalRule),
-        "figure" => Ok(ElementKind::Figure),
-        "figcaption" => Ok(ElementKind::FigCaption),
-        "progress" => Ok(ElementKind::Progress),
-        "meter" => Ok(ElementKind::Meter),
-        "fragment" => Ok(ElementKind::Fragment),
-        "dialog" => Ok(ElementKind::Dialog),
-        "dl" => Ok(ElementKind::DefinitionList),
-        "dt" => Ok(ElementKind::DefinitionTerm),
-        "dd" => Ok(ElementKind::DefinitionDescription),
-        "fieldset" => Ok(ElementKind::Fieldset),
-        "legend" => Ok(ElementKind::Legend),
-        "picture" => Ok(ElementKind::Picture),
-        "source" => Ok(ElementKind::Source),
-        "time" => Ok(ElementKind::Time),
-        "mark" => Ok(ElementKind::Mark),
-        "kbd" => Ok(ElementKind::Kbd),
-        "abbr" => Ok(ElementKind::Abbr),
-        "h1" => Ok(ElementKind::H1),
-        "h2" => Ok(ElementKind::H2),
-        "h3" => Ok(ElementKind::H3),
-        "h4" => Ok(ElementKind::H4),
-        "h5" => Ok(ElementKind::H5),
-        "h6" => Ok(ElementKind::H6),
-        "datalist" => Ok(ElementKind::Datalist),
-        "iframe" => Ok(ElementKind::Iframe),
-        "output" => Ok(ElementKind::Output),
-        "canvas" => Ok(ElementKind::Canvas),
-        "grid" => Ok(ElementKind::Grid),
-        "stack" => Ok(ElementKind::Stack),
-        "spacer" => Ok(ElementKind::Spacer),
-        "badge" => Ok(ElementKind::Badge),
-        "tooltip" => Ok(ElementKind::Tooltip),
-        "avatar" => Ok(ElementKind::Avatar),
-        "carousel" => Ok(ElementKind::Carousel),
-        "chip" => Ok(ElementKind::Chip),
-        "tag" => Ok(ElementKind::Tag),
-        "script" => Ok(ElementKind::Script),
-        "noscript" => Ok(ElementKind::Noscript),
-        "address" => Ok(ElementKind::Address),
-        "search" => Ok(ElementKind::Search),
-        "breadcrumb" => Ok(ElementKind::Breadcrumb),
-        "in-front" => Ok(ElementKind::InFront),
-        "behind" => Ok(ElementKind::Behind),
-        _ => {
-            if let Some(hint) = removed_syntax_hint(&format!("@{}", s)) {
-                return Err(ParseError {
-                    line: line_num,
-                    message: hint,
-                });
-            }
-            let all_known: Vec<&str> = KNOWN_ELEMENTS
-                .iter()
-                .chain(KNOWN_DIRECTIVES.iter())
-                .copied()
-                .collect();
-            let suggestion = suggest_closest(s, &all_known);
-            let msg = match suggestion {
-                Some(closest) => format!("unknown element @{}, did you mean @{}?", s, closest),
-                None => format!("unknown element @{}", s),
-            };
-            Err(ParseError {
-                line: line_num,
-                message: msg,
-            })
-        }
+    if let Some(kind) = ElementKind::from_name(s) {
+        return Ok(kind);
     }
+    if let Some(hint) = removed_syntax_hint(&format!("@{}", s)) {
+        return Err(ParseError {
+            line: line_num,
+            message: hint,
+        });
+    }
+    let all_known: Vec<&str> = ElementKind::all_names()
+        .chain(KNOWN_DIRECTIVES.iter().copied())
+        .collect();
+    let message = match suggest_closest(s, &all_known) {
+        Some(closest) => format!("unknown element @{}, did you mean @{}?", s, closest),
+        None => format!("unknown element @{}", s),
+    };
+    Err(ParseError {
+        line: line_num,
+        message,
+    })
 }
 
 /// Directives and element names removed when the language was simplified,
@@ -4273,131 +4094,15 @@ const CONTAINER_ONLY_ATTRS: &[&str] = &[
     "container-type",
 ];
 
-fn element_kind_name(kind: &ElementKind) -> &'static str {
-    match kind {
-        ElementKind::Row => "@row",
-        ElementKind::Column => "@column",
-        ElementKind::El => "@el",
-        ElementKind::Text => "@text",
-        ElementKind::Paragraph => "@paragraph",
-        ElementKind::Image => "@image",
-        ElementKind::Link => "@link",
-        ElementKind::Children => "@children",
-        ElementKind::Input => "@input",
-        ElementKind::Button => "@button",
-        ElementKind::Select => "@select",
-        ElementKind::Textarea => "@textarea",
-        ElementKind::Option => "@option",
-        ElementKind::Label => "@label",
-        ElementKind::Slot(_) => "@slot",
-        ElementKind::Nav => "@nav",
-        ElementKind::Header => "@header",
-        ElementKind::Footer => "@footer",
-        ElementKind::Main => "@main",
-        ElementKind::Section => "@section",
-        ElementKind::Article => "@article",
-        ElementKind::Aside => "@aside",
-        ElementKind::List => "@list",
-        ElementKind::ListItem => "@item",
-        ElementKind::Table => "@table",
-        ElementKind::TableHead => "@thead",
-        ElementKind::TableBody => "@tbody",
-        ElementKind::TableRow => "@tr",
-        ElementKind::TableCell => "@td",
-        ElementKind::TableHeaderCell => "@th",
-        ElementKind::Video => "@video",
-        ElementKind::Audio => "@audio",
-        ElementKind::Form => "@form",
-        ElementKind::Details => "@details",
-        ElementKind::Summary => "@summary",
-        ElementKind::Blockquote => "@blockquote",
-        ElementKind::Cite => "@cite",
-        ElementKind::Code => "@code",
-        ElementKind::Pre => "@pre",
-        ElementKind::HorizontalRule => "@hr",
-        ElementKind::Figure => "@figure",
-        ElementKind::FigCaption => "@figcaption",
-        ElementKind::Progress => "@progress",
-        ElementKind::Meter => "@meter",
-        ElementKind::Fragment => "@fragment",
-        ElementKind::Dialog => "@dialog",
-        ElementKind::DefinitionList => "@dl",
-        ElementKind::DefinitionTerm => "@dt",
-        ElementKind::DefinitionDescription => "@dd",
-        ElementKind::Fieldset => "@fieldset",
-        ElementKind::Legend => "@legend",
-        ElementKind::Picture => "@picture",
-        ElementKind::Source => "@source",
-        ElementKind::Time => "@time",
-        ElementKind::Mark => "@mark",
-        ElementKind::Kbd => "@kbd",
-        ElementKind::Abbr => "@abbr",
-        ElementKind::H1 => "@h1",
-        ElementKind::H2 => "@h2",
-        ElementKind::H3 => "@h3",
-        ElementKind::H4 => "@h4",
-        ElementKind::H5 => "@h5",
-        ElementKind::H6 => "@h6",
-        ElementKind::Datalist => "@datalist",
-        ElementKind::Iframe => "@iframe",
-        ElementKind::Output => "@output",
-        ElementKind::Canvas => "@canvas",
-        ElementKind::Grid => "@grid",
-        ElementKind::Stack => "@stack",
-        ElementKind::Spacer => "@spacer",
-        ElementKind::Badge => "@badge",
-        ElementKind::Tooltip => "@tooltip",
-        ElementKind::Avatar => "@avatar",
-        ElementKind::Carousel => "@carousel",
-        ElementKind::Chip => "@chip",
-        ElementKind::Tag => "@tag",
-        ElementKind::Script => "@script",
-        ElementKind::Noscript => "@noscript",
-        ElementKind::Address => "@address",
-        ElementKind::Search => "@search",
-        ElementKind::Breadcrumb => "@breadcrumb",
-        ElementKind::InFront => "@in-front",
-        ElementKind::Behind => "@behind",
-    }
+fn element_kind_name(kind: &ElementKind) -> String {
+    format!("@{}", kind.name())
 }
 
 fn is_container(kind: &ElementKind) -> bool {
     matches!(
         kind,
-        ElementKind::Row
-            | ElementKind::Column
-            | ElementKind::El
-            | ElementKind::Nav
-            | ElementKind::Header
-            | ElementKind::Footer
-            | ElementKind::Main
-            | ElementKind::Section
-            | ElementKind::Article
-            | ElementKind::Aside
-            | ElementKind::List
-            | ElementKind::ListItem
-            | ElementKind::Form
-            | ElementKind::Details
-            | ElementKind::Figure
-            | ElementKind::Blockquote
-            | ElementKind::Dialog
-            | ElementKind::DefinitionList
-            | ElementKind::DefinitionTerm
-            | ElementKind::DefinitionDescription
-            | ElementKind::Fieldset
-            | ElementKind::Datalist
-            | ElementKind::Iframe
-            | ElementKind::Canvas
-            | ElementKind::Grid
-            | ElementKind::Stack
-            | ElementKind::Carousel
-            | ElementKind::Noscript
-            | ElementKind::Address
-            | ElementKind::Search
-            | ElementKind::Breadcrumb
-            | ElementKind::InFront
-            | ElementKind::Behind
-    )
+        ElementKind::Row | ElementKind::Column | ElementKind::El | ElementKind::Breadcrumb
+    ) || kind.spec().is_some_and(|spec| spec.container)
 }
 
 fn validate_tree(
@@ -4453,7 +4158,7 @@ fn validate_tree(
 
                 // Form-specific: placeholder only on @input/@textarea
                 if base == "placeholder"
-                    && !matches!(elem.kind, ElementKind::Input | ElementKind::Textarea)
+                    && !(elem.kind.is_tag("input") || elem.kind.is_tag("textarea"))
                 {
                     diagnostics.push(Diagnostic {
                         line: elem.line_num,
@@ -4468,7 +4173,7 @@ fn validate_tree(
                 }
 
                 // 'for' only on @label
-                if base == "for" && !matches!(elem.kind, ElementKind::Label) {
+                if base == "for" && !elem.kind.is_tag("label") {
                     diagnostics.push(Diagnostic {
                         line: elem.line_num,
                         column: None,
@@ -4482,7 +4187,7 @@ fn validate_tree(
                 }
 
                 // 'rows'/'cols' only on @textarea
-                if (base == "rows" || base == "cols") && !matches!(elem.kind, ElementKind::Textarea)
+                if (base == "rows" || base == "cols") && !elem.kind.is_tag("textarea")
                 {
                     diagnostics.push(Diagnostic {
                         line: elem.line_num,
@@ -4498,7 +4203,7 @@ fn validate_tree(
                 }
 
                 // 'ordered' only on @list
-                if base == "ordered" && !matches!(elem.kind, ElementKind::List) {
+                if base == "ordered" && !elem.kind.is_tag("list") {
                     diagnostics.push(Diagnostic {
                         line: elem.line_num,
                         column: None,
@@ -4521,7 +4226,7 @@ fn validate_tree(
                         | "playsinline"
                         | "poster"
                         | "preload"
-                ) && !matches!(elem.kind, ElementKind::Video | ElementKind::Audio)
+                ) && !matches!(elem.kind.name(), "video" | "audio")
                 {
                     diagnostics.push(Diagnostic {
                         line: elem.line_num,
@@ -4547,7 +4252,7 @@ fn validate_tree(
                     source_line: None,
                 });
             }
-            if matches!(elem.kind, ElementKind::Input)
+            if elem.kind.is_tag("input")
                 && !elem.attrs.iter().any(|a| a.key == "type")
             {
                 diagnostics.push(Diagnostic {
@@ -4610,17 +4315,14 @@ fn validate_tree(
             }
 
             // @form inputs should have associated @label
-            if matches!(
-                elem.kind,
-                ElementKind::Input | ElementKind::Select | ElementKind::Textarea
-            ) {
+            if matches!(elem.kind.name(), "input" | "select" | "textarea") {
                 let has_id = elem.attrs.iter().any(|a| a.key == "id");
                 let has_aria_label = elem
                     .attrs
                     .iter()
                     .any(|a| a.key == "aria-label" || a.key == "aria-labelledby");
                 let has_title = elem.attrs.iter().any(|a| a.key == "title");
-                let in_label = matches!(parent_kind, Some(ElementKind::Label));
+                let in_label = parent_kind.is_some_and(|k| k.is_tag("label"));
                 if !has_id && !has_aria_label && !has_title && !in_label {
                     diagnostics.push(Diagnostic {
                         line: elem.line_num,
@@ -4636,7 +4338,7 @@ fn validate_tree(
             }
 
             // @iframe should have title attribute
-            if matches!(elem.kind, ElementKind::Iframe)
+            if elem.kind.is_tag("iframe")
                 && !elem.attrs.iter().any(|a| a.key == "title")
             {
                 diagnostics.push(Diagnostic {
@@ -4649,7 +4351,7 @@ fn validate_tree(
             }
 
             // @button should have accessible text
-            if matches!(elem.kind, ElementKind::Button) {
+            if elem.kind.is_tag("button") {
                 let has_text = elem.argument.is_some() || !elem.children.is_empty();
                 let has_aria = elem.attrs.iter().any(|a| a.key == "aria-label");
                 if !has_text && !has_aria {
@@ -4665,7 +4367,7 @@ fn validate_tree(
             }
 
             // @video should have captions or aria-label
-            if matches!(elem.kind, ElementKind::Video) {
+            if elem.kind.is_tag("video") {
                 let has_aria = elem
                     .attrs
                     .iter()
@@ -4673,7 +4375,7 @@ fn validate_tree(
                 let has_track = elem
                     .children
                     .iter()
-                    .any(|c| matches!(c, Node::Element(e) if e.kind == ElementKind::Source));
+                    .any(|c| matches!(c, Node::Element(e) if e.kind.is_tag("source")));
                 if !has_aria && !has_track {
                     diagnostics.push(Diagnostic {
                         line: elem.line_num,
