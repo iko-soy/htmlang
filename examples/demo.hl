@@ -223,8 +223,8 @@
           type=submit,
           padding 10 16, background $primary, color white, bold,
           rounded 6, border 0,
-          hover:background $primary|darken:10,
-          active:background $primary|darken:20,
+          hover:background ${darken($primary, 10)},
+          active:background ${darken($primary, 20)},
           transition background 0.15s ease,
           cursor pointer
         ] Subscribe
@@ -317,8 +317,8 @@
     @row [spacing $base, align-items center]
       @el [
         padding 12 20, background $primary, color white, bold, rounded 8,
-        hover:background $primary|darken:10,
-        active:background $primary|darken:20,
+        hover:background ${darken($primary, 10)},
+        active:background ${darken($primary, 20)},
         transition all 0.15s ease,
         cursor pointer
       ] > @link https://github.com

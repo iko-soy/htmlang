@@ -33,13 +33,13 @@ fn compile_in(dir: &std::path::Path, input: &str) -> String {
 
 #[test]
 fn truncate_filter_handles_multibyte_text() {
-    let out = compile("@let s héllo wörld\n@text $s|truncate:2");
+    let out = compile("@let s héllo wörld\n@text ${truncate($s, 2)}");
     assert!(out.contains("hé..."), "{}", out);
 }
 
 #[test]
 fn length_filter_counts_characters() {
-    let out = compile("@let s héllo\n@text $s|length");
+    let out = compile("@let s héllo\n@text ${length($s)}");
     assert!(out.contains(">5<"), "{}", out);
 }
 

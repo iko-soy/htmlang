@@ -121,11 +121,7 @@ impl ParseContext {
     fn eval(&mut self, src: &str, line: usize) -> Option<crate::expr::Value> {
         track_var_refs(src, &mut self.used_variables);
         let vars = &self.variables;
-        let resolve = |reference: &str| {
-            let name = reference.split('|').next().unwrap_or(reference);
-            vars.contains_key(name)
-                .then(|| substitute_vars(&format!("${}", reference), vars))
-        };
+        let resolve = |name: &str| vars.get(name).cloned();
         let result = crate::expr::eval(src, &resolve);
         match result {
             Ok(value) => Some(value),
@@ -488,6 +484,20 @@ impl Parser {
     fn parse_line(&mut self, ctx: &mut ParseContext) -> Result<Option<Vec<Node>>, ParseError> {
         let line_num = self.lines[self.pos].line_num;
         ctx.current_line = line_num;
+        if let LineContent::Normal(text) = &self.lines[self.pos].content
+            && let Some(filter) = old_filter_syntax(text)
+        {
+            ctx.diagnostics.push(Diagnostic {
+                line: line_num,
+                column: None,
+                message: format!(
+                    "`${}|{}` filters are functions now: write `${{{}(${})}}` (run `htmlang upgrade`)",
+                    filter.0, filter.1, filter.1, filter.0
+                ),
+                severity: Severity::Warning,
+                source_line: Some(text.clone()),
+            });
+        }
         let current_indent = self.lines[self.pos].indent;
 
         // Handle raw content
@@ -3629,7 +3639,7 @@ fn validate_tree(
                     .find(|a| crate::vocab::base_attribute(&a.key) == "color")
                     .and_then(|a| a.value.as_deref());
                 if let (Some(bg), Some(fg)) = (bg_color, fg_color)
-                    && let (Some(bg_rgb), Some(fg_rgb)) = (parse_hex_rgb(bg), parse_hex_rgb(fg))
+                    && let (Some(bg_rgb), Some(fg_rgb)) = (crate::expr::parse_hex_rgb(bg), crate::expr::parse_hex_rgb(fg))
                 {
                     let ratio = contrast_ratio(bg_rgb, fg_rgb);
                     if ratio < 4.5 {
@@ -3741,28 +3751,6 @@ fn validate_tree(
     }
 }
 
-fn parse_hex_rgb(s: &str) -> Option<(u8, u8, u8)> {
-    let s = s.strip_prefix('#')?;
-    if !s.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return None;
-    }
-    match s.len() {
-        3 => {
-            let r = u8::from_str_radix(&s[0..1], 16).ok()?;
-            let g = u8::from_str_radix(&s[1..2], 16).ok()?;
-            let b = u8::from_str_radix(&s[2..3], 16).ok()?;
-            Some((r * 17, g * 17, b * 17))
-        }
-        6 => {
-            let r = u8::from_str_radix(&s[0..2], 16).ok()?;
-            let g = u8::from_str_radix(&s[2..4], 16).ok()?;
-            let b = u8::from_str_radix(&s[4..6], 16).ok()?;
-            Some((r, g, b))
-        }
-        _ => None,
-    }
-}
-
 fn relative_luminance(r: u8, g: u8, b: u8) -> f64 {
     fn linearize(c: u8) -> f64 {
         let s = c as f64 / 255.0;
@@ -3782,101 +3770,96 @@ fn contrast_ratio(c1: (u8, u8, u8), c2: (u8, u8, u8)) -> f64 {
     (lighter + 0.05) / (darker + 0.05)
 }
 
-fn lighten_color(rgb: (u8, u8, u8), amount: f64) -> (u8, u8, u8) {
-    let r = rgb.0 as f64 + (255.0 - rgb.0 as f64) * amount.clamp(0.0, 1.0);
-    let g = rgb.1 as f64 + (255.0 - rgb.1 as f64) * amount.clamp(0.0, 1.0);
-    let b = rgb.2 as f64 + (255.0 - rgb.2 as f64) * amount.clamp(0.0, 1.0);
-    (r.round() as u8, g.round() as u8, b.round() as u8)
-}
-
-fn darken_color(rgb: (u8, u8, u8), amount: f64) -> (u8, u8, u8) {
-    let factor = 1.0 - amount.clamp(0.0, 1.0);
-    let r = (rgb.0 as f64 * factor).round() as u8;
-    let g = (rgb.1 as f64 * factor).round() as u8;
-    let b = (rgb.2 as f64 * factor).round() as u8;
-    (r, g, b)
-}
-
-fn mix_colors(c1: (u8, u8, u8), c2: (u8, u8, u8), weight: f64) -> (u8, u8, u8) {
-    let w = weight.clamp(0.0, 1.0);
-    let r = (c1.0 as f64 * (1.0 - w) + c2.0 as f64 * w).round() as u8;
-    let g = (c1.1 as f64 * (1.0 - w) + c2.1 as f64 * w).round() as u8;
-    let b = (c1.2 as f64 * (1.0 - w) + c2.2 as f64 * w).round() as u8;
-    (r, g, b)
-}
-
 // ---------------------------------------------------------------------------
 // Variable substitution
 // ---------------------------------------------------------------------------
 
+/// Interpolate `$name` variables and `${expr}` expressions into text.
+/// Undefined variables, and expressions that don't evaluate, are left as
+/// written so they show up in the output.
 fn substitute_vars(input: &str, vars: &HashMap<String, String>) -> String {
     if !input.contains('$') {
         return input.to_string();
     }
-
-    let mut result = String::new();
-    let chars: Vec<char> = input.chars().collect();
-    let mut i = 0;
-
-    while i < chars.len() {
-        if chars[i] == '$'
-            && i + 1 < chars.len()
-            && (chars[i + 1].is_alphanumeric() || chars[i + 1] == '_' || chars[i + 1] == '-')
+    let is_name_char = |c: char| c.is_alphanumeric() || matches!(c, '_' | '-' | '.');
+    let mut result = String::with_capacity(input.len());
+    let mut rest = input;
+    while let Some(pos) = rest.find('$') {
+        result.push_str(&rest[..pos]);
+        let after = &rest[pos + 1..];
+        if after.starts_with('{')
+            && let Some(close) = matching_brace(after)
         {
-            let start = i + 1;
-            let mut end = start;
-            while end < chars.len()
-                && (chars[end].is_alphanumeric()
-                    || chars[end] == '-'
-                    || chars[end] == '_'
-                    || chars[end] == '.')
-            {
-                end += 1;
+            let source = &after[1..close];
+            let resolve = |name: &str| vars.get(name).cloned();
+            match crate::expr::eval(source, &resolve) {
+                Ok(value) => result.push_str(&value.to_string()),
+                Err(_) => result.push_str(&rest[pos..pos + 1 + close + 1]),
             }
-            // Strip trailing dot (not part of name if at end)
-            while end > start && chars[end - 1] == '.' {
-                end -= 1;
-            }
-            let name: String = chars[start..end].iter().collect();
-
-            // Collect pipe filters: $name|filter1|filter2:arg
-            let mut filters: Vec<String> = Vec::new();
-            while end < chars.len() && chars[end] == '|' {
-                end += 1; // skip '|'
-                let filter_start = end;
-                while end < chars.len()
-                    && chars[end] != '|'
-                    && chars[end] != ' '
-                    && chars[end] != ','
-                    && chars[end] != ']'
-                    && chars[end] != '}'
-                {
-                    end += 1;
-                }
-                let filter: String = chars[filter_start..end].iter().collect();
-                if !filter.is_empty() {
-                    filters.push(filter);
-                }
-            }
-
-            if let Some(value) = vars.get(&name) {
-                let mut val = value.clone();
-                for filter in &filters {
-                    val = apply_filter(&val, filter);
-                }
-                result.push_str(&val);
-            } else {
+            rest = &after[close + 1..];
+            continue;
+        }
+        let mut end = after.find(|c: char| !is_name_char(c)).unwrap_or(after.len());
+        while end > 0 && after[..end].ends_with('.') {
+            end -= 1;
+        }
+        let name = &after[..end];
+        match vars.get(name) {
+            Some(value) if !name.is_empty() => result.push_str(value),
+            _ => {
                 result.push('$');
-                result.push_str(&name);
+                result.push_str(name);
             }
-            i = end;
-        } else {
-            result.push(chars[i]);
-            i += 1;
+        }
+        rest = &after[end..];
+    }
+    result.push_str(rest);
+    result
+}
+
+/// The first `$name|filter` (old filter syntax) in `text`, as (name, filter).
+fn old_filter_syntax(text: &str) -> Option<(String, String)> {
+    const FILTERS: &[&str] = &[
+        "uppercase", "lowercase", "capitalize", "trim", "length", "reverse", "truncate",
+        "replace", "default", "lighten", "darken", "alpha", "mix",
+    ];
+    let mut rest = text;
+    while let Some(pos) = rest.find('$') {
+        let after = &rest[pos + 1..];
+        let end = after
+            .find(|c: char| !(c.is_alphanumeric() || matches!(c, '_' | '-' | '.')))
+            .unwrap_or(after.len());
+        if let Some(filter) = after[end..].strip_prefix('|') {
+            let name_end = filter.find(|c: char| !c.is_ascii_alphabetic()).unwrap_or(filter.len());
+            if end > 0 && FILTERS.contains(&&filter[..name_end]) {
+                return Some((after[..end].to_string(), filter[..name_end].to_string()));
+            }
+        }
+        rest = &after[end..];
+    }
+    None
+}
+
+/// Index of the `}` matching the `{` that `s` starts with (skipping
+/// braces inside string literals).
+fn matching_brace(s: &str) -> Option<usize> {
+    let mut depth = 0;
+    let mut in_string = false;
+    for (i, c) in s.char_indices() {
+        match c {
+            '"' => in_string = !in_string,
+            _ if in_string => {}
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            _ => {}
         }
     }
-
-    result
+    None
 }
 
 /// Parse a keyframe line in htmlang syntax: `from [opacity 0]` / `50% [transform scale(1.5)]`
@@ -3918,87 +3901,6 @@ fn parse_keyframe_line(line: &str) -> Option<String> {
     }
 
     Some(format!("{}{{{}}}", selector, css))
-}
-
-fn apply_filter(value: &str, filter: &str) -> String {
-    if let Some(arg) = filter.strip_prefix("truncate:") {
-        if let Ok(n) = arg.parse::<usize>()
-            && value.chars().count() > n
-        {
-            return format!("{}...", value.chars().take(n).collect::<String>());
-        }
-        return value.to_string();
-    }
-    if let Some(rest) = filter.strip_prefix("replace:") {
-        if let Some((old, new)) = rest.split_once(':') {
-            return value.replace(old, new);
-        }
-        return value.to_string();
-    }
-    if let Some(arg) = filter.strip_prefix("default:") {
-        if value.is_empty() {
-            return arg.to_string();
-        }
-        return value.to_string();
-    }
-    // Color functions: lighten:N, darken:N, alpha:N, mix:COLOR:N
-    if let Some(arg) = filter.strip_prefix("lighten:") {
-        if let Ok(amount) = arg.parse::<f64>()
-            && let Some(rgb) = parse_hex_rgb(value)
-        {
-            let (r, g, b) = lighten_color(rgb, amount / 100.0);
-            return format!("#{:02x}{:02x}{:02x}", r, g, b);
-        }
-        return value.to_string();
-    }
-    if let Some(arg) = filter.strip_prefix("darken:") {
-        if let Ok(amount) = arg.parse::<f64>()
-            && let Some(rgb) = parse_hex_rgb(value)
-        {
-            let (r, g, b) = darken_color(rgb, amount / 100.0);
-            return format!("#{:02x}{:02x}{:02x}", r, g, b);
-        }
-        return value.to_string();
-    }
-    if let Some(arg) = filter.strip_prefix("alpha:") {
-        if let Ok(a) = arg.parse::<f64>()
-            && let Some((r, g, b)) = parse_hex_rgb(value)
-        {
-            let a8 = (a.clamp(0.0, 1.0) * 255.0) as u8;
-            return format!("#{:02x}{:02x}{:02x}{:02x}", r, g, b, a8);
-        }
-        return value.to_string();
-    }
-    if let Some(arg) = filter.strip_prefix("mix:") {
-        // mix:COLOR:PERCENTAGE (e.g., mix:#ffffff:50)
-        let parts: Vec<&str> = arg.splitn(2, ':').collect();
-        if parts.len() == 2
-            && let (Some(c1), Some(c2), Ok(pct)) = (
-                parse_hex_rgb(value),
-                parse_hex_rgb(parts[0]),
-                parts[1].parse::<f64>(),
-            )
-        {
-            let (r, g, b) = mix_colors(c1, c2, pct / 100.0);
-            return format!("#{:02x}{:02x}{:02x}", r, g, b);
-        }
-        return value.to_string();
-    }
-    match filter {
-        "uppercase" => value.to_uppercase(),
-        "lowercase" => value.to_lowercase(),
-        "capitalize" => {
-            let mut chars = value.chars();
-            match chars.next() {
-                Some(c) => format!("{}{}", c.to_uppercase(), chars.as_str()),
-                None => String::new(),
-            }
-        }
-        "trim" => value.trim().to_string(),
-        "length" => value.chars().count().to_string(),
-        "reverse" => value.chars().rev().collect(),
-        _ => value.to_string(),
-    }
 }
 
 // ---------------------------------------------------------------------------

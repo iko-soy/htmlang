@@ -92,7 +92,7 @@ pub fn upgrade(input: &str) -> Upgrade {
             // The directive line is upgraded like any other; its body is not.
             let end = block_end(&lines, i);
             let mut header = rewrite_attr_regions(line, &mut attr_depth, &mut true, &user_defined);
-            header = rename_filters(&header);
+            header = convert_filters(&header);
             if header != line {
                 changes += 1;
             }
@@ -123,7 +123,7 @@ pub fn upgrade(input: &str) -> Upgrade {
         }
         new_line =
             rewrite_attr_regions(&new_line, &mut attr_depth, &mut element_attrs, &user_defined);
-        new_line = rename_filters(&new_line);
+        new_line = convert_filters(&new_line);
         if new_line != line {
             changes += 1;
         }
@@ -990,6 +990,76 @@ fn rename_filters(line: &str) -> String {
     out
 }
 
+/// Turn `$name|filter:arg|...` chains into function calls: bare in
+/// expressions (`@if`, `@else if`, `@assert`, `@let x = ...`), and as
+/// `${...}` interpolation everywhere else.
+fn convert_filters(line: &str) -> String {
+    let line = rename_filters(line);
+    if !line.contains('|') {
+        return line;
+    }
+    let trimmed = line.trim_start();
+    let expression_line = ["@if ", "@else if ", "@assert "]
+        .iter()
+        .any(|p| trimmed.starts_with(p))
+        || trimmed
+            .strip_prefix("@let ")
+            .and_then(|r| r.split_once(' '))
+            .is_some_and(|(_, v)| v.trim_start().starts_with('='));
+    let is_name = |c: char| c.is_alphanumeric() || matches!(c, '_' | '-' | '.');
+    let mut out = String::with_capacity(line.len() + 8);
+    let mut rest = line.as_str();
+    while let Some(pos) = rest.find('$') {
+        out.push_str(&rest[..pos]);
+        let after = &rest[pos + 1..];
+        let name_end = after.find(|c: char| !is_name(c)).unwrap_or(after.len());
+        let mut expr = format!("${}", &after[..name_end]);
+        let mut tail = &after[name_end..];
+        let mut converted = false;
+        while name_end > 0 && tail.starts_with('|') {
+            // A filter is a name (letters) with optional `:arg` parts.
+            let body = &tail[1..];
+            let name_len = body
+                .find(|c: char| !(c.is_ascii_alphabetic() || c == '-'))
+                .unwrap_or(body.len());
+            let mut filter_end = 1 + name_len;
+            while tail[filter_end..].starts_with(':') {
+                let arg = &tail[filter_end + 1..];
+                let arg_len = arg
+                    .find(|c: char| matches!(c, ':' | '|' | ',' | ']' | '}' | ')' | '!' | '?' | ';') || c.is_whitespace())
+                    .unwrap_or(arg.len());
+                filter_end += 1 + arg_len;
+            }
+            let mut parts = tail[1..filter_end].split(':');
+            let name = parts.next().unwrap_or("");
+            let args: Vec<String> = parts
+                .map(|a| {
+                    if a.parse::<f64>().is_ok() || a.starts_with('#') {
+                        a.to_string()
+                    } else {
+                        format!("\"{}\"", a)
+                    }
+                })
+                .collect();
+            expr = if args.is_empty() {
+                format!("{}({})", name, expr)
+            } else {
+                format!("{}({}, {})", name, expr, args.join(", "))
+            };
+            converted = true;
+            tail = &tail[filter_end..];
+        }
+        if converted && !expression_line {
+            out.push_str(&format!("${{{}}}", expr));
+        } else {
+            out.push_str(&expr);
+        }
+        rest = tail;
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Replace whole-token `$name` references with `value`.
 fn replace_var(line: &str, name: &str, value: &str) -> String {
     let needle = format!("${name}");
@@ -1150,7 +1220,7 @@ mod tests {
             "@el [$card, animation fade 1s, hover:position-area top] x"
         );
         assert_eq!(up("@el [\n  animate spin 1s\n]"), "@el [\n  animation spin 1s\n]");
-        assert_eq!(up("@text $name|upper|len"), "@text $name|uppercase|length");
+        assert_eq!(up("@text $name|upper|len"), "@text ${length(uppercase($name))}");
         // Text that merely mentions a renamed word is untouched.
         assert_eq!(up("@text [bold] please animate this"), "@text [bold] please animate this");
     }
@@ -1266,6 +1336,19 @@ mod tests {
         );
         assert_eq!(up("@deprecated old\n@let x 1"), "\n@let x 1");
         assert_eq!(upgrade("@breakpoint tablet 600").manual.len(), 1);
+    }
+
+    #[test]
+    fn filters_become_functions() {
+        assert_eq!(up("@text $name|uppercase!"), "@text ${uppercase($name)}!");
+        assert_eq!(
+            up("@el [color $base|darken:10, background $base|mix:#ffffff:50]"),
+            "@el [color ${darken($base, 10)}, background ${mix($base, #ffffff, 50)}]"
+        );
+        assert_eq!(up("@if $name|length > 3\n  x"), "@if length($name) > 3\n  x");
+        assert_eq!(up("@let short = $title|truncate:5"), "@let short = truncate($title, 5)");
+        assert_eq!(up("Hi $who|default:friend"), "Hi ${default($who, \"friend\")}");
+        assert_eq!(up("a | b $x | c"), "a | b $x | c");
     }
 
     #[test]

@@ -118,8 +118,8 @@ Control flow runs at compile time:
 @row [spacing 8]
   @each $item in $items
     @if $item != About
-      @link /$item|lowercase $item
+      @link /${lowercase($item)} $item
 ```
 
 See [DESIGN.md](DESIGN.md) for the full language: files and data (`@include`,
-`@extends`, `@data`), page metadata, filters, expressions and CSS.
+`@extends`, `@data`), page metadata, expressions and CSS.

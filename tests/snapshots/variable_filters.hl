@@ -3,10 +3,10 @@
 @let greeting hi
 
 @column [spacing 10]
-  @text $name|uppercase
-  @text $name|lowercase
-  @text $name|capitalize
-  @text $name|length
-  @text $name|reverse
-  @text $name|truncate:5
-  @text $greeting|default:fallback
+  @text ${uppercase($name)}
+  @text ${lowercase($name)}
+  @text ${capitalize($name)}
+  @text ${length($name)}
+  @text ${reverse($name)}
+  @text ${truncate($name, 5)}
+  @text ${default($greeting, "fallback")}

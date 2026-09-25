@@ -17,10 +17,15 @@
 //! product := unary (("*" | "/" | "%") unary)*
 //! unary   := "-" unary | primary
 //! primary := NUMBER | "STRING" | $VAR | WORD | true | false
-//!          | if(expr, expr, expr) | "(" expr ")"
+//!          | NAME "(" expr ("," expr)* ")" | "(" expr ")"
 //! ```
 //!
-//! A bare word (`dark`, `red`, `#3b82f6`, `10px`) is a string.
+//! A bare word (`dark`, `red`, `#3b82f6`, `10px`) is a string. Functions:
+//! `if(cond, a, b)`, text (`uppercase`, `lowercase`, `capitalize`, `trim`,
+//! `length`, `reverse`, `truncate(s, n)`, `replace(s, old, new)`,
+//! `default(s, fallback)`) and colors (`lighten(c, pct)`, `darken(c, pct)`,
+//! `alpha(c, a)`, `mix(c1, c2, pct)`). In text, `${expr}` interpolates an
+//! expression.
 
 use std::fmt;
 
@@ -61,8 +66,8 @@ impl fmt::Display for Value {
     }
 }
 
-/// Resolves a variable reference: the text after `$`, including any
-/// filters (`name|uppercase`). Returns `None` for undefined variables.
+/// Resolves a variable name (the text after `$`). Returns `None` for
+/// undefined variables.
 pub type Resolver<'a> = &'a dyn Fn(&str) -> Option<String>;
 
 /// Evaluate `src`. Undefined variables are empty strings.
@@ -137,14 +142,13 @@ fn tokenize(src: &str) -> Result<Vec<Token>, String> {
             tokens.push(Token::Str(chars[start..end].iter().collect()));
             i = end + 1;
         } else if c == '$' {
-            // $name, with optional |filter:args chains
             let start = i + 1;
             let mut end = start;
-            while end < chars.len()
-                && !chars[end].is_whitespace()
-                && !matches!(chars[end], '(' | ')' | ',' | '"')
-            {
+            while end < chars.len() && is_var_char(chars[end]) {
                 end += 1;
+            }
+            while end > start && chars[end - 1] == '.' {
+                end -= 1;
             }
             if end == start {
                 return Err(format!("`$` without a variable name in `{}`", src.trim()));
@@ -330,15 +334,18 @@ impl Parser<'_> {
             Token::Var(name) => Ok(Value::Str((self.resolve)(&name).unwrap_or_default())),
             Token::Word(w) if w == "true" => Ok(Value::Bool(true)),
             Token::Word(w) if w == "false" => Ok(Value::Bool(false)),
-            Token::Word(w) if w == "if" && self.peek() == Some(&Token::LParen) => {
+            Token::Word(name) if self.peek() == Some(&Token::LParen) => {
                 self.pos += 1;
-                let condition = self.expr()?;
-                self.expect(Token::Comma)?;
-                let then = self.expr()?;
-                self.expect(Token::Comma)?;
-                let otherwise = self.expr()?;
+                let mut args = Vec::new();
+                if self.peek() != Some(&Token::RParen) {
+                    args.push(self.expr()?);
+                    while self.peek() == Some(&Token::Comma) {
+                        self.pos += 1;
+                        args.push(self.expr()?);
+                    }
+                }
                 self.expect(Token::RParen)?;
-                Ok(if condition.truthy() { then } else { otherwise })
+                call(&name, args)
             }
             Token::Word(w) => Ok(Value::Str(w)),
             Token::LParen => {
@@ -367,6 +374,134 @@ fn arithmetic(op: &str, left: &Value, right: &Value) -> Result<Value, String> {
     }))
 }
 
+fn is_var_char(c: char) -> bool {
+    c.is_alphanumeric() || matches!(c, '_' | '-' | '.')
+}
+
+/// Call a built-in function.
+fn call(name: &str, args: Vec<Value>) -> Result<Value, String> {
+    let text = |i: usize| args.get(i).map(|v| v.to_string()).unwrap_or_default();
+    let num = |i: usize| {
+        args.get(i)
+            .and_then(Value::as_num)
+            .ok_or_else(|| format!("{}() needs a number as argument {}", name, i + 1))
+    };
+    let arity = |n: usize| {
+        if args.len() == n {
+            Ok(())
+        } else {
+            Err(format!("{}() takes {} argument{}", name, n, if n == 1 { "" } else { "s" }))
+        }
+    };
+    let color = |rgb: (u8, u8, u8)| Value::Str(format!("#{:02x}{:02x}{:02x}", rgb.0, rgb.1, rgb.2));
+    Ok(match name {
+        "if" => {
+            arity(3)?;
+            let mut args = args;
+            let otherwise = args.pop().unwrap();
+            let then = args.pop().unwrap();
+            if args[0].truthy() { then } else { otherwise }
+        }
+        "uppercase" => { arity(1)?; Value::Str(text(0).to_uppercase()) }
+        "lowercase" => { arity(1)?; Value::Str(text(0).to_lowercase()) }
+        "capitalize" => {
+            arity(1)?;
+            let s = text(0);
+            let mut chars = s.chars();
+            Value::Str(match chars.next() {
+                Some(c) => format!("{}{}", c.to_uppercase(), chars.as_str()),
+                None => String::new(),
+            })
+        }
+        "trim" => { arity(1)?; Value::Str(text(0).trim().to_string()) }
+        "length" => { arity(1)?; Value::Num(text(0).chars().count() as f64) }
+        "reverse" => { arity(1)?; Value::Str(text(0).chars().rev().collect()) }
+        "truncate" => {
+            arity(2)?;
+            let (s, n) = (text(0), num(1)? as usize);
+            Value::Str(if s.chars().count() > n {
+                format!("{}...", s.chars().take(n).collect::<String>())
+            } else {
+                s
+            })
+        }
+        "replace" => { arity(3)?; Value::Str(text(0).replace(&text(1), &text(2))) }
+        "default" => {
+            arity(2)?;
+            let s = text(0);
+            Value::Str(if s.is_empty() { text(1) } else { s })
+        }
+        "lighten" | "darken" | "alpha" | "mix" => {
+            let expected = if name == "mix" { 3 } else { 2 };
+            arity(expected)?;
+            let Some(rgb) = parse_hex_rgb(&text(0)) else {
+                return Err(format!("{}() needs a hex color, got `{}`", name, text(0)));
+            };
+            match name {
+                "lighten" => color(lighten_color(rgb, num(1)? / 100.0)),
+                "darken" => color(darken_color(rgb, num(1)? / 100.0)),
+                "alpha" => {
+                    let a = (num(1)?.clamp(0.0, 1.0) * 255.0) as u8;
+                    Value::Str(format!("#{:02x}{:02x}{:02x}{:02x}", rgb.0, rgb.1, rgb.2, a))
+                }
+                _ => {
+                    let Some(other) = parse_hex_rgb(&text(1)) else {
+                        return Err(format!("mix() needs a hex color, got `{}`", text(1)));
+                    };
+                    color(mix_colors(rgb, other, num(2)? / 100.0))
+                }
+            }
+        }
+        _ => return Err(format!("unknown function `{}()`", name)),
+    })
+}
+
+pub(crate) fn parse_hex_rgb(s: &str) -> Option<(u8, u8, u8)> {
+    let s = s.strip_prefix('#')?;
+    if !s.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    match s.len() {
+        3 => {
+            let r = u8::from_str_radix(&s[0..1], 16).ok()?;
+            let g = u8::from_str_radix(&s[1..2], 16).ok()?;
+            let b = u8::from_str_radix(&s[2..3], 16).ok()?;
+            Some((r * 17, g * 17, b * 17))
+        }
+        6 => {
+            let r = u8::from_str_radix(&s[0..2], 16).ok()?;
+            let g = u8::from_str_radix(&s[2..4], 16).ok()?;
+            let b = u8::from_str_radix(&s[4..6], 16).ok()?;
+            Some((r, g, b))
+        }
+        _ => None,
+    }
+}
+
+fn lighten_color(rgb: (u8, u8, u8), amount: f64) -> (u8, u8, u8) {
+    let r = rgb.0 as f64 + (255.0 - rgb.0 as f64) * amount.clamp(0.0, 1.0);
+    let g = rgb.1 as f64 + (255.0 - rgb.1 as f64) * amount.clamp(0.0, 1.0);
+    let b = rgb.2 as f64 + (255.0 - rgb.2 as f64) * amount.clamp(0.0, 1.0);
+    (r.round() as u8, g.round() as u8, b.round() as u8)
+}
+
+fn darken_color(rgb: (u8, u8, u8), amount: f64) -> (u8, u8, u8) {
+    let factor = 1.0 - amount.clamp(0.0, 1.0);
+    let r = (rgb.0 as f64 * factor).round() as u8;
+    let g = (rgb.1 as f64 * factor).round() as u8;
+    let b = (rgb.2 as f64 * factor).round() as u8;
+    (r, g, b)
+}
+
+fn mix_colors(c1: (u8, u8, u8), c2: (u8, u8, u8), weight: f64) -> (u8, u8, u8) {
+    let w = weight.clamp(0.0, 1.0);
+    let r = (c1.0 as f64 * (1.0 - w) + c2.0 as f64 * w).round() as u8;
+    let g = (c1.1 as f64 * (1.0 - w) + c2.1 as f64 * w).round() as u8;
+    let b = (c1.2 as f64 * (1.0 - w) + c2.2 as f64 * w).round() as u8;
+    (r, g, b)
+}
+
+
 /// Replace `$name` references inside a string literal.
 fn interpolate(s: &str, resolve: Resolver) -> String {
     let mut out = String::with_capacity(s.len());
@@ -374,9 +509,7 @@ fn interpolate(s: &str, resolve: Resolver) -> String {
     while let Some(pos) = rest.find('$') {
         out.push_str(&rest[..pos]);
         let after = &rest[pos + 1..];
-        let end = after
-            .find(|c: char| !(c.is_alphanumeric() || matches!(c, '_' | '-' | '.' | '|' | ':')))
-            .unwrap_or(after.len());
+        let end = after.find(|c: char| !is_var_char(c)).unwrap_or(after.len());
         if end == 0 {
             out.push('$');
         } else {
@@ -399,7 +532,6 @@ mod tests {
             "theme" => Some("dark".to_string()),
             "tricky" => Some("a == b".to_string()),
             "empty" => Some(String::new()),
-            "name|uppercase" => Some("WORLD".to_string()),
             _ => None,
         };
         eval(src, &resolve).unwrap()
@@ -421,7 +553,7 @@ mod tests {
         assert!(ev("$theme != light and not $empty").truthy());
         assert!(!ev("$count < 2 or $empty").truthy());
         assert!(ev("$name contains or").truthy());
-        assert!(ev("$name|uppercase == WORLD").truthy());
+        assert!(ev("uppercase($name) == WORLD").truthy());
         assert!(ev("#3b82f6 != red").truthy());
     }
 
@@ -441,11 +573,26 @@ mod tests {
     }
 
     #[test]
+    fn functions() {
+        assert_eq!(ev("uppercase($name)").to_string(), "WORLD");
+        assert_eq!(ev("length($name) + 1").to_string(), "6");
+        assert_eq!(ev("truncate($name, 2)").to_string(), "Wo...");
+        assert_eq!(ev("replace($name, o, 0)").to_string(), "W0rld");
+        assert_eq!(ev("default($empty, none)").to_string(), "none");
+        assert_eq!(ev("darken(#ffffff, 50)").to_string(), "#808080");
+        assert_eq!(ev("mix(#000000, #ffffff, 50)").to_string(), "#808080");
+        assert_eq!(ev("alpha(#3b82f6, 0.5)").to_string(), "#3b82f67f");
+    }
+
+    #[test]
     fn errors_are_reported() {
         let none = |_: &str| None;
         assert!(eval("dark * 2", &none).is_err());
         assert!(eval("1 +", &none).is_err());
         assert!(eval("(1", &none).is_err());
         assert!(eval("1 / 0", &none).is_err());
+        assert!(eval("nope(1)", &none).is_err());
+        assert!(eval("uppercase(a, b)", &none).is_err());
+        assert!(eval("darken(red, 10)", &none).is_err());
     }
 }

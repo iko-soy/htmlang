@@ -2970,7 +2970,7 @@ fn snapshot_css_shorthands() {
 
 #[test]
 fn test_variable_filters() {
-    let result = htmlang::parser::parse("@let name hello\n@text $name|uppercase");
+    let result = htmlang::parser::parse("@let name hello\n@text ${uppercase($name)}");
     assert!(
         result
             .diagnostics
@@ -2984,7 +2984,7 @@ fn test_variable_filters() {
         html
     );
 
-    let result = htmlang::parser::parse("@let name HELLO\n@text $name|lowercase");
+    let result = htmlang::parser::parse("@let name HELLO\n@text ${lowercase($name)}");
     let html = htmlang::codegen::generate(&result.document);
     assert!(
         html.contains("hello"),
@@ -2992,7 +2992,7 @@ fn test_variable_filters() {
         html
     );
 
-    let result = htmlang::parser::parse("@let name hello\n@text $name|capitalize");
+    let result = htmlang::parser::parse("@let name hello\n@text ${capitalize($name)}");
     let html = htmlang::codegen::generate(&result.document);
     assert!(
         html.contains("Hello"),
@@ -3000,7 +3000,7 @@ fn test_variable_filters() {
         html
     );
 
-    let result = htmlang::parser::parse("@let name hello\n@text $name|length");
+    let result = htmlang::parser::parse("@let name hello\n@text ${length($name)}");
     let html = htmlang::codegen::generate(&result.document);
     assert!(
         html.contains("5"),
@@ -3008,7 +3008,7 @@ fn test_variable_filters() {
         html
     );
 
-    let result = htmlang::parser::parse("@let name hello\n@text $name|reverse");
+    let result = htmlang::parser::parse("@let name hello\n@text ${reverse($name)}");
     let html = htmlang::codegen::generate(&result.document);
     assert!(
         html.contains("olleh"),
@@ -3016,7 +3016,7 @@ fn test_variable_filters() {
         html
     );
 
-    let result = htmlang::parser::parse("@let name hello world\n@text $name|truncate:5");
+    let result = htmlang::parser::parse("@let name hello world\n@text ${truncate($name, 5)}");
     let html = htmlang::codegen::generate(&result.document);
     assert!(
         html.contains("hello..."),
@@ -3249,7 +3249,7 @@ fn test_extends_directive() {
 #[test]
 fn test_color_filter_lighten() {
     let result = htmlang::parser::parse(
-        "@let primary #3b82f6\n@el [background $primary|lighten:20] Content",
+        "@let primary #3b82f6\n@el [background ${lighten($primary, 20)}] Content",
     );
     let html = htmlang::codegen::generate(&result.document);
     // Lighten #3b82f6 by 20% should produce a lighter blue
@@ -3268,7 +3268,7 @@ fn test_color_filter_lighten() {
 #[test]
 fn test_color_filter_darken() {
     let result =
-        htmlang::parser::parse("@let primary #ffffff\n@el [background $primary|darken:50] Content");
+        htmlang::parser::parse("@let primary #ffffff\n@el [background ${darken($primary, 50)}] Content");
     let html = htmlang::codegen::generate(&result.document);
     // Darken white by 50% should produce gray (#808080 approximately)
     assert!(
@@ -3285,7 +3285,7 @@ fn test_color_filter_darken() {
 #[test]
 fn test_color_filter_alpha() {
     let result =
-        htmlang::parser::parse("@let primary #3b82f6\n@el [background $primary|alpha:0.5] Content");
+        htmlang::parser::parse("@let primary #3b82f6\n@el [background ${alpha($primary, 0.5)}] Content");
     let html = htmlang::codegen::generate(&result.document);
     // Should produce 8-digit hex with alpha
     assert!(
@@ -3298,7 +3298,7 @@ fn test_color_filter_alpha() {
 #[test]
 fn test_color_filter_mix() {
     let result = htmlang::parser::parse(
-        "@let primary #000000\n@el [background $primary|mix:#ffffff:50] Content",
+        "@let primary #000000\n@el [background ${mix($primary, #ffffff, 50)}] Content",
     );
     let html = htmlang::codegen::generate(&result.document);
     // Mix black and white at 50% should produce gray

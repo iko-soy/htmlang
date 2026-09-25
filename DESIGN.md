@@ -330,18 +330,6 @@ as `var(--name)` in the generated CSS:
 @el [background $--brand] Themed
 ```
 
-### Filters
-
-`$name|filter` transforms a value: `uppercase`, `lowercase`, `capitalize`,
-`trim`, `length`, `reverse`, `truncate:N`, `replace:OLD:NEW`, `default:VALUE`,
-and for colors `lighten:N`, `darken:N`, `alpha:N`, `mix:COLOR:N`.
-
-```
-@let name htmlang
-@let base #3b82f6
-@text [color $base|darken:10] $name|uppercase
-```
-
 ### Checks
 
 `@assert CONDITION` fails the build when false. `@warn MESSAGE` emits a
@@ -353,15 +341,26 @@ Conditions and computed values (`@let x = ...`) are expressions:
 
 | | |
 |---|---|
-| Values | numbers, `"strings"` (with `$var` interpolation), `$variables` (with filters), `true`, `false`, and bare words (`dark`, `#fff`) as strings |
+| Values | numbers, `"strings"` (with `$var` interpolation), `$variables`, `true`, `false`, and bare words (`dark`, `#fff`) as strings |
 | Arithmetic | `+ - * / %` with the usual precedence, unary `-`, `( )` |
 | Text | `~` joins two values: `$first ~ " " ~ $last` |
 | Comparison | `== != < > <= >=` (numeric when both sides are numbers), `contains`, `starts-with`, `ends-with` |
 | Logic | `and`, `or`, `not`; empty, `false` and `0` are false |
 | Choice | `if(CONDITION, A, B)` |
+| Text functions | `uppercase(s)`, `lowercase(s)`, `capitalize(s)`, `trim(s)`, `length(s)`, `reverse(s)`, `truncate(s, n)`, `replace(s, old, new)`, `default(s, fallback)` |
+| Color functions | `lighten(c, pct)`, `darken(c, pct)`, `alpha(c, a)`, `mix(c1, c2, pct)` |
 
 Variables are looked up while evaluating, so a value containing `==` or spaces
 is still one value. An invalid expression is a compile error.
+
+In text and attribute values, `$name` inserts a variable and `${EXPR}` inserts
+the value of any expression:
+
+```
+@let name htmlang
+@let base #3b82f6
+@text [color ${darken($base, 10)}] ${uppercase($name)} has ${length($name)} letters
+```
 
 ## Control flow
 
@@ -489,4 +488,4 @@ removed form with its replacement.
 | `COND ? A : B` | `if(COND, A, B)` |
 | `...$bundle` | `$bundle` |
 | `animate`, `inset-area` | `animation`, `position-area` |
-| `\|upper`, `\|lower`, `\|cap`, `\|len` | `\|uppercase`, `\|lowercase`, `\|capitalize`, `\|length` |
+| `$x\|uppercase`, `$c\|darken:10` (filters) | `${uppercase($x)}`, `${darken($c, 10)}` |
