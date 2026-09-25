@@ -1,12 +1,7 @@
 @page My App
 
-@manifest My App
-  short-name App
-  start-url /
-  display standalone
-  theme-color #3b82f6
-  background-color #ffffff
-  description A sample PWA
+@head
+  <link rel="manifest" href="manifest.json">
 
 @column [padding 20]
   @text Hello

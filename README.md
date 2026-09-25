@@ -122,4 +122,4 @@ Control flow runs at compile time:
 ```
 
 See [DESIGN.md](DESIGN.md) for the full language: files and data (`@include`,
-`@import`, `@extends`, `@data`), page metadata, filters, expressions and CSS.
+`@extends`, `@data`), page metadata, filters, expressions and CSS.

@@ -2,13 +2,12 @@
 
 @let theme dark
 
-@match $theme
-  @case light
-    @el [background white, color black]
-      @text Light theme
-  @case dark
-    @el [background #333, color white]
-      @text Dark theme
-  @default
-    @el [background gray]
-      @text Default theme
+@if $theme == "light"
+  @el [background white, color black]
+    @text Light theme
+@else if $theme == "dark"
+  @el [background #333, color white]
+    @text Dark theme
+@else
+  @el [background gray]
+    @text Default theme

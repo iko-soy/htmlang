@@ -14,27 +14,10 @@ pub struct Document {
     pub css_vars: Vec<(String, String)>,
     pub custom_css: Vec<String>,
     pub og_tags: Vec<(String, String)>,
-    pub custom_breakpoints: Vec<(String, String)>,
-    pub theme_tokens: Vec<(String, String)>,
     pub canonical: Option<String>,
     pub base_url: Option<String>,
-    pub font_faces: Vec<(String, String)>,
-    pub json_ld_blocks: Vec<String>,
-    pub manifest: Option<ManifestConfig>,
     pub preload_hints: Vec<PreloadHint>,
     pub nodes: Vec<Node>,
-}
-
-#[derive(Debug, Clone)]
-pub struct ManifestConfig {
-    pub name: String,
-    pub short_name: Option<String>,
-    pub start_url: String,
-    pub display: String,
-    pub background_color: Option<String>,
-    pub theme_color: Option<String>,
-    pub description: Option<String>,
-    pub icons: Vec<(String, String)>, // (src, sizes)
 }
 
 #[derive(Debug, Clone)]

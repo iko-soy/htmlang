@@ -243,8 +243,6 @@ Prefix a style attribute to apply it conditionally:
 | `cq-sm:` … `cq-2xl:` | Container queries |
 | `dark:`, `print:`, `motion-safe:`, `motion-reduce:`, `landscape:`, `portrait:` | Media conditions |
 
-`@breakpoint name WIDTH` defines a custom responsive prefix.
-
 ```
 @el [padding 16, background #3b82f6, hover:background #2563eb, md:padding 32, dark:background #1e3a8a]
   @text [color white] Click me
@@ -324,14 +322,12 @@ A multi-line string uses triple quotes; its indented lines are the value:
 @text $intro
 ```
 
-`@let --name value` also emits a CSS custom property. `@theme` declares a group
-of design tokens at once; each becomes both `$name` and `--name`:
+`@let --name value` also emits a CSS custom property, used as `$--name` and
+as `var(--name)` in the generated CSS:
 
 ```
-@theme
-  brand #3b82f6
-  radius 8
-@el [background $brand, rounded $radius] Themed
+@let --brand #3b82f6
+@el [background $--brand] Themed
 ```
 
 ### Filters
@@ -349,7 +345,7 @@ and for colors `lighten:N`, `darken:N`, `alpha:N`, `mix:COLOR:N`.
 ### Checks
 
 `@assert CONDITION` fails the build when false. `@warn MESSAGE` emits a
-warning. `@deprecated MESSAGE` before a function warns every caller.
+warning.
 
 ## Expressions
 
@@ -392,12 +388,6 @@ All control flow runs at compile time.
 
 @each $label, $url in Home /, About /about
   @link $url $label
-
-@match $count
-  @case 3
-    @text Three
-  @default
-    @text Other
 ```
 
 A range counts down when its start is greater than its end.
@@ -406,14 +396,12 @@ A range counts down when its start is greater than its end.
 
 | Directive | Effect |
 |---|---|
-| `@include file.hl` | Insert another file here, content and definitions |
-| `@import file.hl` | Take only its definitions (`@let`, bundles, functions) |
+| `@include file.hl` | Insert another file: its content and definitions (a library of `@let`s emits nothing) |
+| `@include lib.hl as ui` | Take only its definitions, named `ui.name` |
 | `@extends layout.hl` | Render this page inside a layout (below) |
-| `@data file.json` / `@data $prefix file.json` | Load JSON values as variables |
-| `@fetch $prefix http://...` | Like `@data`, fetched at build time (http only) |
-| `@collection $name "glob"` | List files matching a pattern |
-| `@translations` | Per-locale strings, used as `$t.key` |
-| `@env NAME default` | Read an environment variable |
+| `@data file.json` / `@data $name file.json` | Load JSON values as variables (`$name.key`) |
+| `@data $name dir/*.json` | Load each file as `$name.STEM.key`; `$name` lists the stems |
+| `@data $name env:NAME [default]` | Read an environment variable |
 | `@markdown` / `@markdown file.md` | Markdown, converted to HTML |
 | `@svg file.svg` | Inline an SVG file |
 
@@ -442,8 +430,8 @@ blocks) and `@children` (everything in the page outside `@slot` blocks):
 `@page TITLE` produces a full HTML document; without it the output is a fragment.
 Its attributes set `lang`, `favicon`, `canonical` and `base`. `@meta NAME VALUE`
 adds a meta tag (`og:` names become Open Graph `property` tags), and
-`@font-face NAME URL`, `@manifest NAME` (with indented settings), `@json-ld`
-(indented JSON) and `@head` (indented raw HTML) add the rest.
+`@head` holds any other raw HTML for the `<head>` (fonts, JSON-LD, a manifest
+link). Translations are a JSON file per locale: `@data $t locales/$lang.json`.
 
 ```
 @page [lang en, favicon /favicon.png] My Site
@@ -479,8 +467,13 @@ removed form with its replacement.
 | `@fn`, `@define`, `@mixin`, `@component` | `@let` (function, bundle; `@style` in a function body is scoped) |
 | `@unless COND` | `@if not COND` |
 | `@for $i in A..B`, `@repeat N` | `@each $i in A..B`, `@each $_ in 1..N` |
-| `@switch` | `@match` |
-| `@use "file" names` | `@import file` |
+| `@switch`, `@match` | `@if $x == a` / `@else if` / `@else` |
+| `@use "file" names`, `@import file` | `@include file` |
+| `@collection`, `@env`, `@translations`, `@fetch` | `@data $name SOURCE` (glob, `env:NAME`, or a JSON file per locale) |
+| `@theme` | `@let --name value` lines |
+| `@json-ld`, `@font-face`, `@manifest` | Raw HTML in `@head`, CSS in `@style` |
+| `@breakpoint`, `@deprecated` | A media query in `@style`; nothing |
+| `gap-x`, `gap-y`, `shadow`, `blur N`, `truncate`, `critical` | `column-gap`, `row-gap`, `box-shadow`, `filter blur(N)`, `$truncate`, nothing |
 | `@with $x as y` | `@let y $x` |
 | `@layout file` | `@extends file` |
 | `@scope`, `@starting-style`, `@css-property` | The CSS rule in `@style` |

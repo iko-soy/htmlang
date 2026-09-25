@@ -5,11 +5,15 @@
 @meta og:type website
 
 -- Design tokens become both $vars and CSS custom properties
-@theme
-  primary #3b82f6
-  ink #0f172a
-  muted #64748b
-  subtle #f8fafc
+@let primary #3b82f6
+@let --primary #3b82f6
+@meta theme-color #3b82f6
+@let ink #0f172a
+@let --ink #0f172a
+@let muted #64748b
+@let --muted #64748b
+@let subtle #f8fafc
+@let --subtle #f8fafc
 
 -- Computed @let with arithmetic
 @let base 8
@@ -172,15 +176,14 @@
 
     -- @match
     @let status ready
-    @match $status
-      @case pending
-        @text [color #f59e0b] Pending…
-      @case ready
-        @text [color #10b981, bold] ✓ Ready
-      @case error
-        @text [color #ef4444] Error
-      @default
-        @text Unknown
+    @if $status == "pending"
+      @text [color #f59e0b] Pending…
+    @else if $status == "ready"
+      @text [color #10b981, bold] ✓ Ready
+    @else if $status == "error"
+      @text [color #ef4444] Error
+    @else
+      @text Unknown
 
     -- Conditional attribute value + before: pseudo-element
     @let emphasized true

@@ -45,7 +45,7 @@ const FILTER_ALIASES: &[(&str, &str)] = &[
 
 /// Directives whose indented bodies are foreign text (CSS, JS, Markdown,
 /// HTML, JSON) and must not be rewritten.
-const VERBATIM_BODIES: &[&str] = &["@style", "@script", "@markdown", "@head", "@json-ld"];
+const VERBATIM_BODIES: &[&str] = &["@style", "@script", "@markdown", "@head"];
 
 pub fn upgrade(input: &str) -> Upgrade {
     let mut manual = Vec::new();
@@ -297,6 +297,90 @@ fn rewrite_block(
         return Some(Block { lines: out, end });
     }
 
+    // @match $v / @case a / @default → @if $v == "a" / @else if ... / @else
+    if let Some(value) = trimmed.strip_prefix("@match ") {
+        let value = value.trim();
+        let case_indent = body.iter().find(|l| !l.trim().is_empty()).map(|l| indent_of(l));
+        let mut out = Vec::new();
+        let mut first = true;
+        let mut j = 0;
+        while j < body.len() {
+            let l = body[j];
+            let t = l.trim();
+            if Some(indent_of(l)) == case_indent {
+                let head = if let Some(case) = t.strip_prefix("@case ") {
+                    let case = case.trim();
+                    let quoted = if case.starts_with('"') {
+                        case.to_string()
+                    } else {
+                        format!("\"{}\"", case)
+                    };
+                    let keyword = if first { "@if" } else { "@else if" };
+                    first = false;
+                    format!("{pad}{} {} == {}", keyword, value, quoted)
+                } else if t == "@default" {
+                    format!("{pad}@else")
+                } else {
+                    j += 1;
+                    continue;
+                };
+                out.push(head);
+                // The case body moves up one level, under the @if.
+                let body_end = (j + 1..body.len())
+                    .find(|&k| !body[k].trim().is_empty() && Some(indent_of(body[k])) <= case_indent)
+                    .unwrap_or(body.len());
+                out.extend(dedent_block(&body[j + 1..body_end], indent + 2));
+                j = body_end;
+            } else {
+                j += 1;
+            }
+        }
+        return Some(Block { lines: out, end });
+    }
+
+    // @theme / `name value` lines → `@let name value` and `@let --name value`
+    if trimmed == "@theme" {
+        let mut out = Vec::new();
+        for l in body {
+            if let Some((name, value)) = l.trim().split_once(' ') {
+                let value = value.trim();
+                out.push(format!("{pad}@let {} {}", name, value));
+                out.push(format!("{pad}@let --{} {}", name, value));
+                if name == "primary" || name == "theme-color" {
+                    out.push(format!("{pad}@meta theme-color {}", value));
+                }
+            }
+        }
+        return Some(Block { lines: out, end });
+    }
+
+    // @json-ld with an indented JSON body → a script in @head
+    if trimmed == "@json-ld" {
+        let mut out = vec![
+            format!("{pad}@head"),
+            format!("{pad}  <script type=\"application/ld+json\">"),
+        ];
+        out.extend(dedent_block(body, indent).into_iter().map(|l| {
+            if l.is_empty() {
+                l
+            } else {
+                format!("{pad}    {}", l.trim_start())
+            }
+        }));
+        out.push(format!("{pad}  </script>"));
+        return Some(Block { lines: out, end });
+    }
+
+    if trimmed.starts_with("@manifest") {
+        manual.push((
+            i + 1,
+            "@manifest was removed: write a manifest.json file and add \
+             `<link rel=\"manifest\" href=\"manifest.json\">` to @head"
+                .to_string(),
+        ));
+        return None;
+    }
+
     // @defer → its body, dedented
     if trimmed == "@defer" || trimmed.starts_with("@defer ") {
         return Some(Block {
@@ -537,6 +621,34 @@ fn rewrite_directive_line(
             idx + 1,
             "@fetch was removed: download the data before building and load it with \
              `@data $name file.json`"
+                .to_string(),
+        ));
+        return line.to_string();
+    }
+    if let Some(rest) = trimmed.strip_prefix("@font-face ")
+        && let Some((name, url)) = rest.trim().split_once(' ')
+    {
+        let url = url.trim();
+        let format = match url.rsplit('.').next() {
+            Some("woff2") => " format('woff2')",
+            Some("woff") => " format('woff')",
+            Some("ttf") => " format('truetype')",
+            Some("otf") => " format('opentype')",
+            _ => "",
+        };
+        return format!(
+            "{pad}@style\n{pad}  @font-face {{ font-family: '{name}'; src: url('{url}'){format}; font-display: swap; }}\n\
+             {pad}@head\n{pad}  <link rel=\"preload\" href=\"{url}\" as=\"font\" crossorigin>"
+        );
+    }
+    if trimmed.starts_with("@deprecated ") {
+        return String::new();
+    }
+    if trimmed.starts_with("@breakpoint ") {
+        manual.push((
+            idx + 1,
+            "@breakpoint was removed (its prefixes never took effect): write the media \
+             query in an @style block"
                 .to_string(),
         ));
         return line.to_string();
@@ -1132,6 +1244,28 @@ mod tests {
             "@el [column-gap 4, hover:box-shadow 0 1px red, filter blur(4px), backdrop-filter blur(2px), $truncate]"
         );
         assert_eq!(up("@el [critical, padding 4]"), "@el [padding 4]");
+    }
+
+    #[test]
+    fn small_directives() {
+        assert_eq!(
+            up("@match $v\n  @case a\n    @text A\n  @case b c\n    @text B\n  @default\n    @text D"),
+            "@if $v == \"a\"\n  @text A\n@else if $v == \"b c\"\n  @text B\n@else\n  @text D"
+        );
+        assert_eq!(
+            up("@theme\n  primary #3b82f6\n  radius 8"),
+            "@let primary #3b82f6\n@let --primary #3b82f6\n@meta theme-color #3b82f6\n@let radius 8\n@let --radius 8"
+        );
+        assert_eq!(
+            up("@json-ld\n  {\"a\": 1}"),
+            "@head\n  <script type=\"application/ld+json\">\n    {\"a\": 1}\n  </script>"
+        );
+        assert_eq!(
+            up("@font-face Inter fonts/inter.woff2"),
+            "@style\n  @font-face { font-family: 'Inter'; src: url('fonts/inter.woff2') format('woff2'); font-display: swap; }\n@head\n  <link rel=\"preload\" href=\"fonts/inter.woff2\" as=\"font\" crossorigin>"
+        );
+        assert_eq!(up("@deprecated old\n@let x 1"), "\n@let x 1");
+        assert_eq!(upgrade("@breakpoint tablet 600").manual.len(), 1);
     }
 
     #[test]

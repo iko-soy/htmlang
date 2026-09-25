@@ -840,7 +840,7 @@ fn video_with_multiple_attrs() {
 #[test]
 fn match_selects_correct_case() {
     let output = compile(
-        "@let x b\n@match $x\n  @case a\n    @text A\n  @case b\n    @text B\n  @default\n    @text D",
+        "@let x b\n@if $x == \"a\"\n  @text A\n@else if $x == \"b\"\n  @text B\n@else\n  @text D",
     );
     assert!(output.contains("B"));
     assert!(!output.contains(">A<"));
@@ -850,14 +850,14 @@ fn match_selects_correct_case() {
 #[test]
 fn match_falls_to_default() {
     let output =
-        compile("@let x z\n@match $x\n  @case a\n    @text A\n  @default\n    @text Default");
+        compile("@let x z\n@if $x == \"a\"\n  @text A\n@else\n  @text Default");
     assert!(output.contains("Default"));
     assert!(!output.contains(">A<"));
 }
 
 #[test]
 fn match_no_match_no_default() {
-    let output = compile("@let x z\n@match $x\n  @case a\n    @text A\n  @case b\n    @text B");
+    let output = compile("@let x z\n@if $x == \"a\"\n  @text A\n@else if $x == \"b\"\n  @text B");
     assert!(!output.contains(">A<"));
     assert!(!output.contains(">B<"));
 }
@@ -1096,7 +1096,7 @@ fn dns_prefetch_for_external_domains() {
 
 #[test]
 fn theme_color_meta_from_theme() {
-    let output = compile("@page T\n@theme\n  primary #3b82f6\n@el\n  test");
+    let output = compile("@page T\n@let primary #3b82f6\n@let --primary #3b82f6\n@meta theme-color #3b82f6\n@el\n  test");
     assert!(output.contains("theme-color"));
     assert!(output.contains("#3b82f6"));
 }
@@ -3194,7 +3194,7 @@ fn test_keyframes_percentage() {
 #[test]
 fn test_theme_directive() {
     let result = htmlang::parser::parse(
-        "@theme\n  primary #3b82f6\n  spacing-md 16\n\n@el [background $primary, padding $spacing-md] Content",
+        "@let primary #3b82f6\n@let --primary #3b82f6\n@meta theme-color #3b82f6\n@let spacing-md 16\n@let --spacing-md 16\n\n@el [background $primary, padding $spacing-md] Content",
     );
     let diags = &result.diagnostics;
     let errors: Vec<_> = diags
@@ -3227,24 +3227,9 @@ fn test_theme_directive() {
 }
 
 #[test]
-fn test_deprecated_fn() {
-    let result = htmlang::parser::parse(
-        "@deprecated Use @new-card instead\n@let old-card $title\n  @text $title\n\n@old-card [title Hello]",
-    );
-    let warnings: Vec<_> = result
-        .diagnostics
-        .iter()
-        .filter(|d| d.message.contains("deprecated"))
-        .collect();
-    assert!(
-        !warnings.is_empty(),
-        "calling deprecated fn should warn, got: {:?}",
-        result.diagnostics
-    );
-    assert!(
-        warnings[0].message.contains("Use @new-card instead"),
-        "deprecation message should be included"
-    );
+fn deprecated_was_removed() {
+    let diags = parse_diagnostics("@deprecated old\n@let card\n  @text x");
+    assert!(diags.iter().any(|d| d.message.contains("`@deprecated` was removed")), "{:?}", diags);
 }
 
 #[test]
@@ -3653,10 +3638,10 @@ fn base_directive() {
 
 #[test]
 fn font_face_directive() {
-    let output = compile("@page T\n@font-face Inter fonts/inter.woff2\n@text Hello");
+    let output = compile("@page T\n@style\n  @font-face { font-family: 'Inter'; src: url('fonts/inter.woff2') format('woff2'); font-display: swap; }\n@head\n  <link rel=\"preload\" href=\"fonts/inter.woff2\" as=\"font\" crossorigin>\n@text Hello");
     assert!(output.contains("@font-face"), "font-face: {}", output);
     assert!(
-        output.contains("font-family:'Inter'"),
+        output.contains("font-family: 'Inter'"),
         "font name: {}",
         output
     );
@@ -3666,7 +3651,7 @@ fn font_face_directive() {
 
 #[test]
 fn json_ld_directive() {
-    let output = compile("@page T\n@json-ld\n  {\"@type\": \"WebPage\"}\n@text Hello");
+    let output = compile("@page T\n@head\n  <script type=\"application/ld+json\">\n    {\"@type\": \"WebPage\"}\n  </script>\n@text Hello");
     assert!(
         output.contains("application/ld+json"),
         "json-ld type: {}",
@@ -4049,7 +4034,7 @@ fn function_without_style_has_no_wrapper() {
 #[test]
 fn switch_matches_case() {
     let html = compile(
-        "@let variant primary\n@match $variant\n  @case primary\n    @text Primary\n  @case danger\n    @text Danger\n",
+        "@let variant primary\n@if $variant == \"primary\"\n  @text Primary\n@else if $variant == \"danger\"\n  @text Danger\n",
     );
     assert!(html.contains("Primary"));
     assert!(!html.contains("Danger"));
@@ -4058,7 +4043,7 @@ fn switch_matches_case() {
 #[test]
 fn switch_falls_to_default() {
     let html = compile(
-        "@let variant unknown\n@match $variant\n  @case primary\n    @text Primary\n  @default\n    @text Default\n",
+        "@let variant unknown\n@if $variant == \"primary\"\n  @text Primary\n@else\n  @text Default\n",
     );
     assert!(!html.contains("Primary"));
     assert!(html.contains("Default"));
@@ -4067,11 +4052,11 @@ fn switch_falls_to_default() {
 #[test]
 fn switch_with_attrs() {
     let _html = compile(
-        "@let variant primary\n@match $variant\n  @case primary\n    @let __switch [background blue, color white]\n  @case danger\n    @let __switch [background red, color white]\n",
+        "@let variant primary\n@if $variant == \"primary\"\n  @let __switch [background blue, color white]\n@else if $variant == \"danger\"\n  @let __switch [background red, color white]\n",
     );
     // The @switch should register matched attrs as __switch define
     let result = htmlang::parser::parse(
-        "@let variant primary\n@match $variant\n  @case primary\n    @let __switch [background blue, color white]\n  @case danger\n    @let __switch [background red, color white]\n",
+        "@let variant primary\n@if $variant == \"primary\"\n  @let __switch [background blue, color white]\n@else if $variant == \"danger\"\n  @let __switch [background red, color white]\n",
     );
     assert!(result.document.defines.contains_key("__switch"));
 }
@@ -4611,12 +4596,9 @@ fn starting_style_generates_css() {
 }
 
 #[test]
-fn manifest_generates_link() {
-    let output = compile("@page App\n@manifest My App\n  display standalone\n@text hi");
-    assert!(
-        output.contains("rel=\"manifest\""),
-        "should generate manifest link"
-    );
+fn manifest_was_removed() {
+    let diags = parse_diagnostics("@page App\n@manifest My App\n  display standalone\n@text hi");
+    assert!(diags.iter().any(|d| d.message.contains("`@manifest` was removed")), "{:?}", diags);
 }
 
 #[test]

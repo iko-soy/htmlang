@@ -85,7 +85,6 @@ struct ParseContext {
     css_vars: Vec<(String, String)>,
     custom_css: Vec<String>,
     og_tags: Vec<(String, String)>,
-    custom_breakpoints: Vec<(String, String)>,
     diagnostics: Vec<Diagnostic>,
     base_path: Option<PathBuf>,
     included_files: Vec<PathBuf>,
@@ -104,20 +103,10 @@ struct ParseContext {
     fn_lines: HashMap<String, usize>,
     /// Line numbers of attribute bundle definitions (name -> line)
     define_lines: HashMap<String, usize>,
-    /// Deprecated functions: name -> deprecation message
-    deprecated_fns: HashMap<String, String>,
-    /// Theme tokens: (name, value) pairs from @theme
-    theme_tokens: Vec<(String, String)>,
     /// Canonical URL
     canonical: Option<String>,
     /// Base URL for relative links
     base_url: Option<String>,
-    /// @font-face declarations: (font_name, url)
-    font_faces: Vec<(String, String)>,
-    /// @json-ld blocks
-    json_ld_blocks: Vec<String>,
-    /// @manifest configuration
-    manifest: Option<crate::ast::ManifestConfig>,
     /// Track @import paths for circular dependency detection
     import_stack: Vec<PathBuf>,
 }
@@ -197,7 +186,6 @@ pub fn parse_with_base(input: &str, base_path: Option<&Path>) -> ParseResult {
         css_vars: Vec::new(),
         custom_css: Vec::new(),
         og_tags: Vec::new(),
-        custom_breakpoints: Vec::new(),
         diagnostics: Vec::new(),
         base_path: base_path.map(|p| p.to_path_buf()),
         included_files: Vec::new(),
@@ -210,13 +198,8 @@ pub fn parse_with_base(input: &str, base_path: Option<&Path>) -> ParseResult {
         let_lines: HashMap::new(),
         fn_lines: HashMap::new(),
         define_lines: HashMap::new(),
-        deprecated_fns: HashMap::new(),
-        theme_tokens: Vec::new(),
         canonical: None,
         base_url: None,
-        font_faces: Vec::new(),
-        json_ld_blocks: Vec::new(),
-        manifest: None,
         import_stack: Vec::new(),
     };
     load_prelude(&mut ctx);
@@ -236,13 +219,8 @@ pub fn parse_with_base(input: &str, base_path: Option<&Path>) -> ParseResult {
             css_vars: ctx.css_vars,
             custom_css: ctx.custom_css,
             og_tags: ctx.og_tags,
-            custom_breakpoints: ctx.custom_breakpoints,
-            theme_tokens: ctx.theme_tokens,
             canonical: ctx.canonical,
             base_url: ctx.base_url,
-            font_faces: ctx.font_faces,
-            json_ld_blocks: ctx.json_ld_blocks,
-            manifest: ctx.manifest,
             preload_hints: collect_image_preload_hints(&nodes),
             nodes,
         },
@@ -744,17 +722,6 @@ impl Parser {
         }
 
 
-        if let Some(rest) = content.strip_prefix("@breakpoint ") {
-            let rest = rest.trim();
-            if let Some((name, value)) = rest.split_once(' ') {
-                ctx.custom_breakpoints.push((
-                    name.trim().to_string(),
-                    substitute_vars(value.trim(), &ctx.variables),
-                ));
-            }
-            return Ok(None);
-        }
-
         if content == "@head" || content.starts_with("@head ") {
             // Collect indented body lines as raw head content
             let mut head_content = String::new();
@@ -851,61 +818,6 @@ impl Parser {
             }
         }
 
-        // --- @manifest (PWA web manifest) ---
-        if content.trim() == "@manifest" || content.starts_with("@manifest ") {
-            let mut name = content
-                .strip_prefix("@manifest")
-                .unwrap_or("")
-                .trim()
-                .to_string();
-            if name.is_empty() {
-                name = ctx.page_title.clone().unwrap_or_else(|| "App".to_string());
-            }
-            let name = substitute_vars(&name, &ctx.variables);
-            let mut manifest = crate::ast::ManifestConfig {
-                name: name.clone(),
-                short_name: None,
-                start_url: "/".to_string(),
-                display: "standalone".to_string(),
-                background_color: None,
-                theme_color: None,
-                description: None,
-                icons: Vec::new(),
-            };
-            while self.pos < self.lines.len() && self.lines[self.pos].indent > current_indent {
-                if let LineContent::Normal(ref s) = self.lines[self.pos].content {
-                    let trimmed = s.trim();
-                    if let Some((key, value)) = trimmed.split_once(' ') {
-                        let value = substitute_vars(value.trim(), &ctx.variables);
-                        match key.trim() {
-                            "short_name" | "short-name" => manifest.short_name = Some(value),
-                            "start_url" | "start-url" => manifest.start_url = value,
-                            "display" => manifest.display = value,
-                            "background_color" | "background-color" => {
-                                manifest.background_color = Some(value)
-                            }
-                            "theme_color" | "theme-color" => manifest.theme_color = Some(value),
-                            "description" => manifest.description = Some(value),
-                            "icon" => {
-                                // icon src sizes (e.g., icon /icon-192.png 192x192)
-                                let parts: Vec<&str> = value.splitn(2, ' ').collect();
-                                if parts.len() == 2 {
-                                    manifest
-                                        .icons
-                                        .push((parts[0].to_string(), parts[1].to_string()));
-                                } else {
-                                    manifest.icons.push((value, "192x192".to_string()));
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                self.pos += 1;
-            }
-            ctx.manifest = Some(manifest);
-            return Ok(None);
-        }
 
 
         // --- @assert directive (compile-time assertions) ---
@@ -1662,94 +1574,6 @@ impl Parser {
         }
 
 
-        // --- @match ---
-
-        if let Some(rest) = content.strip_prefix("@match ") {
-            let match_val = substitute_vars(rest.trim(), &ctx.variables);
-            track_var_refs(rest.trim(), &mut ctx.used_variables);
-
-            // Collect all child lines
-            let mut match_lines = Vec::new();
-            while self.pos < self.lines.len() && self.lines[self.pos].indent > current_indent {
-                match_lines.push(self.lines[self.pos].clone());
-                self.pos += 1;
-            }
-
-            if match_lines.is_empty() {
-                return Ok(None);
-            }
-
-            let case_indent = match_lines[0].indent;
-
-            // Group into cases: (Some(value), body) or (None, body) for @default
-            let mut cases: Vec<(Option<String>, Vec<Line>)> = Vec::new();
-            let mut mi = 0;
-            while mi < match_lines.len() {
-                if match_lines[mi].indent == case_indent {
-                    if let LineContent::Normal(ref s) = match_lines[mi].content {
-                        let trimmed = s.trim();
-                        if let Some(case_val) = trimmed.strip_prefix("@case ") {
-                            let case_val = substitute_vars(case_val.trim(), &ctx.variables);
-                            mi += 1;
-                            let mut body = Vec::new();
-                            while mi < match_lines.len() && match_lines[mi].indent > case_indent {
-                                body.push(match_lines[mi].clone());
-                                mi += 1;
-                            }
-                            cases.push((Some(case_val), body));
-                        } else if trimmed == "@default" {
-                            mi += 1;
-                            let mut body = Vec::new();
-                            while mi < match_lines.len() && match_lines[mi].indent > case_indent {
-                                body.push(match_lines[mi].clone());
-                                mi += 1;
-                            }
-                            cases.push((None, body));
-                        } else {
-                            mi += 1;
-                        }
-                    } else {
-                        mi += 1;
-                    }
-                } else {
-                    mi += 1;
-                }
-            }
-
-            // Find first matching case or @default
-            let body_lines = cases
-                .into_iter()
-                .find(|(case_val, _)| match case_val {
-                    Some(v) => *v == match_val,
-                    None => true,
-                })
-                .map(|(_, lines)| lines)
-                .unwrap_or_default();
-
-            if body_lines.is_empty() {
-                return Ok(None);
-            }
-
-            let min_indent = body_lines.iter().map(|l| l.indent).min().unwrap_or(0);
-            let adjusted: Vec<Line> = body_lines
-                .iter()
-                .map(|l| Line {
-                    indent: l.indent - min_indent,
-                    content: l.content.clone(),
-                    line_num: l.line_num,
-                })
-                .collect();
-
-            let saved_vars = ctx.variables.clone();
-            let mut body_parser = Parser {
-                lines: adjusted,
-                pos: 0,
-            };
-            let nodes = body_parser.parse_children(0, ctx);
-            ctx.variables = saved_vars;
-            return Ok(Some(nodes));
-        }
-
 
         // --- @warn / @debug ---
 
@@ -1794,85 +1618,6 @@ impl Parser {
             return Ok(None);
         }
 
-        // --- @theme directive ---
-
-        if content.trim() == "@theme" {
-            let mut tokens = Vec::new();
-            while self.pos < self.lines.len() && self.lines[self.pos].indent > current_indent {
-                if let LineContent::Normal(ref s) = self.lines[self.pos].content {
-                    let trimmed = s.trim();
-                    if let Some((name, value)) = trimmed.split_once(' ') {
-                        let name = name.trim().to_string();
-                        let value = value.trim().to_string();
-                        tokens.push((name.clone(), value.clone()));
-                        // Set as regular variable
-                        ctx.variables.insert(name.clone(), value.clone());
-                        // Also set as CSS custom property
-                        let css_name = format!("--{}", name);
-                        ctx.css_vars.push((css_name, value));
-                    }
-                }
-                self.pos += 1;
-            }
-            ctx.theme_tokens = tokens;
-            return Ok(None);
-        }
-
-
-        // --- @font-face directive ---
-
-        if let Some(rest) = content.strip_prefix("@font-face ") {
-            let rest = rest.trim();
-            if let Some((name, url)) = rest.split_once(' ') {
-                ctx.font_faces.push((
-                    substitute_vars(name.trim(), &ctx.variables),
-                    substitute_vars(url.trim(), &ctx.variables),
-                ));
-            }
-            return Ok(None);
-        }
-
-        // --- @json-ld block ---
-
-        if content.trim() == "@json-ld" {
-            let mut block = String::new();
-            while self.pos < self.lines.len() && self.lines[self.pos].indent > current_indent {
-                match &self.lines[self.pos].content {
-                    LineContent::Normal(s) => {
-                        block.push_str(s.trim());
-                        block.push('\n');
-                    }
-                    LineContent::Raw(s) => {
-                        block.push_str(s);
-                        block.push('\n');
-                    }
-                }
-                self.pos += 1;
-            }
-            let trimmed = block.trim().to_string();
-            if !trimmed.is_empty() {
-                ctx.json_ld_blocks.push(trimmed);
-            }
-            return Ok(None);
-        }
-
-
-        // --- @deprecated annotation ---
-
-        if let Some(rest) = content.strip_prefix("@deprecated ") {
-            let message = rest.trim().to_string();
-            // Peek at the next line to get the function name
-            if self.pos < self.lines.len()
-                && let LineContent::Normal(ref s) = self.lines[self.pos].content
-                && let Some(fn_rest) = s.trim().strip_prefix("@let ")
-            {
-                let parts: Vec<&str> = fn_rest.split_whitespace().collect();
-                if let Some(&fn_name) = parts.first() {
-                    ctx.deprecated_fns.insert(fn_name.to_string(), message);
-                }
-            }
-            return Ok(None);
-        }
 
         // --- @extends (template inheritance) ---
 
@@ -2014,16 +1759,6 @@ impl Parser {
             let name = extract_element_name(&content);
             if ctx.functions.contains_key(name) {
                 ctx.used_functions.insert(name.to_string());
-                // Emit deprecation warning if function is marked @deprecated
-                if let Some(msg) = ctx.deprecated_fns.get(name) {
-                    ctx.diagnostics.push(Diagnostic {
-                        line: line_num,
-                        column: None,
-                        message: format!("@{} is deprecated: {}", name, msg),
-                        severity: Severity::Warning,
-                        source_line: Some(content.clone()),
-                    });
-                }
                 let nodes = self.expand_fn_call(name, &content, current_indent, line_num, ctx)?;
                 return Ok(Some(nodes));
             }
@@ -2529,19 +2264,10 @@ const KNOWN_DIRECTIVES: &[&str] = &[
     "meta",
     "head",
     "style",
-    "match",
-    "case",
-    "default",
     "warn",
-    "breakpoint",
-    "theme",
-    "deprecated",
     "extends",
-    "font-face",
-    "json-ld",
     "assert",
     "markdown",
-    "manifest",
     "data",
     "svg",
 ];
@@ -2604,6 +2330,21 @@ const REMOVED_SYNTAX: &[(&str, &str)] = &[
     ("@base", "use `@page [base ...] Title`"),
     ("@og", "use `@meta og:NAME VALUE`"),
     ("@debug", "use `@warn`"),
+    ("@match", "use `@if $x == a` / `@else if $x == b` / `@else`"),
+    ("@case", "use `@if $x == a` / `@else if $x == b` / `@else`"),
+    ("@default", "use `@else` in an `@if` chain"),
+    ("@theme", "use a `@let --name value` line per token"),
+    (
+        "@json-ld",
+        "put a `<script type=\"application/ld+json\">` in `@head`",
+    ),
+    ("@font-face", "write the `@font-face` rule in an `@style` block"),
+    (
+        "@manifest",
+        "write a manifest.json file and link it from `@head`",
+    ),
+    ("@breakpoint", "write the media query in an `@style` block"),
+    ("@deprecated", "remove it"),
     (
         "@collection",
         "use `@data $name dir/*.json` (each file becomes `$name.STEM.key`)",

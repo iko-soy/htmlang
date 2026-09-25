@@ -1,12 +1,20 @@
 @page [canonical https://example.com/page, base https://example.com/] My Site
-@font-face Inter fonts/inter.woff2
-@font-face Mono fonts/mono.ttf
-@json-ld
-  {
+@style
+  @font-face { font-family: 'Inter'; src: url('fonts/inter.woff2') format('woff2'); font-display: swap; }
+@head
+  <link rel="preload" href="fonts/inter.woff2" as="font" crossorigin>
+@style
+  @font-face { font-family: 'Mono'; src: url('fonts/mono.ttf') format('truetype'); font-display: swap; }
+@head
+  <link rel="preload" href="fonts/mono.ttf" as="font" crossorigin>
+@head
+  <script type="application/ld+json">
+    {
     "@context": "https://schema.org",
     "@type": "WebPage",
     "name": "My Site"
-  }
+    }
+  </script>
 
 @column [spacing 10]
   @text [font Inter] Hello with custom fonts

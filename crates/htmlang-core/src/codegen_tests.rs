@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::codegen::{generate, generate_dev, generate_partial, json_str, short_class_name};
+    use crate::codegen::{generate, generate_dev, generate_partial, short_class_name};
     use crate::parser::parse;
 
     fn compile(src: &str) -> String {
@@ -92,11 +92,5 @@ mod tests {
             count <= 1,
             "duplicate CSS rule emitted ({count} times) in:\n{out}"
         );
-    }
-
-    #[test]
-    fn json_str_escapes_quotes_and_controls() {
-        assert_eq!(json_str(r#"My "App""#), r#""My \"App\"""#);
-        assert_eq!(json_str("a\\b\n\t\u{1}"), r#""a\\b\n\t\u0001""#);
     }
 }

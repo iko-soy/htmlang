@@ -876,88 +876,8 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
         None => String::new(),
     };
 
-    // JSON-LD blocks
-    let json_ld_html: String = doc
-        .json_ld_blocks
-        .iter()
-        .map(|block| {
-            if dev {
-                format!(
-                    "<script type=\"application/ld+json\">\n{}\n</script>\n",
-                    block
-                )
-            } else {
-                format!("<script type=\"application/ld+json\">{}</script>", block)
-            }
-        })
-        .collect();
-
-    // Manifest link
-    let manifest_html = if let Some(ref manifest) = doc.manifest {
-        let mut json = String::from("{");
-        json.push_str(&format!("\"name\":{},", json_str(&manifest.name)));
-        if let Some(ref short) = manifest.short_name {
-            json.push_str(&format!("\"short_name\":{},", json_str(short)));
-        }
-        json.push_str(&format!("\"start_url\":{},", json_str(&manifest.start_url)));
-        json.push_str(&format!("\"display\":{}", json_str(&manifest.display)));
-        if let Some(ref bg) = manifest.background_color {
-            json.push_str(&format!(",\"background_color\":{}", json_str(bg)));
-        }
-        if let Some(ref tc) = manifest.theme_color {
-            json.push_str(&format!(",\"theme_color\":{}", json_str(tc)));
-        }
-        if let Some(ref desc) = manifest.description {
-            json.push_str(&format!(",\"description\":{}", json_str(desc)));
-        }
-        if !manifest.icons.is_empty() {
-            json.push_str(",\"icons\":[");
-            for (i, (src, sizes)) in manifest.icons.iter().enumerate() {
-                if i > 0 {
-                    json.push(',');
-                }
-                json.push_str(&format!(
-                    "{{\"src\":{},\"sizes\":{},\"type\":\"image/png\"}}",
-                    json_str(src),
-                    json_str(sizes)
-                ));
-            }
-            json.push(']');
-        }
-        json.push('}');
-
-        // Inline the manifest as a data URI
-        let encoded = base64_encode(json.as_bytes());
-        if dev {
-            format!(
-                "<link rel=\"manifest\" href=\"data:application/manifest+json;base64,{}\">\n",
-                encoded
-            )
-        } else {
-            format!(
-                "<link rel=\"manifest\" href=\"data:application/manifest+json;base64,{}\">",
-                encoded
-            )
-        }
-    } else {
-        String::new()
-    };
-
-    // Preload hints (auto-detect fonts from @font-face)
+    // Preload hints
     let mut preload_html = String::new();
-    for (_, url) in &doc.font_faces {
-        if dev {
-            preload_html.push_str(&format!(
-                "<link rel=\"preload\" href=\"{}\" as=\"font\" type=\"font/woff2\" crossorigin>\n",
-                url
-            ));
-        } else {
-            preload_html.push_str(&format!(
-                "<link rel=\"preload\" href=\"{}\" as=\"font\" type=\"font/woff2\" crossorigin>",
-                url
-            ));
-        }
-    }
     // Explicit preload hints from the document
     for hint in &doc.preload_hints {
         if dev {
@@ -976,26 +896,6 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
             ));
         }
     }
-
-    // Auto theme-color meta from @theme primary token
-    let theme_color_html = doc
-        .theme_tokens
-        .iter()
-        .find(|(name, _)| name == "primary" || name == "theme-color")
-        .map(|(_, value)| {
-            if dev {
-                format!(
-                    "<meta name=\"theme-color\" content=\"{}\">\n",
-                    html_escape(value)
-                )
-            } else {
-                format!(
-                    "<meta name=\"theme-color\" content=\"{}\">",
-                    html_escape(value)
-                )
-            }
-        })
-        .unwrap_or_default();
 
     // Focus-visible CSS for interactive elements (accessibility)
     let focus_visible_css = if ctx.has_interactive {
@@ -1032,7 +932,7 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
 <meta charset=\"utf-8\">
 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
 <title>{title}</title>
-{theme_color_html}{base_html}{canonical_html}{manifest_html}{preload_html}{dns_prefetch_html}{meta_html}{og_html}{favicon_html}{json_ld_html}{head_html}\
+{base_html}{canonical_html}{preload_html}{dns_prefetch_html}{meta_html}{og_html}{favicon_html}{head_html}\
 <style>
 {reset_css}{element_css}\
 </style>
@@ -1044,15 +944,12 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
 ",
                     title = html_escape(title),
                     lang_attr = lang_attr,
-                    theme_color_html = theme_color_html,
                     base_html = base_html,
                     canonical_html = canonical_html,
-                    manifest_html = manifest_html,
                     preload_html = preload_html,
                     dns_prefetch_html = dns_prefetch_html,
                     meta_html = meta_html,
                     favicon_html = favicon_html,
-                    json_ld_html = json_ld_html,
                     head_html = head_html,
                     og_html = og_html,
                     reset_css = reset_css,
@@ -1061,19 +958,16 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
                 )
             } else {
                 format!(
-                    "<!DOCTYPE html><html{lang_attr}><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>{title}</title>{theme_color_html}{base_html}{canonical_html}{manifest_html}{preload_html}{dns_prefetch_html}{meta_html}{og_html}{favicon_html}{json_ld_html}{head_html}<style>{reset_css}{element_css}</style></head><body>{body}</body></html>",
+                    "<!DOCTYPE html><html{lang_attr}><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>{title}</title>{base_html}{canonical_html}{preload_html}{dns_prefetch_html}{meta_html}{og_html}{favicon_html}{head_html}<style>{reset_css}{element_css}</style></head><body>{body}</body></html>",
                     title = html_escape(title),
                     lang_attr = lang_attr,
-                    theme_color_html = theme_color_html,
                     base_html = base_html,
                     canonical_html = canonical_html,
-                    manifest_html = manifest_html,
                     preload_html = preload_html,
                     dns_prefetch_html = dns_prefetch_html,
                     meta_html = meta_html,
                     og_html = og_html,
                     favicon_html = favicon_html,
-                    json_ld_html = json_ld_html,
                     head_html = head_html,
                     reset_css = reset_css,
                     element_css = element_css,
@@ -1093,56 +987,11 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
     }
 }
 
-/// Encode `s` as a JSON string literal (with surrounding quotes).
-pub(crate) fn json_str(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('"');
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
-}
-
 /// Assemble every CSS block the document needs (font faces, custom
 /// properties, generated class rules, keyframes, and user CSS). Shared by
 /// full-page and partial output so both emit the same styles.
 fn build_element_css(doc: &Document, styles: &StyleCollector, dev: bool) -> String {
     let mut element_css = String::new();
-
-    // @font-face rules, in declaration order
-    for (name, url) in &doc.font_faces {
-        let format_hint = if url.ends_with(".woff2") {
-            " format('woff2')"
-        } else if url.ends_with(".woff") {
-            " format('woff')"
-        } else if url.ends_with(".ttf") {
-            " format('truetype')"
-        } else if url.ends_with(".otf") {
-            " format('opentype')"
-        } else {
-            ""
-        };
-        if dev {
-            element_css.push_str(&format!(
-                "@font-face {{\n  font-family: '{}';\n  src: url('{}'){};\n  font-display: swap;\n}}\n",
-                name, url, format_hint
-            ));
-        } else {
-            element_css.push_str(&format!(
-                "@font-face{{font-family:'{}';src:url('{}'){};font-display:swap}}",
-                name, url, format_hint
-            ));
-        }
-    }
 
     // Collect all CSS custom properties (explicit `@let --name` / `@theme`
     // tokens, plus any auto-extracted repeats) so they can be emitted in a
@@ -1150,12 +999,6 @@ fn build_element_css(doc: &Document, styles: &StyleCollector, dev: bool) -> Stri
     let mut root_vars: Vec<(String, String)> = Vec::new();
     for (name, value) in &doc.css_vars {
         root_vars.push((name.clone(), value.clone()));
-    }
-    for (name, value) in &doc.theme_tokens {
-        let css_name = format!("--{}", name);
-        if !root_vars.iter().any(|(n, _)| *n == css_name) {
-            root_vars.push((css_name, value.clone()));
-        }
     }
 
     // Generated rules always go in `@layer htmlang`, so unlayered user CSS
