@@ -288,7 +288,7 @@ pub fn format(input: &str) -> String {
         }
 
         let level = indent_stack.len() - 1;
-        let is_code = trimmed.starts_with('@') || trimmed.starts_with('[');
+        let is_code = trimmed.starts_with('@');
 
         // An opening `"""` without its closing partner starts a verbatim block.
         if trimmed.matches("\"\"\"").count() % 2 == 1 {

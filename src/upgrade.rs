@@ -684,6 +684,10 @@ fn rewrite_directive_line(
 ) -> String {
     let trimmed = line.trim_start();
     let pad = " ".repeat(indent);
+    // `[attrs]` on its own line was an anonymous @el
+    if trimmed.starts_with('[') {
+        return format!("{pad}@el {}", trimmed);
+    }
     for old in ["@fn ", "@define ", "@mixin ", "@component "] {
         if let Some(rest) = trimmed.strip_prefix(old) {
             return format!("{pad}@let {}", rest);
@@ -941,9 +945,6 @@ const STD_COMPONENTS: &[&str] = &[
 /// Does this line's attribute list style an element (as opposed to passing
 /// function parameters or directive options)?
 fn takes_element_attributes(trimmed: &str, user_defined: &[&str]) -> bool {
-    if trimmed.starts_with('[') {
-        return true; // implicit @el
-    }
     let Some(rest) = trimmed.strip_prefix('@') else {
         return false;
     };
@@ -971,7 +972,7 @@ fn rewrite_attr_regions(
 ) -> String {
     let trimmed = line.trim_start();
     // In a text line, only inline elements (`{@abbr [...]}`) have attributes.
-    let text_line = !trimmed.starts_with('@') && !trimmed.starts_with('[');
+    let text_line = !trimmed.starts_with('@');
     if *depth == 0 && text_line && !line.contains("{@") {
         return line.to_string();
     }
@@ -1480,7 +1481,7 @@ mod tests {
             up("@input [type email, name e, required, padding 8]"),
             "@input [type=email, name=e, required, padding 8]"
         );
-        assert_eq!(up("[id main, aria-label Close]\n  x"), "[id=main, aria-label=Close]\n  x");
+        assert_eq!(up("[id main, aria-label Close]\n  x"), "@el [id=main, aria-label=Close]\n  x");
         // Idempotent: a second run changes nothing.
         let once = up("@el [aria-label Main menu]");
         assert_eq!(once, "@el [aria-label=Main menu]");
@@ -1576,6 +1577,12 @@ mod tests {
             up("@svg [width 24, color red, class icon] a.svg"),
             "@image [inline, width 24, color red, class=icon] a.svg"
         );
+    }
+
+    #[test]
+    fn bare_attribute_lines_become_el() {
+        assert_eq!(up("[padding 4]\n  x\n"), "@el [padding 4]\n  x\n");
+        assert_eq!(up("  [\n    padding 4\n  ] > @link / Home\n"), "  @el [\n    padding 4\n  ] > @link / Home\n");
     }
 
     #[test]

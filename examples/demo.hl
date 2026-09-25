@@ -277,8 +277,7 @@
         htmlang is a layout-first language that compiles to a single,
         self-contained HTML file with embedded CSS.
 
-    -- Implicit @el via bare [attrs] line
-    [
+    @el [
       display grid,
       grid-template-columns 1fr 2fr,
       grid-template-areas "h h" "s m" "f f",

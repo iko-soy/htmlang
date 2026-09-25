@@ -1,7 +1,0 @@
-@page Implicit El
-[padding 20, background #f5f5f5]
-  @text Hello from implicit el
-[rounded 8, border 1 #ccc]
-  @row [spacing 10]
-    @text A
-    @text B

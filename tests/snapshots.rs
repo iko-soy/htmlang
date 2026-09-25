@@ -111,11 +111,6 @@ fn snapshot_no_page() {
 }
 
 #[test]
-fn snapshot_implicit_el() {
-    snapshot_test("implicit_el");
-}
-
-#[test]
 fn snapshot_responsive() {
     snapshot_test("responsive");
 }

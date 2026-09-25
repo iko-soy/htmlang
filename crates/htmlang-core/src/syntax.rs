@@ -234,7 +234,7 @@ fn build(lines: &[Line], pos: &mut usize, parent: Option<usize>, plain: bool) ->
 fn takes_body(text: &str) -> bool {
     const ONE_LINE: &[&str] = &["@page", "@meta", "@data", "@include"];
     let name = text.split([' ', '[']).next().unwrap_or("");
-    (text.starts_with('@') || text.starts_with('[')) && !ONE_LINE.contains(&name)
+    text.starts_with('@') && !ONE_LINE.contains(&name)
 }
 
 /// The line at `pos` if it is a sibling at `indent`, with its text.
@@ -425,7 +425,7 @@ pub(crate) fn preprocess(input: &str) -> Vec<Line> {
 /// with one more word, as in `@let name [`). Brackets in text content, such
 /// as `@text [bold] Use [ to open`, are ignored.
 pub(crate) fn open_attr_depth(line: &str) -> i32 {
-    if !line.starts_with('@') && !line.starts_with('[') {
+    if !line.starts_with('@') {
         // Text: an inline `{@name [` whose list runs onto the next line
         let Some(start) = line.rfind("{@") else {
             return 0;

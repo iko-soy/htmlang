@@ -43,7 +43,7 @@ split attributes, so a font stack is written `font "Inter, sans-serif"`.
 
 ### Text
 
-Any line that doesn't start with `@` or `[` is text. Text after an element's
+Any line that doesn't start with `@` is text. Text after an element's
 attributes is its content, and `{...}` puts elements inside a line of text:
 
 ```
@@ -66,13 +66,10 @@ line: `--` later in a line is ordinary text.
 
 ### Shorthands
 
-A line starting with `[` is an anonymous `@el`. `>` chains single-child
-elements on one line; the last element in the chain gets the indented children.
+`>` chains single-child elements on one line; the last element in the chain
+gets the indented children.
 
 ```
-[padding 20, background white]
-  Hello
-
 @el [padding 16, background blue, rounded 8] > @link https://example.com
   @text [color white] Get Started
 ```
@@ -489,5 +486,6 @@ removed form with its replacement.
 | `$a ~ " " ~ $b` | `"$a $b"` |
 | `@each $x in LIST [page N]` | Split the list, or filter it with `@if` |
 | `...$bundle` | `$bundle` |
+| `[attrs]` alone on a line | `@el [attrs]` |
 | `animate`, `inset-area` | `animation`, `position-area` |
 | `$x\|uppercase`, `$c\|darken:10` (filters) | `${uppercase($x)}`, `${darken($c, 10)}` |

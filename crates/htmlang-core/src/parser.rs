@@ -896,12 +896,32 @@ impl Evaluator {
 
         // --- Elements ---
 
-        if content.starts_with('@') || content.starts_with('[') {
+        if content.starts_with('@') {
             let node = self.parse_element_line(&content, children, line_num, ctx)?;
             return Ok(Some(vec![inline_svg(node, line_num, ctx)]));
         }
 
         // --- Bare text ---
+
+        // `[attrs]` alone on a line used to be an anonymous @el
+        if let Some(list) = content.strip_prefix('[')
+            && (list.is_empty()
+                || list
+                    .split([',', ']'])
+                    .next()
+                    .and_then(|first| first.split_whitespace().next())
+                    .is_some_and(crate::vocab::is_style_attribute))
+        {
+            ctx.diagnostics.push(Diagnostic {
+                line: line_num,
+                column: None,
+                message: "a line starting with `[` is text: for an element, write `@el [...]` \
+                          (run `htmlang upgrade`)"
+                    .to_string(),
+                severity: Severity::Warning,
+                source_line: Some(content.clone()),
+            });
+        }
 
         let var_warnings =
             check_undefined_vars(&content, &ctx.variables, line_num, current_indent);
@@ -1390,10 +1410,7 @@ fn parse_single_element(
     line_num: usize,
     ctx: &mut ParseContext,
 ) -> Result<Element, ParseError> {
-    let (kind, rest) = if content.starts_with('[') {
-        // Implicit @el
-        (ElementKind::El, content.to_string())
-    } else if let Some(without_at) = content.strip_prefix('@') {
+    let (kind, rest) = if let Some(without_at) = content.strip_prefix('@') {
         match without_at.find([' ', '[']) {
             Some(i) => {
                 let kind_str = &without_at[..i];
