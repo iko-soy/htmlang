@@ -2511,6 +2511,12 @@ fn argument_is_special(kind: &ElementKind) -> bool {
         .is_some_and(|spec| matches!(spec.arg, TagArg::Attr(_)))
 }
 
+/// The directive names (without `@`) the parser recognizes, for tools such
+/// as the language server.
+pub fn known_directives() -> &'static [&'static str] {
+    KNOWN_DIRECTIVES
+}
+
 const KNOWN_DIRECTIVES: &[&str] = &[
     "page",
     "let",
@@ -2536,6 +2542,8 @@ const KNOWN_DIRECTIVES: &[&str] = &[
     "assert",
     "markdown",
     "manifest",
+    "data",
+    "svg",
 ];
 
 fn parse_element_kind(s: &str, line_num: usize) -> Result<ElementKind, ParseError> {

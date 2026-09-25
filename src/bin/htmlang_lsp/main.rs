@@ -12,6 +12,7 @@ use tower_lsp::{Client, LanguageServer, LspService, Server};
 
 mod analysis;
 mod completion;
+mod docs;
 mod hover;
 mod navigation;
 mod state;

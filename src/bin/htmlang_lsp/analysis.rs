@@ -1040,19 +1040,9 @@ pub(crate) fn semantic_tokens(text: &str, result: &ParseResult) -> Vec<SemanticT
                     i += 1;
                 }
                 let word = &line[start..i];
-                let token_type = match word {
-                    "@page" | "@let" | "@if" | "@else" | "@each" | "@include" | "@import"
-                    | "@meta" | "@head" | "@style" | "@keyframes" | "@match" | "@case"
-                    | "@default" | "@slot" | "@children" | "@warn"
-                    | "@fragment" | "@breakpoint"
-                    | "@font-face" | "@json-ld" | "@assert" | "@theme"
-                    | "@deprecated" | "@extends" | "@data" | "@env" | "@fetch"
-                    | "@svg" => 0, // keyword
-                    _ => {
-                        // Check if it's a user function call (starts with @ but not a builtin element)
-                        if is_builtin_element(word) { 0 } else { 2 } // function
-                    }
-                };
+                // Directives and built-in elements are keywords; any other
+                // `@name` is a function call.
+                let token_type = if is_builtin_name(&word[1..]) { 0 } else { 2 };
                 // Mark unused definitions with deprecated modifier (dimmed)
                 let modifier = if trimmed.starts_with("@let ") && word != "@let" {
                     let name_part = &word[1..]; // strip @
@@ -1110,72 +1100,12 @@ pub(crate) fn semantic_tokens(text: &str, result: &ParseResult) -> Vec<SemanticT
     tokens
 }
 
-fn is_builtin_element(word: &str) -> bool {
-    matches!(
-        word,
-        "@row"
-            | "@column"
-            | "@el"
-            | "@text"
-            | "@paragraph"
-            | "@image"
-            | "@link"
-            | "@input"
-            | "@button"
-            | "@select"
-            | "@textarea"
-            | "@option"
-            | "@label"
-            | "@raw"
-            | "@nav"
-            | "@header"
-            | "@footer"
-            | "@main"
-            | "@section"
-            | "@article"
-            | "@aside"
-            | "@list"
-            | "@item"
-            | "@table"
-            | "@thead"
-            | "@tbody"
-            | "@tr"
-            | "@td"
-            | "@th"
-            | "@video"
-            | "@audio"
-            | "@form"
-            | "@details"
-            | "@summary"
-            | "@blockquote"
-            | "@cite"
-            | "@code"
-            | "@pre"
-            | "@hr"
-            | "@figure"
-            | "@figcaption"
-            | "@progress"
-            | "@meter"
-            | "@fragment"
-            | "@dialog"
-            | "@dl"
-            | "@dt"
-            | "@dd"
-            | "@fieldset"
-            | "@legend"
-            | "@picture"
-            | "@source"
-            | "@time"
-            | "@mark"
-            | "@kbd"
-            | "@abbr"
-            | "@datalist"
-            | "@script"
-            | "@noscript"
-            | "@address"
-            | "@search"
-            | "@breadcrumb"
-    )
+/// A directive or built-in element name (without `@`), from the compiler.
+fn is_builtin_name(name: &str) -> bool {
+    htmlang::parser::known_directives().contains(&name)
+        || htmlang::ast::ElementKind::from_name(name).is_some()
+        // Directives the parser handles outside its directive list
+        || matches!(name, "data" | "svg")
 }
 
 #[allow(clippy::too_many_arguments)]
