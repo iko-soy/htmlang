@@ -232,7 +232,7 @@ fn build(lines: &[Line], pos: &mut usize, parent: Option<usize>, plain: bool) ->
 
 /// Whether the lines indented under `text` belong to it.
 fn takes_body(text: &str) -> bool {
-    const ONE_LINE: &[&str] = &["@page", "@meta", "@warn", "@assert", "@data", "@include"];
+    const ONE_LINE: &[&str] = &["@page", "@meta", "@data", "@include"];
     let name = text.split([' ', '[']).next().unwrap_or("");
     (text.starts_with('@') || text.starts_with('[')) && !ONE_LINE.contains(&name)
 }

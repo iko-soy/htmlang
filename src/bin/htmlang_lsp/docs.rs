@@ -108,8 +108,6 @@ pub(crate) const DIRECTIVES: &[Doc] = &[
         "Repeats its body for each item of a list or range; `$_index` counts from 0.",
         "@each $item in apple, banana\n  @text $item\n@each $i in 1..10 step 2\n  @text $i",
     ),
-    doc("assert", "Fails the build when the condition is false.", "@assert $spacing == 16"),
-    doc("warn", "Emits a compile-time warning.", "@warn Remember to set a title"),
     doc("data", "Loads a JSON file as variables.", "@data site.json"),
 ];
 

@@ -162,9 +162,8 @@
         ]
           $i
 
-    -- @if / @else if / @else (with @assert to verify at compile time)
+    -- @if / @else if / @else
     @let count 3
-    @assert $count == 3
     @row [spacing 6, align-items center]
       @text [bold, min-width 64] Count:
       @if $count == 0

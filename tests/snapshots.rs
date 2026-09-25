@@ -921,33 +921,6 @@ fn css_scroll_snap_align() {
 }
 
 // ---------------------------------------------------------------------------
-// Feature tests: @warn / @debug
-// ---------------------------------------------------------------------------
-
-#[test]
-fn warn_produces_diagnostic() {
-    let diags = parse_diagnostics("@warn Something is wrong");
-    assert!(
-        diags.iter().any(|d| d.message == "Something is wrong"
-            && d.severity == htmlang::parser::Severity::Warning),
-        "expected @warn diagnostic, got: {:?}",
-        diags
-    );
-}
-
-#[test]
-fn warn_substitutes_variables() {
-    let diags = parse_diagnostics("@let name test\n@warn Missing $name value");
-    assert!(
-        diags
-            .iter()
-            .any(|d| d.message.contains("Missing test value")),
-        "expected substituted @warn, got: {:?}",
-        diags
-    );
-}
-
-// ---------------------------------------------------------------------------
 // Feature tests: image optimization hints
 // ---------------------------------------------------------------------------
 
@@ -3695,64 +3668,6 @@ fn no_warning_used_mixin() {
 }
 
 // ---------------------------------------------------------------------------
-// @assert directive
-// ---------------------------------------------------------------------------
-
-#[test]
-fn snapshot_assert_directive() {
-    snapshot_test("assert_directive");
-}
-
-#[test]
-fn assert_passes_no_error() {
-    let diags = parse_diagnostics("@let x hello\n@assert $x == hello\n@el [padding 10]");
-    assert!(
-        !diags
-            .iter()
-            .any(|d| d.severity == htmlang::parser::Severity::Error),
-        "passing assertion should produce no error, got: {:?}",
-        diags
-    );
-}
-
-#[test]
-fn assert_fails_produces_error() {
-    let diags = parse_diagnostics("@let x hello\n@assert $x == world");
-    assert!(
-        diags
-            .iter()
-            .any(|d| d.severity == htmlang::parser::Severity::Error
-                && d.message.contains("assertion failed")),
-        "failing assertion should produce error, got: {:?}",
-        diags
-    );
-}
-
-#[test]
-fn assert_not_equal() {
-    let diags = parse_diagnostics("@let x hello\n@assert $x != world\n@el");
-    assert!(
-        !diags
-            .iter()
-            .any(|d| d.severity == htmlang::parser::Severity::Error),
-        "!= assertion should pass when values differ, got: {:?}",
-        diags
-    );
-}
-
-#[test]
-fn assert_truthy() {
-    let diags = parse_diagnostics("@let x true\n@assert $x\n@el");
-    assert!(
-        !diags
-            .iter()
-            .any(|d| d.severity == htmlang::parser::Severity::Error),
-        "truthy assertion should pass, got: {:?}",
-        diags
-    );
-}
-
-// ---------------------------------------------------------------------------
 // clamp() / min() / max() CSS functions
 // ---------------------------------------------------------------------------
 
@@ -4174,16 +4089,6 @@ fn test_error_circular_include() {
 }
 
 #[test]
-fn test_error_assert_failure() {
-    let diags = parse_diagnostics("@let x 5\n@assert $x == 10");
-    assert!(
-        diags.iter().any(|d| d.message.contains("assertion failed")
-            && d.severity == htmlang::parser::Severity::Error),
-        "should report assertion failure as error"
-    );
-}
-
-#[test]
 fn test_error_duplicate_attribute() {
     let diags = parse_diagnostics("@el [padding 10, padding 20]\n  Hello");
     assert!(
@@ -4248,21 +4153,6 @@ fn test_spread_define() {
         html.contains("font-weight:bold") || html.contains("font-weight:700"),
         "spread define should apply bold"
     );
-}
-
-#[test]
-fn test_log_directive() {
-    // @log should not produce errors and should be consumed without output nodes
-    let result = htmlang::parser::parse("@let x hello\n@warn x = $x\n@text $x");
-    assert!(
-        result
-            .diagnostics
-            .iter()
-            .all(|d| d.severity != htmlang::parser::Severity::Error),
-        "@warn should = $should, not = $not, produce = $produce, errors = $errors"
-    );
-    let html = htmlang::codegen::generate(&result.document);
-    assert!(!html.contains("@log"), "@warn should = $should, not = $not, appear = $appear, in = $in, output = $output");
 }
 
 #[test]

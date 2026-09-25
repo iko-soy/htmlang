@@ -497,22 +497,6 @@ impl Evaluator {
 
 
 
-        // --- @assert directive (compile-time assertions) ---
-
-        if let Some(rest) = content.strip_prefix("@assert ") {
-            let rest = rest.trim();
-            if !ctx.condition(rest, line_num) {
-                ctx.diagnostics.push(Diagnostic {
-                    line: line_num,
-                    column: None,
-                    message: format!("assertion failed: {}", rest),
-                    severity: Severity::Error,
-                    source_line: Some(content.clone()),
-                });
-            }
-            return Ok(None);
-        }
-
         if let Some(rest) = content.strip_prefix("@include ") {
             let rest = rest.trim();
             let (filename, alias) = if let Some((file_part, alias_part)) = rest.rsplit_once(" as ")
@@ -870,21 +854,6 @@ impl Evaluator {
         }
 
         // --- @each loop ---
-
-        // --- @warn / @debug ---
-
-        if let Some(rest) = content.strip_prefix("@warn ") {
-            let msg = substitute_vars(rest.trim(), &ctx.variables);
-            ctx.diagnostics.push(Diagnostic {
-                line: line_num,
-                column: None,
-                message: msg,
-                severity: Severity::Warning,
-                source_line: Some(content.clone()),
-            });
-            return Ok(None);
-        }
-
 
         // --- @keyframes directive ---
 
@@ -1546,8 +1515,6 @@ const KNOWN_DIRECTIVES: &[&str] = &[
     "meta",
     "head",
     "style",
-    "warn",
-    "assert",
     "markdown",
     "data",
 ];
@@ -1614,7 +1581,7 @@ const REMOVED_SYNTAX: &[(&str, &str)] = &[
     ("@canonical", "use `@page [canonical ...] Title`"),
     ("@base", "use `@page [base ...] Title`"),
     ("@og", "use `@meta og:NAME VALUE`"),
-    ("@debug", "use `@warn`"),
+    ("@debug", "removed: a layout needs no compile-time messages"),
     ("@svg", "use `@image [inline] file.svg`"),
     ("@match", "use `@if $x == a` / `@else if $x == b` / `@else`"),
     ("@case", "use `@if $x == a` / `@else if $x == b` / `@else`"),
@@ -1645,7 +1612,9 @@ const REMOVED_SYNTAX: &[(&str, &str)] = &[
         "put each locale's strings in a JSON file and use `@data $t locales/$lang.json`",
     ),
     ("@defer", "remove it: the content is already in the page"),
-    ("@log", "use `@warn`"),
+    ("@log", "removed: a layout needs no compile-time messages"),
+    ("@warn", "removed: a layout needs no compile-time messages"),
+    ("@assert", "removed: a layout needs no compile-time checks"),
     (
         "@component",
         "use `@let`: an `@style` block in a function body is scoped to it",

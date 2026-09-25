@@ -331,11 +331,6 @@ as `var(--name)` in the generated CSS:
 @el [background $--brand] Themed
 ```
 
-### Checks
-
-`@assert CONDITION` fails the build when false. `@warn MESSAGE` emits a
-warning.
-
 ## Expressions
 
 Conditions and computed values (`@let x = ...`) are expressions:
@@ -482,7 +477,7 @@ removed form with its replacement.
 | `@scope`, `@starting-style`, `@css-property` | The CSS rule in `@style` |
 | `@lang`, `@favicon`, `@canonical`, `@base` | `@page [lang ..., favicon ..., canonical ..., base ...] Title` |
 | `@og KEY VALUE` | `@meta og:KEY VALUE` |
-| `@debug`, `@log` | `@warn` |
+| `@assert`, `@warn`, `@debug`, `@log` | Nothing (the lines are removed) |
 | `@defer` | Its content, directly |
 | `@col`, `@p`, `@img`, `@li`, `@btn`, `@ul`, `@divider`, `@opt` | `@column`, `@paragraph`, `@image`, `@item`, `@button`, `@list`, `@hr`, `@option` |
 | `type email`, `id main` (HTML attributes written as styles) | `type=email`, `id=main` |

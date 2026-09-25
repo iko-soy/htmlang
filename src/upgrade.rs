@@ -204,6 +204,17 @@ pub fn upgrade(input: &str) -> Upgrade {
             continue;
         }
 
+        // Directives removed without a replacement: drop the line
+        if attr_depth == 0
+            && ["@assert ", "@warn ", "@debug ", "@log ", "@deprecated "]
+                .iter()
+                .any(|d| trimmed.starts_with(d) && !user_defined.contains(&&d[1..d.len() - 1]))
+        {
+            changes += 1;
+            i += 1;
+            continue;
+        }
+
         // --- Line rewrites ---
         let mut new_line = line.to_string();
         if attr_depth == 0 {
@@ -688,16 +699,6 @@ fn rewrite_directive_line(
             .unwrap_or(value);
         return format!("{pad}@meta og:{} {}", key, value);
     }
-    if let Some(rest) = trimmed.strip_prefix("@debug ") {
-        return format!("{pad}@warn {}", rest);
-    }
-    if let Some(rest) = trimmed.strip_prefix("@log ") {
-        let shown: Vec<String> = rest
-            .split_whitespace()
-            .map(|v| format!("{} = ${}", v.trim_start_matches('$'), v.trim_start_matches('$')))
-            .collect();
-        return format!("{pad}@warn {}", shown.join(", "));
-    }
     // `@let x = $a ~ " " ~ $b` → `@let x "$a $b"` (`~` was removed:
     // interpolated strings do the same)
     if let Some(rest) = trimmed.strip_prefix("@let ")
@@ -804,9 +805,6 @@ fn rewrite_directive_line(
             "{pad}@style\n{pad}  @font-face {{ font-family: '{name}'; src: url('{url}'){format}; font-display: swap; }}\n\
              {pad}@head\n{pad}  <link rel=\"preload\" href=\"{url}\" as=\"font\" crossorigin>"
         );
-    }
-    if trimmed.starts_with("@deprecated ") {
-        return String::new();
     }
     if trimmed.starts_with("@breakpoint ") {
         manual.push((
@@ -1209,7 +1207,7 @@ fn rename_filters(line: &str) -> String {
 }
 
 /// Turn `$name|filter:arg|...` chains into function calls: bare in
-/// expressions (`@if`, `@else if`, `@assert`, `@let x = ...`), and as
+/// expressions (`@if`, `@else if`, `@let x = ...`), and as
 /// `${...}` interpolation everywhere else.
 fn convert_filters(line: &str) -> String {
     let line = rename_filters(line);
@@ -1217,7 +1215,7 @@ fn convert_filters(line: &str) -> String {
         return line;
     }
     let trimmed = line.trim_start();
-    let expression_line = ["@if ", "@else if ", "@assert "]
+    let expression_line = ["@if ", "@else if "]
         .iter()
         .any(|p| trimmed.starts_with(p))
         || trimmed
@@ -1469,7 +1467,7 @@ mod tests {
             "@page [lang en, favicon /f.png] Home\n@text hi\n"
         );
         assert_eq!(up("@og title \"My Page\""), "@meta og:title My Page");
-        assert_eq!(up("@debug hi $x\n@log $a $b"), "@warn hi $x\n@warn a = $a, b = $b");
+        assert_eq!(up("@debug hi $x\n@log $a $b\n@assert $x == 1\n@warn hi\n@text x"), "@text x");
         assert_eq!(up("@component card $t\n  @text $t"), "@let card $t\n  @text $t");
         assert_eq!(up("@el [color $on ? green : gray]"), "@el [color if($on, green, gray)]");
         let r = upgrade("@lang en\n@text hi");
@@ -1554,7 +1552,7 @@ mod tests {
             up("@font-face Inter fonts/inter.woff2"),
             "@style\n  @font-face { font-family: 'Inter'; src: url('fonts/inter.woff2') format('woff2'); font-display: swap; }\n@head\n  <link rel=\"preload\" href=\"fonts/inter.woff2\" as=\"font\" crossorigin>"
         );
-        assert_eq!(up("@deprecated old\n@let x 1"), "\n@let x 1");
+        assert_eq!(up("@deprecated old\n@let x 1"), "@let x 1");
         assert_eq!(upgrade("@breakpoint tablet 600").manual.len(), 1);
     }
 
