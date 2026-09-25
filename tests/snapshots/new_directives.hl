@@ -1,6 +1,4 @@
-@page My Site
-@canonical https://example.com/page
-@base https://example.com/
+@page [canonical https://example.com/page, base https://example.com/] My Site
 @font-face Inter fonts/inter.woff2
 @font-face Mono fonts/mono.ttf
 @json-ld

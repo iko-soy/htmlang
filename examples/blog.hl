@@ -1,6 +1,5 @@
 -- A minimal blog template: header + list of posts + post template.
-@page My Blog
-@lang en
+@page [lang en] My Blog
 @let primary #3b82f6
 @let ink #1f2937
 @let muted #6b7280

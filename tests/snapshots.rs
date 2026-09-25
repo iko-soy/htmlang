@@ -976,13 +976,13 @@ fn image_explicit_loading_not_doubled() {
 
 #[test]
 fn ternary_expression_in_attrs() {
-    let output = compile("@page T\n@let active true\n@el [color $active ? green : gray]\n  test");
+    let output = compile("@page T\n@let active true\n@el [color if($active, green, gray)]\n  test");
     assert!(output.contains("color:green"));
 }
 
 #[test]
 fn ternary_expression_false() {
-    let output = compile("@page T\n@let active false\n@el [color $active ? green : gray]\n  test");
+    let output = compile("@page T\n@let active false\n@el [color if($active, green, gray)]\n  test");
     assert!(output.contains("color:gray"));
 }
 
@@ -1752,7 +1752,7 @@ fn css_resize() {
 
 #[test]
 fn lang_sets_html_attr() {
-    let output = compile("@page T\n@lang en\n@text Hello");
+    let output = compile("@page [lang en] T\n@text Hello");
     assert!(output.contains("<html lang=\"en\">"));
 }
 
@@ -1768,7 +1768,7 @@ fn lang_not_present_without_directive() {
 #[test]
 fn favicon_fallback_href() {
     // Nonexistent file should fall back to href
-    let output = compile("@page T\n@favicon nonexistent.png\n@text Hello");
+    let output = compile("@page [favicon nonexistent.png] T\n@text Hello");
     assert!(output.contains("<link rel=\"icon\" href=\"nonexistent.png\">"));
 }
 
@@ -2099,7 +2099,7 @@ fn unless_true_hides_content() {
 #[test]
 fn og_tags_in_output() {
     let output = compile(
-        "@page T\n@og title \"My Page\"\n@og image \"https://example.com/img.png\"\n@text Hello",
+        "@page T\n@meta og:title My Page\n@meta og:image https://example.com/img.png\n@text Hello",
     );
     assert!(output.contains("og:title"));
     assert!(output.contains("My Page"));
@@ -3636,7 +3636,7 @@ fn breadcrumb_generates_nav_ol() {
 
 #[test]
 fn canonical_directive() {
-    let output = compile("@page T\n@canonical https://example.com/page\n@text Hello");
+    let output = compile("@page [canonical https://example.com/page] T\n@text Hello");
     assert!(
         output.contains("<link rel=\"canonical\" href=\"https://example.com/page\">"),
         "canonical: {}",
@@ -3646,7 +3646,7 @@ fn canonical_directive() {
 
 #[test]
 fn base_directive() {
-    let output = compile("@page T\n@base https://example.com/\n@text Hello");
+    let output = compile("@page [base https://example.com/] T\n@text Hello");
     assert!(
         output.contains("<base href=\"https://example.com/\">"),
         "base: {}",
@@ -4029,16 +4029,19 @@ fn conditional_attr_boolean_false() {
 // -----------------------------------------------------------------------
 
 #[test]
-fn component_wraps_in_scoped_div() {
-    let html = compile("@component card $title\n  @text $title\n\n@card [title Hello]\n");
-    assert!(html.contains("hl-card"));
+fn function_with_style_is_scoped() {
+    let html = compile(
+        "@let card $title\n  @style\n    .t { color: red; }\n  @text [class t] $title\n@card [title Hello]\n",
+    );
+    assert!(html.contains("hl-card\"><span class=\"t\">Hello"), "{}", html);
+    assert!(html.contains(".hl-card .t { color: red; }"), "{}", html);
 }
 
 #[test]
-fn component_with_children() {
+fn function_without_style_has_no_wrapper() {
     let html =
-        compile("@component box\n  @el [padding 10]\n    @children\n\n@box\n  @text Inside\n");
-    assert!(html.contains("hl-box"));
+        compile("@let box\n  @el [padding 10]\n    @children\n\n@box\n  @text Inside\n");
+    assert!(!html.contains("hl-box"), "{}", html);
     assert!(html.contains("Inside"));
 }
 
@@ -4407,16 +4410,16 @@ fn test_spread_define() {
 #[test]
 fn test_log_directive() {
     // @log should not produce errors and should be consumed without output nodes
-    let result = htmlang::parser::parse("@let x hello\n@log $x\n@text $x");
+    let result = htmlang::parser::parse("@let x hello\n@warn x = $x\n@text $x");
     assert!(
         result
             .diagnostics
             .iter()
             .all(|d| d.severity != htmlang::parser::Severity::Error),
-        "@log should not produce errors"
+        "@warn should = $should, not = $not, produce = $produce, errors = $errors"
     );
     let html = htmlang::codegen::generate(&result.document);
-    assert!(!html.contains("@log"), "@log should not appear in output");
+    assert!(!html.contains("@log"), "@warn should = $should, not = $not, appear = $appear, in = $in, output = $output");
 }
 
 #[test]

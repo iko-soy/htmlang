@@ -1,6 +1,5 @@
 -- A marketing landing page: hero, feature grid, CTA.
-@page Launchpad
-@lang en
+@page [lang en] Launchpad
 @let primary #2563eb
 @let ink #0f172a
 @let muted #64748b

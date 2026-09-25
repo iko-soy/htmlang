@@ -71,6 +71,8 @@ struct ParseContext {
     /// Source line currently being parsed, for diagnostics raised deep
     /// inside helpers that don't take a line number.
     current_line: usize,
+    /// Functions whose body has a scoped @style block.
+    scoped_functions: std::collections::HashSet<String>,
     page_title: Option<String>,
     lang: Option<String>,
     favicon: Option<String>,
@@ -154,6 +156,7 @@ pub fn parse_with_base(input: &str, base_path: Option<&Path>) -> ParseResult {
     let mut parser = Parser { lines, pos: 0 };
     let mut ctx = ParseContext {
         current_line: 0,
+        scoped_functions: std::collections::HashSet::new(),
         page_title: None,
         lang: None,
         favicon: None,
@@ -516,20 +519,38 @@ impl Parser {
             });
         }
 
+        // @page [lang en, favicon /f.png, canonical URL, base URL] Title
         if let Some(rest) = content.strip_prefix("@page ") {
-            ctx.page_title = Some(substitute_vars(rest, &ctx.variables));
+            let rest = rest.trim_start();
+            let title = if rest.starts_with('[') {
+                let (attrs, title) = parse_attr_brackets_no_validate(rest, line_num, ctx)?;
+                for attr in attrs {
+                    let value = attr.value.unwrap_or_default();
+                    match attr.key.as_str() {
+                        "lang" => ctx.lang = Some(value),
+                        "favicon" => ctx.favicon = Some(value),
+                        "canonical" => ctx.canonical = Some(value),
+                        "base" => ctx.base_url = Some(value),
+                        other => ctx.diagnostics.push(Diagnostic {
+                            line: line_num,
+                            column: None,
+                            message: format!(
+                                "unknown @page attribute '{}' (expected lang, favicon, canonical or base)",
+                                other
+                            ),
+                            severity: Severity::Warning,
+                            source_line: Some(content.clone()),
+                        }),
+                    }
+                }
+                title
+            } else {
+                rest.to_string()
+            };
+            ctx.page_title = Some(substitute_vars(title.trim(), &ctx.variables));
             return Ok(None);
         }
 
-        if let Some(rest) = content.strip_prefix("@lang ") {
-            ctx.lang = Some(substitute_vars(rest.trim(), &ctx.variables));
-            return Ok(None);
-        }
-
-        if let Some(rest) = content.strip_prefix("@favicon ") {
-            ctx.favicon = Some(substitute_vars(rest.trim(), &ctx.variables));
-            return Ok(None);
-        }
 
         if let Some(rest) = content.strip_prefix("@let ") {
             let rest = rest.trim();
@@ -572,6 +593,26 @@ impl Parser {
                 while self.pos < self.lines.len() && self.lines[self.pos].indent > current_indent {
                     body_lines.push(self.lines[self.pos].clone());
                     self.pos += 1;
+                }
+
+                // An @style block at the top of the body is scoped to the
+                // function: its rules apply inside a `.hl-NAME` wrapper.
+                let (body_lines, style_lines) = split_style_block(body_lines);
+                if !style_lines.is_empty() {
+                    let scope_class = format!("hl-{}", name);
+                    let scoped_css: String = style_lines
+                        .iter()
+                        .filter_map(|line| match &line.content {
+                            LineContent::Normal(s) if !s.trim().is_empty() => {
+                                Some(format!(".{} {}\n", scope_class, s.trim()))
+                            }
+                            _ => None,
+                        })
+                        .collect();
+                    if !scoped_css.is_empty() {
+                        ctx.custom_css.push(scoped_css);
+                    }
+                    ctx.scoped_functions.insert(name.clone());
                 }
 
                 ctx.fn_lines.entry(name.clone()).or_insert(line_num);
@@ -666,29 +707,19 @@ impl Parser {
             return Ok(None);
         }
 
+        // @meta NAME VALUE; `og:` names become Open Graph property tags
         if let Some(rest) = content.strip_prefix("@meta ") {
             let rest = rest.trim();
             if let Some((name, value)) = rest.split_once(' ') {
                 let value = substitute_vars(value.trim(), &ctx.variables);
-                ctx.meta_tags.push((name.trim().to_string(), value));
+                match name.trim().strip_prefix("og:") {
+                    Some(property) => ctx.og_tags.push((property.to_string(), value)),
+                    None => ctx.meta_tags.push((name.trim().to_string(), value)),
+                }
             }
             return Ok(None);
         }
 
-        if let Some(rest) = content.strip_prefix("@og ") {
-            let rest = rest.trim();
-            let parts: Vec<&str> = rest.splitn(2, ' ').collect();
-            if parts.len() == 2 {
-                let value = substitute_vars(parts[1].trim(), &ctx.variables);
-                let value = if value.starts_with('"') && value.ends_with('"') && value.len() >= 2 {
-                    value[1..value.len() - 1].to_string()
-                } else {
-                    value
-                };
-                ctx.og_tags.push((parts[0].to_string(), value));
-            }
-            return Ok(None);
-        }
 
         if let Some(rest) = content.strip_prefix("@breakpoint ") {
             let rest = rest.trim();
@@ -2013,64 +2044,6 @@ impl Parser {
             return Ok(None);
         }
 
-        if let Some(rest) = content.strip_prefix("@debug ") {
-            let msg = substitute_vars(rest.trim(), &ctx.variables);
-            eprintln!("debug: line {}: {}", line_num, msg);
-            return Ok(None);
-        }
-
-        // --- @log (compile-time variable inspection) ---
-
-        if let Some(rest) = content.strip_prefix("@log ") {
-            let rest = rest.trim();
-            // @log $var — shows variable name, value, and type info
-            let var_names: Vec<&str> = rest.split_whitespace().collect();
-            for var_name in &var_names {
-                let name = var_name.strip_prefix('$').unwrap_or(var_name);
-                ctx.used_variables.insert(name.to_string());
-                if let Some(val) = ctx.variables.get(name) {
-                    let kind = if val.parse::<f64>().is_ok() {
-                        "number"
-                    } else if val.starts_with('#') && is_valid_hex_color(val) {
-                        "color"
-                    } else if val.contains('/') || val.ends_with(".hl") || val.ends_with(".html") {
-                        "path"
-                    } else {
-                        "string"
-                    };
-                    eprintln!("log: line {}: ${} = \"{}\" ({})", line_num, name, val, kind);
-                } else if ctx.functions.contains_key(name) {
-                    let def = &ctx.functions[name];
-                    let params: Vec<String> =
-                        def.params.iter().map(|p| format!("${}", p)).collect();
-                    eprintln!(
-                        "log: line {}: @{} ({}) — {} line(s)",
-                        line_num,
-                        name,
-                        params.join(", "),
-                        def.body_lines.len()
-                    );
-                } else if ctx.defines.contains_key(name) {
-                    let attrs = &ctx.defines[name];
-                    let attr_strs: Vec<String> = attrs
-                        .iter()
-                        .map(|a| match &a.value {
-                            Some(v) => format!("{} {}", a.key, v),
-                            None => a.key.clone(),
-                        })
-                        .collect();
-                    eprintln!(
-                        "log: line {}: ${} = [{}]",
-                        line_num,
-                        name,
-                        attr_strs.join(", ")
-                    );
-                } else {
-                    eprintln!("log: line {}: ${} is undefined", line_num, name);
-                }
-            }
-            return Ok(None);
-        }
 
         // --- @keyframes directive ---
 
@@ -2124,19 +2097,6 @@ impl Parser {
             return Ok(None);
         }
 
-        // --- @canonical directive ---
-
-        if let Some(rest) = content.strip_prefix("@canonical ") {
-            ctx.canonical = Some(substitute_vars(rest.trim(), &ctx.variables));
-            return Ok(None);
-        }
-
-        // --- @base directive ---
-
-        if let Some(rest) = content.strip_prefix("@base ") {
-            ctx.base_url = Some(substitute_vars(rest.trim(), &ctx.variables));
-            return Ok(None);
-        }
 
         // --- @font-face directive ---
 
@@ -2379,87 +2339,6 @@ impl Parser {
         }
 
 
-        // --- @component definition (scoped @fn) ---
-
-        if let Some(rest) = content.strip_prefix("@component ") {
-            let parts: Vec<&str> = rest.split_whitespace().collect();
-            if parts.is_empty() {
-                return Err(ParseError {
-                    line: line_num,
-                    message: "@component requires a name".to_string(),
-                });
-            }
-            let name = parts[0].to_string();
-            let mut params = Vec::new();
-            let mut defaults = HashMap::new();
-            for part in &parts[1..] {
-                let part = part.strip_prefix('$').unwrap_or(part);
-                if let Some((param_name, default_val)) = part.split_once('=') {
-                    params.push(param_name.to_string());
-                    defaults.insert(param_name.to_string(), default_val.to_string());
-                } else {
-                    params.push(part.to_string());
-                }
-            }
-
-            // Collect body lines and separate @style blocks from element content
-            let mut body_lines = Vec::new();
-            let mut style_lines = Vec::new();
-            let mut in_style = false;
-            let mut style_indent = 0;
-            while self.pos < self.lines.len() && self.lines[self.pos].indent > current_indent {
-                if let LineContent::Normal(ref s) = self.lines[self.pos].content
-                    && s.trim() == "@style"
-                {
-                    in_style = true;
-                    style_indent = self.lines[self.pos].indent;
-                    self.pos += 1;
-                    continue;
-                }
-                if in_style && self.lines[self.pos].indent > style_indent {
-                    style_lines.push(self.lines[self.pos].clone());
-                } else {
-                    in_style = false;
-                    body_lines.push(self.lines[self.pos].clone());
-                }
-                self.pos += 1;
-            }
-
-            // Register scoped CSS from @style blocks
-            if !style_lines.is_empty() {
-                let scope_class = format!("hl-{}", name);
-                let mut scoped_css = String::new();
-                for line in &style_lines {
-                    if let LineContent::Normal(ref s) = line.content {
-                        let trimmed = s.trim();
-                        // Scope selectors by prepending .hl-componentname
-                        if !trimmed.is_empty() {
-                            scoped_css.push_str(&format!(".{} {}\n", scope_class, trimmed));
-                        }
-                    }
-                }
-                if !scoped_css.is_empty() {
-                    ctx.custom_css.push(scoped_css);
-                }
-            }
-
-            ctx.fn_lines.entry(name.clone()).or_insert(line_num);
-            ctx.functions.insert(
-                name.clone(),
-                FnDef {
-                    params,
-                    defaults,
-                    body_lines,
-                },
-            );
-            // Mark that this function should wrap output with a scoped class
-            ctx.variables.insert(
-                format!("__component_scope_{}", name),
-                format!("hl-{}", name),
-            );
-            return Ok(None);
-        }
-
         // --- Function call ---
 
         if content.starts_with('@') {
@@ -2660,14 +2539,13 @@ impl Parser {
             }
         }
 
-        // If this is a @component, wrap output in a scoped container
-        let scope_key = format!("__component_scope_{}", name);
-        if let Some(scope_class) = ctx.variables.get(&scope_key).cloned() {
+        // A function with a scoped @style wraps its output in the scope class
+        if ctx.scoped_functions.contains(name) {
             let wrapper = Element {
                 kind: ElementKind::El,
                 attrs: vec![Attribute {
                     key: "class".to_string(),
-                    value: Some(scope_class),
+                    value: Some(format!("hl-{}", name)),
                 }],
                 argument: None,
                 children: result_nodes,
@@ -2896,21 +2774,13 @@ const KNOWN_DIRECTIVES: &[&str] = &[
     "case",
     "default",
     "warn",
-    "debug",
-    "og",
     "breakpoint",
-    "lang",
-    "favicon",
     "theme",
     "deprecated",
     "extends",
-    "canonical",
-    "base",
     "font-face",
     "json-ld",
     "assert",
-    "component",
-    "log",
     "markdown",
     "collection",
     "manifest",
@@ -2965,6 +2835,17 @@ const REMOVED_SYNTAX: &[(&str, &str)] = &[
         "write the `@starting-style` rule in an `@style` block",
     ),
     ("@css-property", "write an `@property` rule in an `@style` block"),
+    ("@lang", "use `@page [lang ...] Title`"),
+    ("@favicon", "use `@page [favicon ...] Title`"),
+    ("@canonical", "use `@page [canonical ...] Title`"),
+    ("@base", "use `@page [base ...] Title`"),
+    ("@og", "use `@meta og:NAME VALUE`"),
+    ("@debug", "use `@warn`"),
+    ("@log", "use `@warn`"),
+    (
+        "@component",
+        "use `@let`: an `@style` block in a function body is scoped to it",
+    ),
     ("@col", "use `@column`"),
     ("@p", "use `@paragraph`"),
     ("@img", "use `@image`"),
@@ -3663,7 +3544,6 @@ fn parse_attr_list(
 
         let attr = if let Some((key, value)) = part.split_once(' ') {
             let value = evaluate_if_expr(value.trim());
-            let value = substitute_ternary(&value);
             Attribute {
                 key: key.trim().to_string(),
                 value: Some(value),
@@ -3978,27 +3858,6 @@ fn evaluate_condition(condition: &str) -> bool {
     }
 }
 
-/// Evaluate ternary expressions: `condition ? true_val : false_val` in attribute values.
-fn substitute_ternary(input: &str) -> String {
-    if !input.contains(" ? ") {
-        return input.to_string();
-    }
-    // Find the ternary operator pattern
-    if let Some(q_pos) = input.find(" ? ") {
-        let condition = input[..q_pos].trim();
-        let rest = &input[q_pos + 3..];
-        if let Some(c_pos) = rest.find(" : ") {
-            let true_val = rest[..c_pos].trim();
-            let false_val = rest[c_pos + 3..].trim();
-            if evaluate_condition(condition) {
-                return true_val.to_string();
-            } else {
-                return false_val.to_string();
-            }
-        }
-    }
-    input.to_string()
-}
 
 /// Evaluate `if(condition, true_val, false_val)` expressions in attribute values.
 fn evaluate_if_expr(input: &str) -> String {
@@ -4849,6 +4708,28 @@ fn parse_json_with_error(input: &str) -> Result<JsonValue, String> {
             ))
         }
     }
+}
+
+/// Split a function body into its content and an @style block at the
+/// body's top level (the block's CSS lines, without the `@style` line).
+fn split_style_block(body: Vec<Line>) -> (Vec<Line>, Vec<Line>) {
+    let top = body.iter().map(|l| l.indent).min().unwrap_or(0);
+    let mut content = Vec::new();
+    let mut style = Vec::new();
+    let mut in_style = false;
+    for line in body {
+        let is_style_header =
+            line.indent == top && matches!(&line.content, LineContent::Normal(s) if s.trim() == "@style");
+        if is_style_header {
+            in_style = true;
+        } else if in_style && line.indent > top {
+            style.push(line);
+        } else {
+            in_style = false;
+            content.push(line);
+        }
+    }
+    (content, style)
 }
 
 fn parse_json_value(chars: &[char], mut pos: usize) -> Option<(JsonValue, usize)> {

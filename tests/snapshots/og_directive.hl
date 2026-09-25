@@ -1,6 +1,6 @@
 @page OG Test
-@og title "My Page Title"
-@og description "A description of the page"
-@og image "https://example.com/image.png"
+@meta og:title My Page Title
+@meta og:description A description of the page
+@meta og:image https://example.com/image.png
 
 @text Hello

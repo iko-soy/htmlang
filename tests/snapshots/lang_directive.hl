@@ -1,4 +1,3 @@
-@page Lang Test
-@lang en
+@page [lang en] Lang Test
 
 @text Hello World

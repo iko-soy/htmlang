@@ -375,16 +375,15 @@ blocks) and `@children` (everything in the page outside `@slot` blocks):
 ## Page and head
 
 `@page TITLE` produces a full HTML document; without it the output is a fragment.
-Head content comes from `@lang`, `@favicon`, `@meta NAME VALUE`,
-`@og KEY VALUE`, `@canonical URL`, `@base URL`, `@manifest NAME` (with
-indented settings), `@font-face NAME URL`, `@json-ld` (indented JSON) and `@head`
-(indented raw HTML).
+Its attributes set `lang`, `favicon`, `canonical` and `base`. `@meta NAME VALUE`
+adds a meta tag (`og:` names become Open Graph `property` tags), and
+`@font-face NAME URL`, `@manifest NAME` (with indented settings), `@json-ld`
+(indented JSON) and `@head` (indented raw HTML) add the rest.
 
 ```
-@page My Site
-@lang en
+@page [lang en, favicon /favicon.png] My Site
 @meta description A small site
-@og title My Site
+@meta og:title My Site
 ```
 
 ## CSS

@@ -1,6 +1,5 @@
 -- A documentation page: sidebar nav + prose content + code samples.
-@page Docs · Getting Started
-@lang en
+@page [lang en] Docs · Getting Started
 @let ink #0f172a
 @let muted #64748b
 @let primary #3b82f6

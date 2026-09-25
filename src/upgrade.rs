@@ -45,10 +45,10 @@ const FILTER_ALIASES: &[(&str, &str)] = &[
 const VERBATIM_BODIES: &[&str] = &["@style", "@script", "@markdown", "@head", "@json-ld"];
 
 pub fn upgrade(input: &str) -> Upgrade {
-    let lines: Vec<&str> = input.lines().collect();
-    let mut out: Vec<String> = Vec::with_capacity(lines.len());
-    let mut changes = 0;
     let mut manual = Vec::new();
+    let (folded, mut changes) = fold_head_directives(input, &mut manual);
+    let lines: Vec<&str> = folded.lines().collect();
+    let mut out: Vec<String> = Vec::with_capacity(lines.len());
     let mut attr_depth = 0i32;
     let mut i = 0;
     // A file may define its own function named like an old alias (e.g.
@@ -327,6 +327,51 @@ fn rewrite_block(
     None
 }
 
+/// Move `@lang`, `@favicon`, `@canonical` and `@base` into the `@page`
+/// line's attributes: `@page [lang en, favicon /f.png] Title`.
+fn fold_head_directives(input: &str, manual: &mut Vec<(usize, String)>) -> (String, usize) {
+    const FOLDED: &[&str] = &["lang", "favicon", "canonical", "base"];
+    let lines: Vec<&str> = input.lines().collect();
+    let mut attrs = Vec::new();
+    let mut keep = Vec::with_capacity(lines.len());
+    for (i, line) in lines.iter().enumerate() {
+        let folded = FOLDED.iter().find_map(|key| {
+            let rest = line.strip_prefix(&format!("@{} ", key))?;
+            Some(format!("{} {}", key, rest.trim()))
+        });
+        match folded {
+            Some(attr) => attrs.push((i, attr)),
+            None => keep.push(*line),
+        }
+    }
+    if attrs.is_empty() {
+        return (input.to_string(), 0);
+    }
+    let Some(page) = keep.iter().position(|l| l.starts_with("@page ")) else {
+        for (i, _) in &attrs {
+            manual.push((
+                i + 1,
+                "this directive now goes in @page's attributes, but the file has no @page line"
+                    .to_string(),
+            ));
+        }
+        return (input.to_string(), 0);
+    };
+    let list = attrs.iter().map(|(_, a)| a.as_str()).collect::<Vec<_>>().join(", ");
+    let title = &keep[page]["@page ".len()..];
+    let new_page = match title.strip_prefix('[') {
+        Some(rest) => format!("@page [{}, {}", list, rest),
+        None => format!("@page [{}] {}", list, title),
+    };
+    let mut out: Vec<String> = keep.iter().map(|l| l.to_string()).collect();
+    out[page] = new_page;
+    let mut text = out.join("\n");
+    if input.ends_with('\n') {
+        text.push('\n');
+    }
+    (text, attrs.len())
+}
+
 /// Single-line directive rewrites.
 fn rewrite_directive_line(
     line: &str,
@@ -336,10 +381,30 @@ fn rewrite_directive_line(
 ) -> String {
     let trimmed = line.trim_start();
     let pad = " ".repeat(indent);
-    for old in ["@fn ", "@define ", "@mixin "] {
+    for old in ["@fn ", "@define ", "@mixin ", "@component "] {
         if let Some(rest) = trimmed.strip_prefix(old) {
             return format!("{pad}@let {}", rest);
         }
+    }
+    if let Some(rest) = trimmed.strip_prefix("@og ")
+        && let Some((key, value)) = rest.trim().split_once(' ')
+    {
+        let value = value.trim();
+        let value = value
+            .strip_prefix('"')
+            .and_then(|v| v.strip_suffix('"'))
+            .unwrap_or(value);
+        return format!("{pad}@meta og:{} {}", key, value);
+    }
+    if let Some(rest) = trimmed.strip_prefix("@debug ") {
+        return format!("{pad}@warn {}", rest);
+    }
+    if let Some(rest) = trimmed.strip_prefix("@log ") {
+        let shown: Vec<String> = rest
+            .split_whitespace()
+            .map(|v| format!("{} = ${}", v.trim_start_matches('$'), v.trim_start_matches('$')))
+            .collect();
+        return format!("{pad}@warn {}", shown.join(", "));
     }
     if let Some(rest) = trimmed.strip_prefix("@unless ") {
         return format!("{pad}@if not {}", rest);
@@ -470,6 +535,16 @@ fn rewrite_attr_list(list: &str) -> String {
                 };
                 format!("background linear-gradient({})", gradient)
             }
+            None => body,
+        };
+        // `key COND ? A : B` → `key if(COND, A, B)`
+        let body = match body.split_once(' ') {
+            Some((key, value)) => match value.split_once(" ? ").and_then(|(cond, rest)| {
+                rest.split_once(" : ").map(|(a, b)| (cond, a, b))
+            }) {
+                Some((cond, a, b)) => format!("{} if({}, {}, {})", key, cond.trim(), a.trim(), b.trim()),
+                None => body,
+            },
             None => body,
         };
         // Renamed keys (keeping any `hover:` / `md:` style prefix)
@@ -726,6 +801,20 @@ mod tests {
             up("@breadcrumb\n  @link / Home\n  Current"),
             "@breadcrumb\n  @item > @link / Home\n  @item Current"
         );
+    }
+
+    #[test]
+    fn head_directives_and_debugging() {
+        assert_eq!(
+            up("@page Home\n@lang en\n@favicon /f.png\n@text hi\n"),
+            "@page [lang en, favicon /f.png] Home\n@text hi\n"
+        );
+        assert_eq!(up("@og title \"My Page\""), "@meta og:title My Page");
+        assert_eq!(up("@debug hi $x\n@log $a $b"), "@warn hi $x\n@warn a = $a, b = $b");
+        assert_eq!(up("@component card $t\n  @text $t"), "@let card $t\n  @text $t");
+        assert_eq!(up("@el [color $on ? green : gray]"), "@el [color if($on, green, gray)]");
+        let r = upgrade("@lang en\n@text hi");
+        assert_eq!(r.manual.len(), 1);
     }
 
     #[test]

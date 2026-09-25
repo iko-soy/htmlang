@@ -1,9 +1,8 @@
 -- A comprehensive tour of htmlang: layout, style, components, and control flow.
-@page htmlang Demo
-@lang en
+@page [lang en] htmlang Demo
 @meta description A one-page tour of htmlang.
-@og title htmlang
-@og type website
+@meta og:title htmlang
+@meta og:type website
 
 -- Design tokens become both $vars and CSS custom properties
 @theme
