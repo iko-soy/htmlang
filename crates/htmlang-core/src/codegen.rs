@@ -1351,113 +1351,14 @@ fn generate_node(
     }
 }
 
-/// HTML attributes that are passed through to the HTML tag rather than converted to CSS.
-const HTML_PASSTHROUGH_ATTRS: &[&str] = &[
-    "type",
-    "placeholder",
-    "name",
-    "value",
-    "disabled",
-    "required",
-    "checked",
-    "for",
-    "action",
-    "method",
-    "autocomplete",
-    "min",
-    "max",
-    "step",
-    "pattern",
-    "maxlength",
-    "rows",
-    "cols",
-    "multiple",
-    "alt",
-    "role",
-    "tabindex",
-    "title",
-    "autofocus",
-    // Media
-    "controls",
-    "autoplay",
-    "loop",
-    "muted",
-    "playsinline",
-    "poster",
-    "preload",
-    // Image optimization
-    "loading",
-    "decoding",
-    // Media src (explicit attribute form)
-    "src",
-    // New element attributes
-    "datetime",
-    "media",
-    "sizes",
-    "srcset",
-    "list",
-    // Details
-    "open",
-    // Form
-    "novalidate",
-    // Progress/Meter
-    "low",
-    "high",
-    "optimum",
-    // Table
-    "colspan",
-    "rowspan",
-    "scope",
-    // Popover API
-    "popover",
-    "popovertarget",
-    "popovertargetaction",
-    // Modern form/input hints
-    "inputmode",
-    "enterkeyhint",
-    // Performance hints
-    "fetchpriority",
-    "blocking",
-    // Global attrs
-    "translate",
-    "spellcheck",
-    // ARIA live regions
-    "aria-live",
-    "aria-atomic",
-    "aria-relevant",
-];
-
-/// Boolean HTML attributes (rendered without a value, e.g., `<input disabled>`).
-const BOOLEAN_HTML_ATTRS: &[&str] = &[
-    "disabled",
-    "required",
-    "checked",
-    "multiple",
-    "controls",
-    "autoplay",
-    "loop",
-    "muted",
-    "playsinline",
-    "open",
-    "novalidate",
-    "autofocus",
-    "defer",
-    "async",
-    "nomodule",
-    // Popover
-    "popover",
-];
 
 fn emit_html_passthrough_attrs(out: &mut String, attrs: &[Attribute]) {
     for attr in attrs {
         let key = attr.key.as_str();
-        let is_passthrough = HTML_PASSTHROUGH_ATTRS.contains(&key)
-            || key.starts_with("aria-")
-            || key.starts_with("data-");
-        if !is_passthrough {
+        if !crate::vocab::is_html_passthrough(key) {
             continue;
         }
-        if BOOLEAN_HTML_ATTRS.contains(&key) && attr.value.is_none() {
+        if crate::vocab::BOOLEAN_HTML_ATTRS.contains(&key) && attr.value.is_none() {
             out.push(' ');
             out.push_str(key);
         } else if let Some(val) = &attr.value {
@@ -2706,16 +2607,6 @@ fn attrs_to_css(
             },
 
             // Style
-            "background" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "background", v);
-                }
-            }
-            "color" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "color", v);
-                }
-            }
             "border" => {
                 if let Some(v) = val {
                     let parts: Vec<&str> = v.splitn(2, ' ').collect();
@@ -2776,28 +2667,8 @@ fn attrs_to_css(
                     push_css(&mut css, "font-family", v);
                 }
             }
-            "transition" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "transition", v);
-                }
-            }
-            "cursor" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "cursor", v);
-                }
-            }
-            "opacity" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "opacity", v);
-                }
-            }
 
             // Typography
-            "text-align" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "text-align", v);
-                }
-            }
             "line-height" => {
                 if let Some(v) = val {
                     push_css(&mut css, "line-height", &css_line_height(v));
@@ -2808,28 +2679,8 @@ fn attrs_to_css(
                     push_css(&mut css, "letter-spacing", &css_px(v));
                 }
             }
-            "text-transform" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "text-transform", v);
-                }
-            }
-            "white-space" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "white-space", v);
-                }
-            }
 
             // Overflow & positioning
-            "overflow" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "overflow", v);
-                }
-            }
-            "position" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "position", v);
-                }
-            }
             "top" => {
                 if let Some(v) = val {
                     push_css(&mut css, "top", &css_px(v));
@@ -2850,36 +2701,9 @@ fn attrs_to_css(
                     push_css(&mut css, "left", &css_px(v));
                 }
             }
-            "z-index" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "z-index", v);
-                }
-            }
 
             // Display & visibility
-            "display" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "display", v);
-                }
-            }
-            "visibility" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "visibility", v);
-                }
-            }
             "hidden" => push_css(&mut css, "display", "none"),
-
-            // Transform & filters
-            "transform" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "transform", v);
-                }
-            }
-            "backdrop-filter" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "backdrop-filter", v);
-                }
-            }
 
             // Effects
             "shadow" => {
@@ -2939,20 +2763,6 @@ fn attrs_to_css(
             "row-span" => {
                 if let Some(v) = val {
                     push_css(&mut css, "grid-row", &format!("span {}", v));
-                }
-            }
-
-            // Animation
-            "animation" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "animation", v);
-                }
-            }
-
-            // Aspect ratio
-            "aspect-ratio" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "aspect-ratio", v);
                 }
             }
 
@@ -3080,18 +2890,6 @@ fn attrs_to_css(
                 }
             }
 
-            // Scroll snap
-            "scroll-snap-type" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "scroll-snap-type", v);
-                }
-            }
-            "scroll-snap-align" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "scroll-snap-align", v);
-                }
-            }
-
             // Margin
             "margin" => {
                 if let Some(v) = val {
@@ -3109,124 +2907,9 @@ fn attrs_to_css(
                 }
             }
 
-            // Filter
-            "filter" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "filter", v);
-                }
-            }
-
-            // Object fit/position (for images)
-            "object-fit" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "object-fit", v);
-                }
-            }
-            "object-position" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "object-position", v);
-                }
-            }
-
-            // Text shadow
-            "text-shadow" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "text-shadow", v);
-                }
-            }
-
-            // Text overflow
-            "text-overflow" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "text-overflow", v);
-                }
-            }
-
-            // Interaction
-            "pointer-events" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "pointer-events", v);
-                }
-            }
-            "user-select" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "user-select", v);
-                }
-            }
-
-            // Flexbox/grid alignment
-            "justify-content" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "justify-content", v);
-                }
-            }
-            "align-items" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "align-items", v);
-                }
-            }
-
-            // Flex item order
-            "order" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "order", v);
-                }
-            }
-
-            // Background extras
-            "background-size" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "background-size", v);
-                }
-            }
-            "background-position" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "background-position", v);
-                }
-            }
-            "background-repeat" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "background-repeat", v);
-                }
-            }
-
-            // Text wrapping
-            "word-break" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "word-break", v);
-                }
-            }
-            "overflow-wrap" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "overflow-wrap", v);
-                }
-            }
-
             // Container queries
             "container" => {
                 push_css(&mut css, "container-type", "inline-size");
-            }
-            "container-name" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "container-name", v);
-                }
-            }
-            "container-type" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "container-type", v);
-                }
-            }
-
-            // Overflow axis
-            "overflow-x" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "overflow-x", v);
-                }
-            }
-            "overflow-y" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "overflow-y", v);
-                }
             }
 
             // Inset (shorthand for top/right/bottom/left)
@@ -3236,43 +2919,7 @@ fn attrs_to_css(
                 }
             }
 
-            // Accent & caret colors
-            "accent-color" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "accent-color", v);
-                }
-            }
-            "caret-color" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "caret-color", v);
-                }
-            }
-
-            // Color scheme & appearance
-            "color-scheme" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "color-scheme", v);
-                }
-            }
-            "appearance" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "appearance", v);
-                }
-            }
-
-            // List style
-            "list-style" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "list-style", v);
-                }
-            }
-
             // Table
-            "border-collapse" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "border-collapse", v);
-                }
-            }
             "border-spacing" => {
                 if let Some(v) = val {
                     push_css(&mut css, "border-spacing", &css_px(v));
@@ -3280,24 +2927,9 @@ fn attrs_to_css(
             }
 
             // Text decoration
-            "text-decoration" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "text-decoration", v);
-                }
-            }
-            "text-decoration-color" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "text-decoration-color", v);
-                }
-            }
             "text-decoration-thickness" => {
                 if let Some(v) = val {
                     push_css(&mut css, "text-decoration-thickness", &css_px(v));
-                }
-            }
-            "text-decoration-style" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "text-decoration-style", v);
                 }
             }
             "text-underline-offset" => {
@@ -3312,64 +2944,8 @@ fn attrs_to_css(
                     push_css(&mut css, "column-width", &css_px(v));
                 }
             }
-            "column-rule" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "column-rule", v);
-                }
-            }
-
-            // Place items/self
-            "place-items" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "place-items", v);
-                }
-            }
-            "place-self" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "place-self", v);
-                }
-            }
-
-            // Scroll behavior
-            "scroll-behavior" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "scroll-behavior", v);
-                }
-            }
-
-            // Resize
-            "resize" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "resize", v);
-                }
-            }
 
             // New CSS properties
-            "clip-path" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "clip-path", v);
-                }
-            }
-            "mix-blend-mode" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "mix-blend-mode", v);
-                }
-            }
-            "background-blend-mode" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "background-blend-mode", v);
-                }
-            }
-            "writing-mode" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "writing-mode", v);
-                }
-            }
-            "column-count" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "column-count", v);
-                }
-            }
             "column-gap" => {
                 if let Some(v) = val {
                     push_css(&mut css, "column-gap", &css_px(v));
@@ -3380,69 +2956,9 @@ fn attrs_to_css(
                     push_css(&mut css, "text-indent", &css_px(v));
                 }
             }
-            "hyphens" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "hyphens", v);
-                }
-            }
-            "flex-grow" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "flex-grow", v);
-                }
-            }
-            "flex-shrink" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "flex-shrink", v);
-                }
-            }
             "flex-basis" => {
                 if let Some(v) = val {
                     push_css(&mut css, "flex-basis", &css_px(v));
-                }
-            }
-            "isolation" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "isolation", v);
-                }
-            }
-            "place-content" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "place-content", v);
-                }
-            }
-            "background-image" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "background-image", v);
-                }
-            }
-            "font-weight" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "font-weight", v);
-                }
-            }
-            "font-style" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "font-style", v);
-                }
-            }
-            "text-wrap" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "text-wrap", v);
-                }
-            }
-            "will-change" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "will-change", v);
-                }
-            }
-            "touch-action" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "touch-action", v);
-                }
-            }
-            "vertical-align" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "vertical-align", v);
                 }
             }
             "scroll-margin" => {
@@ -3469,11 +2985,6 @@ fn attrs_to_css(
             | "scroll-padding-right" => {
                 if let Some(v) = val {
                     push_css(&mut css, effective_key, &css_px(v));
-                }
-            }
-            "direction" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "direction", v);
                 }
             }
 
@@ -3554,94 +3065,6 @@ fn attrs_to_css(
                 }
             }
 
-            // Grid areas
-            "grid-template-areas" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "grid-template-areas", v);
-                }
-            }
-            "grid-area" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "grid-area", v);
-                }
-            }
-
-            // View transitions
-            "view-transition-name" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "view-transition-name", v);
-                }
-            }
-
-
-            // CSS subgrid
-            "grid-template-columns" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "grid-template-columns", v);
-                }
-            }
-            "grid-template-rows" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "grid-template-rows", v);
-                }
-            }
-
-            // Scroll-driven animations
-            "animation-timeline" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "animation-timeline", v);
-                }
-            }
-            "animation-range" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "animation-range", v);
-                }
-            }
-            "view-timeline-name" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "view-timeline-name", v);
-                }
-            }
-            "view-timeline-axis" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "view-timeline-axis", v);
-                }
-            }
-            "scroll-timeline-name" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "scroll-timeline-name", v);
-                }
-            }
-            "scroll-timeline-axis" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "scroll-timeline-axis", v);
-                }
-            }
-
-            // Anchor positioning
-            "anchor-name" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "anchor-name", v);
-                }
-            }
-            "position-anchor" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "position-anchor", v);
-                }
-            }
-            "position-area" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "position-area", v);
-                }
-            }
-
-            // initial-letter (drop caps)
-            "initial-letter" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "initial-letter", v);
-                }
-            }
-
             // Critical CSS hint — not CSS, handled elsewhere
             "critical" => {}
 
@@ -3656,6 +3079,18 @@ fn attrs_to_css(
             | "responsive" | "datetime" | "media" | "sizes" | "srcset" | "cite" | "list"
             | "sandbox" | "allow" | "allowfullscreen" | "referrerpolicy" | "formaction"
             | "formmethod" | "formtarget" | "target" | "autofocus" => {}
+
+            // Any other standard CSS property is copied through, with `px`
+            // added to bare numbers where the property takes a length.
+            key if crate::vocab::is_css_property(key) && !crate::vocab::is_html_passthrough(key) => {
+                if let Some(v) = val {
+                    if crate::vocab::is_length_property(key) {
+                        push_css(&mut css, key, &css_px_multi(v));
+                    } else {
+                        push_css(&mut css, key, v);
+                    }
+                }
+            }
 
             _ => {}
         }
