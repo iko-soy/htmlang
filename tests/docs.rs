@@ -2,7 +2,7 @@
 //! language. A fenced block without a language tag is htmlang unless it is a
 //! shell session (lines starting with `htmlang ` / `cargo `) or the syntax
 //! template in DESIGN.md. Blocks whose first line is `-- name.hl` are written
-//! to disk first so `@extends` / `@include` between them resolve.
+//! to disk first so `@include` between them resolves.
 
 use std::path::Path;
 

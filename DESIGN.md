@@ -396,31 +396,33 @@ A range counts down when its start is greater than its end.
 |---|---|
 | `@include file.hl` | Insert another file: its content and definitions (a library of `@let`s emits nothing) |
 | `@include lib.hl as ui` | Take only its definitions, named `ui.name` |
-| `@extends layout.hl` | Render this page inside a layout (below) |
 | `@data file.json` / `@data $name file.json` | Load JSON values as variables (`$name.key`) |
 | `@data $name dir/*.json` | Load each file as `$name.STEM.key`; `$name` lists the stems |
 | `@data $name env:NAME [default]` | Read an environment variable |
 | `@markdown` / `@markdown file.md` | Markdown, converted to HTML |
 | `@image [inline] file.svg` | Inline an SVG file (`width`, `height`, `color`, `class=`, `id=` apply to it) |
 
-With `@extends`, the layout marks where content goes with `@slot name` (named
-blocks) and `@children` (everything in the page outside `@slot` blocks):
+A layout is an ordinary function in its own file. It marks where content goes
+with `@slot name` (named blocks, with default content) and `@children`
+(everything in the call outside `@slot` blocks):
 
 ```
 -- layout.hl
-@page My Site
-@column [max-width 800, center-x]
-  @slot header
-    @text Default header
-  @children
+@let layout
+  @page My Site
+  @column [max-width 800, center-x]
+    @slot header
+      @text Default header
+    @children
 ```
 
 ```
 -- page.hl
-@extends layout.hl
-@slot header
-  @text About us
-@paragraph This fills @children.
+@include layout.hl
+@layout
+  @slot header
+    @text About us
+  @paragraph This fills @children.
 ```
 
 ## Page and head
@@ -475,7 +477,7 @@ removed form with its replacement.
 | `@svg [attrs] file.svg` | `@image [inline, attrs] file.svg` |
 | `gap-x`, `gap-y`, `shadow`, `blur N`, `truncate`, `critical` | `column-gap`, `row-gap`, `box-shadow`, `filter blur(N)`, `$truncate`, nothing |
 | `@with $x as y` | `@let y $x` |
-| `@layout file` | `@extends file` |
+| `@extends layout.hl`, `@layout file` | `@include layout.hl` and a call to the layout, now a function (both files are converted) |
 | `@scope`, `@starting-style`, `@css-property` | The CSS rule in `@style` |
 | `@lang`, `@favicon`, `@canonical`, `@base` | `@page [lang ..., favicon ..., canonical ..., base ...] Title` |
 | `@og KEY VALUE` | `@meta og:KEY VALUE` |

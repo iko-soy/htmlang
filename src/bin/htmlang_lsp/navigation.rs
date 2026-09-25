@@ -17,12 +17,9 @@ pub(crate) fn definition_at(
     let lines: Vec<&str> = text.lines().collect();
     let line = lines.get(position.line as usize)?;
 
-    // Check for @include/@import file path navigation
+    // Check for @include file path navigation
     let trimmed = line.trim();
-    if let Some(filename) = trimmed
-        .strip_prefix("@include ")
-        .or_else(|| trimmed.strip_prefix("@import "))
-    {
+    if let Some(filename) = trimmed.strip_prefix("@include ") {
         let filename = filename.trim();
         if !filename.is_empty() {
             let file_path = uri.to_file_path().ok()?;

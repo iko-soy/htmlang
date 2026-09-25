@@ -95,7 +95,6 @@ pub(crate) const DIRECTIVES: &[Doc] = &[
         "@let primary #3b82f6\n@let gap = 8 * 2\n@let card [padding 20]\n@let button $label\n  @el [$card] $label",
     ),
     doc("include", "Inserts another `.hl` file here, with its definitions.", "@include header.hl"),
-    doc("extends", "Renders this page inside a layout; `@slot` blocks fill its slots.", "@extends layout.hl"),
     doc("raw", "Pastes HTML into the output verbatim.", "@raw \"\"\"<div></div>\"\"\""),
     doc("markdown", "Markdown (indented body or file), converted to HTML.", "@markdown\n  # Title"),
     doc("style", "Raw CSS; overrides generated styles.", "@style\n  .note { color: gray; }"),

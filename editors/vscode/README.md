@@ -15,7 +15,7 @@ Syntax highlighting, snippets, and LSP-backed intelligence for [htmlang](https:/
   values, and color swatches.
 - **Go to definition / rename** — for `$variables`, `@fn` calls, `@define`
   bundles, and `@include` targets.
-- **Document links** — cmd-click on `@include`, `@import`, `@use`, `@extends`.
+- **Document links** — cmd-click on `@include`.
 - **Code lens** — per-definition reference counts for `@fn` / `@let` / `@define`.
 - **Document symbols + workspace symbols** — outline view and `Ctrl-T` search
   scan both open documents and every `.hl` file in the workspace.

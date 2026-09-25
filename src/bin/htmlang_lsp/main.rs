@@ -376,10 +376,7 @@ impl LanguageServer for Backend {
         let lines: Vec<&str> = text.lines().collect();
         if let Some(line) = lines.get(pos.line as usize) {
             let trimmed = line.trim_start();
-            if trimmed.starts_with("@include ")
-                || trimmed.starts_with("@import ")
-                || trimmed.starts_with("@extends ")
-            {
+            if trimmed.starts_with("@include ") {
                 let items = path_completions(uri, pos);
                 if !items.is_empty() {
                     return Ok(Some(CompletionResponse::Array(items)));
@@ -704,10 +701,6 @@ impl LanguageServer for Backend {
             let indent = raw_line.len() - trimmed.len();
             let (prefix, filename) = if let Some(rest) = trimmed.strip_prefix("@include ") {
                 ("@include ", rest)
-            } else if let Some(rest) = trimmed.strip_prefix("@import ") {
-                ("@import ", rest)
-            } else if let Some(rest) = trimmed.strip_prefix("@extends ") {
-                ("@extends ", rest)
             } else {
                 continue;
             };

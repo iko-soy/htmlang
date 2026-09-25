@@ -476,14 +476,11 @@ pub(crate) fn code_actions(
                                                 .unwrap_or("")
                                                 .to_string()
                                         });
-                                    let already_imported = text.lines().any(|l| {
-                                        let t = l.trim();
-                                        t == format!("@import {}", rel)
-                                            || t == format!("@include {}", rel)
-                                    });
-                                    if !already_imported {
-                                        // Offer @import (all definitions)
-                                        let import_line = format!("@import {}\n", rel);
+                                    let already_included = text
+                                        .lines()
+                                        .any(|l| l.trim() == format!("@include {}", rel));
+                                    if !already_included {
+                                        let import_line = format!("@include {}\n", rel);
                                         let edit = TextEdit {
                                             range: Range::new(
                                                 Position::new(0, 0),
@@ -495,7 +492,7 @@ pub(crate) fn code_actions(
                                         changes.insert(uri.clone(), vec![edit]);
                                         actions.push(CodeActionOrCommand::CodeAction(CodeAction {
                                             title: format!(
-                                                "Add '@import {}' for @{}",
+                                                "Add '@include {}' for @{}",
                                                 rel, fn_name
                                             ),
                                             kind: Some(CodeActionKind::QUICKFIX),

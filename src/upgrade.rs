@@ -47,6 +47,98 @@ const FILTER_ALIASES: &[(&str, &str)] = &[
 /// HTML, JSON) and must not be rewritten.
 const VERBATIM_BODIES: &[&str] = &["@style", "@script", "@markdown", "@head"];
 
+/// The function name a layout file becomes: `layout.hl` → `layout`,
+/// `base.hl` → `base-layout` (so it can't shadow an element like `@main`).
+pub fn layout_function_name(file: &str) -> String {
+    let stem = std::path::Path::new(file.trim_matches('"'))
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let stem: String = stem
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' })
+        .collect();
+    if stem.ends_with("layout") {
+        stem
+    } else {
+        format!("{}-layout", stem)
+    }
+}
+
+/// Turn a layout file (one used with `@extends`) into a function: its
+/// content becomes the body of `@let NAME`, so `@slot` and `@children`
+/// fill in from the call. Top-level `@let` and `@include` blocks stay
+/// outside, so pages still see the layout's definitions. Returns `None`
+/// if the file already defines the function.
+pub fn convert_layout(input: &str, name: &str) -> Option<String> {
+    let definition = format!("@let {}", name);
+    if input.lines().any(|l| l.trim() == definition) {
+        return None;
+    }
+    let lines: Vec<&str> = input.lines().collect();
+    let mut hoisted: Vec<String> = Vec::new();
+    let mut body: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i];
+        if line.starts_with("@let ") || line.starts_with("@include ") {
+            // The definition runs through its indented body and any
+            // bracket continuation lines.
+            let mut depth = bracket_depth(line);
+            let mut end = i + 1;
+            while end < lines.len() {
+                let next = lines[end];
+                let continues = depth > 0
+                    || next.starts_with([' ', '\t'])
+                    || (next.trim().is_empty()
+                        && lines[end..]
+                            .iter()
+                            .find(|l| !l.trim().is_empty())
+                            .is_some_and(|l| l.starts_with([' ', '\t'])));
+                if !continues {
+                    break;
+                }
+                depth += bracket_depth(next);
+                end += 1;
+            }
+            hoisted.extend(lines[i..end].iter().map(|l| l.to_string()));
+            i = end;
+            continue;
+        }
+        body.push(if line.trim().is_empty() {
+            String::new()
+        } else {
+            format!("  {}", line)
+        });
+        i += 1;
+    }
+    while body.first().is_some_and(|l| l.is_empty()) {
+        body.remove(0);
+    }
+    while body.last().is_some_and(|l| l.is_empty()) {
+        body.pop();
+    }
+    let mut out = hoisted;
+    if !out.is_empty() && out.last().is_some_and(|l| !l.trim().is_empty()) {
+        out.push(String::new());
+    }
+    out.push(definition);
+    out.extend(body);
+    let mut text = out.join("\n");
+    text.push('\n');
+    Some(text)
+}
+
+fn bracket_depth(line: &str) -> i32 {
+    line.chars()
+        .map(|c| match c {
+            '[' => 1,
+            ']' => -1,
+            _ => 0,
+        })
+        .sum()
+}
+
 pub fn upgrade(input: &str) -> Upgrade {
     let mut manual = Vec::new();
     let (folded, mut changes) = fold_head_directives(input, &mut manual);
@@ -381,6 +473,27 @@ fn rewrite_block(
         return None;
     }
 
+    // @extends layout.hl + the rest of the page → @include layout.hl and a
+    // call to the layout function with the rest of the page as children
+    if let Some(file) = trimmed.strip_prefix("@extends ") {
+        let file = file.trim();
+        let mut out = vec![
+            format!("{pad}@include {}", file),
+            format!("{pad}@{}", layout_function_name(file)),
+        ];
+        out.extend(lines[i + 1..].iter().map(|l| {
+            if l.trim().is_empty() {
+                String::new()
+            } else {
+                format!("  {}", l)
+            }
+        }));
+        return Some(Block {
+            lines: out,
+            end: lines.len(),
+        });
+    }
+
     // @defer → its body, dedented
     if trimmed == "@defer" || trimmed.starts_with("@defer ") {
         return Some(Block {
@@ -397,20 +510,26 @@ fn rewrite_block(
         return Some(Block { lines: out, end });
     }
 
-    // @layout file with a body running to the end of the file →
-    // @extends file, body dedented (its content fills @children).
-    if let Some(rest) = trimmed.strip_prefix("@layout ") {
+    // @layout file.hl with a body → @include file.hl and a call to the
+    // layout function (see `convert_layout`), body as its children.
+    if let Some(rest) = trimmed.strip_prefix("@layout ")
+        && rest.trim().ends_with(".hl")
+    {
         if end < lines.len() && lines[end..].iter().any(|l| !l.trim().is_empty()) {
             manual.push((
                 i + 1,
-                "@layout was removed: replace it with @extends (content after the \
-                 @layout block has to move into the layout)"
+                "@layout was removed: call the layout as a function (content after the \
+                 @layout block has to move into its children)"
                     .to_string(),
             ));
             return None;
         }
-        let mut out = vec![format!("{pad}@extends {}", rest.trim())];
-        out.extend(dedent_block(body, indent));
+        let file = rest.trim();
+        let mut out = vec![
+            format!("{pad}@include {}", file),
+            format!("{pad}@{}", layout_function_name(file)),
+        ];
+        out.extend(body.iter().map(|l| l.to_string()));
         return Some(Block { lines: out, end });
     }
 
@@ -1263,7 +1382,7 @@ mod tests {
     fn with_and_layout() {
         assert_eq!(up("@with $a as b\n  @text $b"), "@let b $a\n@text $b");
         assert_eq!(up("@defer Loading\n  @text x"), "@text x");
-        assert_eq!(up("@layout base.hl\n  @text x\n"), "@extends base.hl\n@text x\n");
+        assert_eq!(up("@layout base.hl\n  @text x\n"), "@include base.hl\n@base-layout\n  @text x\n");
         let r = upgrade("@layout base.hl\n  @text x\n@text after");
         assert_eq!(r.output, "@layout base.hl\n  @text x\n@text after");
         assert_eq!(r.manual.len(), 1);
@@ -1427,6 +1546,28 @@ mod tests {
         assert_eq!(
             up("@svg [width 24, color red, class icon] a.svg"),
             "@image [inline, width 24, color red, class=icon] a.svg"
+        );
+    }
+
+    #[test]
+    fn layouts_become_functions() {
+        assert_eq!(
+            up("@extends layout.hl\n@slot header\n  @text Hi\n@paragraph Body\n"),
+            "@include layout.hl\n@layout\n  @slot header\n    @text Hi\n  @paragraph Body\n"
+        );
+        assert_eq!(super::layout_function_name("parts/base.hl"), "base-layout");
+        assert_eq!(
+            super::convert_layout("@page Site\n@column\n  @children\n", "layout").unwrap(),
+            "@let layout\n  @page Site\n  @column\n    @children\n"
+        );
+        assert!(super::convert_layout("@let layout\n  x\n", "layout").is_none());
+        assert_eq!(
+            super::convert_layout(
+                "@page Site\n@let accent #f00\n@let box [\n  padding 4\n]\n@let card\n  @el\n\n    @children\n@el [color $accent]\n  @children\n",
+                "layout"
+            )
+            .unwrap(),
+            "@let accent #f00\n@let box [\n  padding 4\n]\n@let card\n  @el\n\n    @children\n\n@let layout\n  @page Site\n  @el [color $accent]\n    @children\n"
         );
     }
 

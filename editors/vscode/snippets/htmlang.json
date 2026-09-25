@@ -184,14 +184,15 @@
     ],
     "description": "Include another file (a library of @let definitions emits nothing)"
   },
-  "Template inheritance": {
-    "prefix": "@extends",
+  "Layout": {
+    "prefix": "@layout",
     "body": [
-      "@extends ${1:layout.hl}",
-      "@slot ${2:content}",
-      "  $0"
+      "@include ${1:layout.hl}",
+      "@${2:layout}",
+      "  @slot ${3:header}",
+      "    $0"
     ],
-    "description": "Extend a base layout template"
+    "description": "Render the page inside a layout function"
   },
   "Script (external)": {
     "prefix": "@script-src",

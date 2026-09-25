@@ -3110,15 +3110,16 @@ fn deprecated_was_removed() {
 }
 
 #[test]
-fn test_extends_directive() {
-    // Can't test with actual files, but verify parse error for missing file
-    let result = htmlang::parser::parse("@extends nonexistent.hl\n@slot content\n  Hello");
+fn test_extends_was_removed() {
+    let result = htmlang::parser::parse("@extends layout.hl\n@slot content\n  Hello");
     let has_error = result.diagnostics.iter().any(|d| {
-        d.message.contains("cannot extend") && d.severity == htmlang::parser::Severity::Error
+        d.message.contains("was removed")
+            && d.message.contains("function")
+            && d.severity == htmlang::parser::Severity::Error
     });
     assert!(
         has_error,
-        "@extends should report error for missing file, got: {:?}",
+        "@extends should point at layout functions, got: {:?}",
         result.diagnostics
     );
 }

@@ -87,7 +87,7 @@
       }
     },
     "include-directive": {
-      "match": "(@(?:include|extends|markdown|svg|data))\\s+(.*)",
+      "match": "(@(?:include|markdown|data))\\s+(.*)",
       "captures": {
         "1": {
           "name": "keyword.control.directive.htmlang"

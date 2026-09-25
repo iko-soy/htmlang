@@ -1499,139 +1499,6 @@ impl Parser {
         }
 
 
-        // --- @extends (template inheritance) ---
-
-        if let Some(rest) = content.strip_prefix("@extends ") {
-            let filename = substitute_vars(rest.trim(), &ctx.variables);
-            let resolved = match &ctx.base_path {
-                Some(base) => base.join(&filename),
-                None => PathBuf::from(&filename),
-            };
-
-            if ctx.include_stack.contains(&resolved) {
-                ctx.diagnostics.push(Diagnostic {
-                    line: line_num,
-                    column: None,
-                    message: format!("circular extends '{}'", filename),
-                    severity: Severity::Error,
-                    source_line: Some(content.clone()),
-                });
-                return Ok(None);
-            }
-
-            let extends_text = if let Some(cached) = ctx.file_cache.get(&resolved) {
-                cached.clone()
-            } else {
-                match std::fs::read_to_string(&resolved) {
-                    Ok(text) => {
-                        ctx.file_cache.insert(resolved.clone(), text.clone());
-                        text
-                    }
-                    Err(e) => {
-                        ctx.diagnostics.push(Diagnostic {
-                            line: line_num,
-                            column: None,
-                            message: format!("cannot extend '{}': {}", filename, e),
-                            severity: Severity::Error,
-                            source_line: Some(content.clone()),
-                        });
-                        return Ok(None);
-                    }
-                }
-            };
-
-            // Collect slot blocks defined in the extending file. Everything
-            // else becomes the default content, filling the layout's
-            // @children.
-            let mut slot_contents: HashMap<String, Vec<Line>> = HashMap::new();
-            let mut default_lines: Vec<Line> = Vec::new();
-            while self.pos < self.lines.len() {
-                let line_indent = self.lines[self.pos].indent;
-                if line_indent < current_indent {
-                    break;
-                }
-                if let LineContent::Normal(ref s) = self.lines[self.pos].content {
-                    let trimmed = s.trim();
-                    if let Some(slot_name) = trimmed.strip_prefix("@slot ") {
-                        let slot_name = slot_name.trim().to_string();
-                        self.pos += 1;
-                        let mut slot_lines = Vec::new();
-                        while self.pos < self.lines.len()
-                            && self.lines[self.pos].indent > line_indent
-                        {
-                            slot_lines.push(self.lines[self.pos].clone());
-                            self.pos += 1;
-                        }
-                        slot_contents.insert(slot_name, slot_lines);
-                        continue;
-                    }
-                }
-                default_lines.push(self.lines[self.pos].clone());
-                self.pos += 1;
-            }
-            let default_nodes = if default_lines.is_empty() {
-                Vec::new()
-            } else {
-                let min_indent = default_lines.iter().map(|l| l.indent).min().unwrap_or(0);
-                let adjusted: Vec<Line> = default_lines
-                    .iter()
-                    .map(|l| Line {
-                        indent: l.indent - min_indent,
-                        content: l.content.clone(),
-                        line_num: l.line_num,
-                    })
-                    .collect();
-                let mut default_parser = Parser {
-                    lines: adjusted,
-                    pos: 0,
-                };
-                default_parser.parse_children(0, ctx)
-            };
-
-            // Parse slot contents into nodes
-            let mut slot_nodes: HashMap<String, Vec<Node>> = HashMap::new();
-            for (name, lines) in &slot_contents {
-                if lines.is_empty() {
-                    continue;
-                }
-                let min_indent = lines.iter().map(|l| l.indent).min().unwrap_or(0);
-                let adjusted: Vec<Line> = lines
-                    .iter()
-                    .map(|l| Line {
-                        indent: l.indent - min_indent,
-                        content: l.content.clone(),
-                        line_num: l.line_num,
-                    })
-                    .collect();
-                let mut slot_parser = Parser {
-                    lines: adjusted,
-                    pos: 0,
-                };
-                let nodes = slot_parser.parse_children(0, ctx);
-                slot_nodes.insert(name.clone(), nodes);
-            }
-
-            // Parse the base layout file
-            ctx.included_files.push(resolved.clone());
-            ctx.include_stack.push(resolved.clone());
-            let saved_base = ctx.base_path.clone();
-            ctx.base_path = resolved.parent().map(|p| p.to_path_buf());
-
-            let extends_lines = preprocess(&extends_text);
-            let mut extends_parser = Parser {
-                lines: extends_lines,
-                pos: 0,
-            };
-            let layout_nodes = extends_parser.parse_children(0, ctx);
-
-            ctx.base_path = saved_base;
-            ctx.include_stack.pop();
-
-            // Fill @slot placeholders and @children in the layout
-            let result_nodes = replace_children_and_slots(layout_nodes, &default_nodes, &slot_nodes);
-            return Ok(Some(result_nodes));
-        }
-
 
         // --- Function call ---
 
@@ -2145,7 +2012,6 @@ const KNOWN_DIRECTIVES: &[&str] = &[
     "head",
     "style",
     "warn",
-    "extends",
     "assert",
     "markdown",
     "data",
@@ -2195,7 +2061,12 @@ const REMOVED_SYNTAX: &[(&str, &str)] = &[
     ("@with", "use `@let alias $source`"),
     (
         "@layout",
-        "use `@extends` (page content outside `@slot` blocks fills `@children`)",
+        "make the layout a function (`@let layout` with `@children`) and call it",
+    ),
+    (
+        "@extends",
+        "make the layout a function (`@let layout` with `@children` and `@slot`), \
+         `@include` its file and call it",
     ),
     ("@scope", "write the `@scope` rule in an `@style` block"),
     (
