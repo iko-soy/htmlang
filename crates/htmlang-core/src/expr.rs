@@ -10,9 +10,8 @@
 //! or      := and ("or" and)*
 //! and     := not ("and" not)*
 //! not     := "not" not | compare
-//! compare := concat (("==" | "!=" | "<" | ">" | "<=" | ">=" | "contains"
-//!                     | "starts-with" | "ends-with") concat)?
-//! concat  := sum ("~" sum)*
+//! compare := sum (("==" | "!=" | "<" | ">" | "<=" | ">=" | "contains"
+//!                  | "starts-with" | "ends-with") sum)?
 //! sum     := product (("+" | "-") product)*
 //! product := unary (("*" | "/" | "%") unary)*
 //! unary   := "-" unary | primary
@@ -112,7 +111,7 @@ impl fmt::Display for Token {
     }
 }
 
-const OPERATORS: &[&str] = &["==", "!=", "<=", ">=", "<", ">", "+", "-", "*", "/", "%", "~"];
+const OPERATORS: &[&str] = &["==", "!=", "<=", ">=", "<", ">", "+", "-", "*", "/", "%"];
 
 fn tokenize(src: &str) -> Result<Vec<Token>, String> {
     let chars: Vec<char> = src.chars().collect();
@@ -249,7 +248,7 @@ impl Parser<'_> {
     }
 
     fn compare(&mut self) -> Result<Value, String> {
-        let left = self.concat()?;
+        let left = self.sum()?;
         let op = if let Some(op) = self.eat_op(&["==", "!=", "<=", ">=", "<", ">"]) {
             op
         } else if self.eat_word("contains") {
@@ -261,7 +260,7 @@ impl Parser<'_> {
         } else {
             return Ok(left);
         };
-        let right = self.concat()?;
+        let right = self.sum()?;
         let numbers = left.as_num().zip(right.as_num());
         let (l, r) = (left.to_string(), right.to_string());
         Ok(Value::Bool(match (op, numbers) {
@@ -282,15 +281,6 @@ impl Parser<'_> {
             ("ends-with", _) => l.ends_with(&r),
             _ => unreachable!(),
         }))
-    }
-
-    fn concat(&mut self) -> Result<Value, String> {
-        let mut left = self.sum()?;
-        while self.eat_op(&["~"]).is_some() {
-            let right = self.sum()?;
-            left = Value::Str(format!("{}{}", left, right));
-        }
-        Ok(left)
     }
 
     fn sum(&mut self) -> Result<Value, String> {
@@ -566,7 +556,6 @@ mod tests {
 
     #[test]
     fn strings_and_if() {
-        assert_eq!(ev("\"Hello \" ~ $name").to_string(), "Hello World");
         assert_eq!(ev("\"Hi $name!\"").to_string(), "Hi World!");
         assert_eq!(ev("if($count > 2, big, small)").to_string(), "big");
         assert_eq!(ev("$missing").to_string(), "");

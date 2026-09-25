@@ -343,7 +343,6 @@ Conditions and computed values (`@let x = ...`) are expressions:
 |---|---|
 | Values | numbers, `"strings"` (with `$var` interpolation), `$variables`, `true`, `false`, and bare words (`dark`, `#fff`) as strings |
 | Arithmetic | `+ - * / %` with the usual precedence, unary `-`, `( )` |
-| Text | `~` joins two values: `$first ~ " " ~ $last` |
 | Comparison | `== != < > <= >=` (numeric when both sides are numbers), `contains`, `starts-with`, `ends-with` |
 | Logic | `and`, `or`, `not`; empty, `false` and `0` are false |
 | Choice | `if(CONDITION, A, B)` |
@@ -488,6 +487,7 @@ removed form with its replacement.
 | `@tooltip TEXT` | `@tooltip [tip TEXT] TEXT` |
 | `@let x $a + 1` (computed without `=`) | `@let x = $a + 1` |
 | `COND ? A : B` | `if(COND, A, B)` |
+| `$a ~ " " ~ $b` | `"$a $b"` |
 | `...$bundle` | `$bundle` |
 | `animate`, `inset-area` | `animation`, `position-area` |
 | `$x\|uppercase`, `$c\|darken:10` (filters) | `${uppercase($x)}`, `${darken($c, 10)}` |

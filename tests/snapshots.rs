@@ -1020,9 +1020,9 @@ fn comparison_operators_starts_with() {
 }
 
 #[test]
-fn string_concat_operator() {
+fn string_interpolation_joins_values() {
     let output = compile(
-        "@page T\n@let first Hello\n@let last World\n@let full = $first ~ \" \" ~ $last\n@text $full",
+        "@page T\n@let first Hello\n@let last World\n@let full \"$first $last\"\n@text $full",
     );
     assert!(output.contains("Hello World"), "got: {}", output);
 }

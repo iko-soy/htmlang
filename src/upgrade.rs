@@ -579,6 +579,43 @@ fn rewrite_directive_line(
             .collect();
         return format!("{pad}@warn {}", shown.join(", "));
     }
+    // `@let x = $a ~ " " ~ $b` → `@let x "$a $b"` (`~` was removed:
+    // interpolated strings do the same)
+    if let Some(rest) = trimmed.strip_prefix("@let ")
+        && let Some((name, value)) = rest.split_once(' ')
+        && value.contains(" ~ ")
+    {
+        let expression = value.trim();
+        let expression = expression.strip_prefix('=').unwrap_or(expression);
+        let is_var_char = |c: char| c.is_alphanumeric() || matches!(c, '_' | '-' | '.');
+        let pieces: Vec<String> = expression
+            .split(" ~ ")
+            .map(|part| {
+                let part = part.trim();
+                if let Some(text) = part.strip_prefix('"').and_then(|p| p.strip_suffix('"')) {
+                    text.to_string()
+                } else if !part.contains(' ') && !part.contains('(') {
+                    part.to_string()
+                } else {
+                    format!("${{{}}}", part)
+                }
+            })
+            .collect();
+        let mut joined = String::new();
+        for (k, piece) in pieces.iter().enumerate() {
+            // `$n` directly followed by text would read as a longer name.
+            let next_continues_name = pieces
+                .get(k + 1)
+                .and_then(|next| next.chars().next())
+                .is_some_and(is_var_char);
+            if piece.starts_with('$') && !piece.starts_with("${") && next_continues_name {
+                joined.push_str(&format!("${{{}}}", piece));
+            } else {
+                joined.push_str(piece);
+            }
+        }
+        return format!("{pad}@let {} \"{}\"", name, joined);
+    }
     // `@let x $a + 4` computed its value; computing now needs `=`.
     if let Some(rest) = trimmed.strip_prefix("@let ")
         && let Some((name, value)) = rest.split_once(' ')
@@ -1312,7 +1349,8 @@ mod tests {
     #[test]
     fn computed_let_needs_equals() {
         assert_eq!(up("@let gap $base + 4"), "@let gap = $base + 4");
-        assert_eq!(up("@let full $a ~ \" \" ~ $b"), "@let full = $a ~ \" \" ~ $b");
+        assert_eq!(up("@let full $a ~ \" \" ~ $b"), "@let full \"$a $b\"");
+        assert_eq!(up("@let x = $n ~ \"px\""), "@let x \"${$n}px\"");
         assert_eq!(up("@let x = 1 + 2"), "@let x = 1 + 2");
         assert_eq!(up("@let area 1 / span 2"), "@let area 1 / span 2");
         assert_eq!(up("@let card $title $tone=primary\n  @text $title"), "@let card $title $tone=primary\n  @text $title");
