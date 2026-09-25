@@ -1354,19 +1354,6 @@ fn generate_self_closing(
 
     // Image optimization: auto-add loading="lazy" and decoding="async"
     if elem.kind == ElementKind::Image {
-        // SVG inlining: @image [inline] logo.svg
-        if elem.attrs.iter().any(|a| a.key == "inline")
-            && let Some(src) = &elem.argument
-            && src.ends_with(".svg")
-            && let Ok(svg_content) = std::fs::read_to_string(src)
-        {
-            // Close the tag we opened, then emit inline SVG instead
-            out.truncate(out.rfind('<').unwrap_or(0));
-            out.push_str(&ctx.indent());
-            out.push_str(svg_content.trim());
-            out.push_str(ctx.nl());
-            return;
-        }
         // Responsive srcset: @image photo.jpg [responsive 400 800 1200]
         let responsive_attr = elem.attrs.iter().find(|a| a.key == "responsive");
         if let Some(resp) = responsive_attr

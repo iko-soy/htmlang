@@ -402,7 +402,7 @@ A range counts down when its start is greater than its end.
 | `@data $name dir/*.json` | Load each file as `$name.STEM.key`; `$name` lists the stems |
 | `@data $name env:NAME [default]` | Read an environment variable |
 | `@markdown` / `@markdown file.md` | Markdown, converted to HTML |
-| `@svg file.svg` | Inline an SVG file |
+| `@image [inline] file.svg` | Inline an SVG file (`width`, `height`, `color`, `class=`, `id=` apply to it) |
 
 With `@extends`, the layout marks where content goes with `@slot name` (named
 blocks) and `@children` (everything in the page outside `@slot` blocks):
@@ -472,6 +472,7 @@ removed form with its replacement.
 | `@theme` | `@let --name value` lines |
 | `@json-ld`, `@font-face`, `@manifest` | Raw HTML in `@head`, CSS in `@style` |
 | `@breakpoint`, `@deprecated` | A media query in `@style`; nothing |
+| `@svg [attrs] file.svg` | `@image [inline, attrs] file.svg` |
 | `gap-x`, `gap-y`, `shadow`, `blur N`, `truncate`, `critical` | `column-gap`, `row-gap`, `box-shadow`, `filter blur(N)`, `$truncate`, nothing |
 | `@with $x as y` | `@let y $x` |
 | `@layout file` | `@extends file` |

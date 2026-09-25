@@ -222,7 +222,7 @@ fn svg_width_does_not_touch_stroke_width() {
         r#"<svg viewBox="0 0 24 24"><path stroke-width="2" d="M0 0"/></svg>"#,
     )
     .unwrap();
-    let out = compile_in(&dir, "@svg [width 48] icon.svg");
+    let out = compile_in(&dir, "@image [inline, width 48] icon.svg");
     assert!(out.contains("stroke-width=\"2\""), "{}", out);
     assert!(out.contains("width=\"48\""), "{}", out);
 }
@@ -400,4 +400,13 @@ fn lint_adds_only_checks_the_compiler_does_not_already_make() {
     assert_eq!(messages.iter().filter(|m| m.contains("'alt'")).count(), 1, "{:?}", messages);
     assert!(messages.iter().any(|m| m.contains("empty container")), "{:?}", messages);
     assert!(messages.iter().any(|m| m.contains("'type'")), "{:?}", messages);
+}
+
+#[test]
+fn inline_svg_resolves_from_the_page_and_keeps_attributes() {
+    let dir = scratch_dir("inline_svg");
+    std::fs::create_dir_all(dir.join("icons")).unwrap();
+    std::fs::write(dir.join("icons/a.svg"), r#"<svg viewBox="0 0 24 24"></svg>"#).unwrap();
+    let out = compile_in(&dir, "@image [inline, width 24, class=icon] icons/a.svg");
+    assert!(out.contains(r#"<svg viewBox="0 0 24 24" width="24" class="icon">"#), "{}", out);
 }

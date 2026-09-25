@@ -112,7 +112,6 @@ pub(crate) const DIRECTIVES: &[Doc] = &[
     doc("assert", "Fails the build when the condition is false.", "@assert $spacing == 16"),
     doc("warn", "Emits a compile-time warning.", "@warn Remember to set a title"),
     doc("data", "Loads a JSON file as variables.", "@data site.json"),
-    doc("svg", "Inlines an SVG file.", "@svg [width 24] icon.svg"),
 ];
 
 /// htmlang's own attributes, plus CSS properties htmlang treats specially.
@@ -147,7 +146,7 @@ pub(crate) const ATTRIBUTES: &[Doc] = &[
     doc("font", "Font family; quote a stack with commas.", "font \"Inter, sans-serif\""),
     doc("line-height", "Line height; integers of 2 or more are px.", "line-height 1.5"),
     doc("ordered", "On `@list`: a numbered list (`<ol>`).", "ordered"),
-    doc("inline", "On `@image` or `@svg`: embed the file in the page.", "inline"),
+    doc("inline", "On `@image`: embed the file (SVG markup, or other images as base64) in the page.", "inline"),
     doc("responsive", "On `@image`: widths for a generated `srcset`.", "responsive 400 800 1200"),
 ];
 

@@ -1105,7 +1105,7 @@ fn is_builtin_name(name: &str) -> bool {
     htmlang::parser::known_directives().contains(&name)
         || htmlang::ast::ElementKind::from_name(name).is_some()
         // Directives the parser handles outside its directive list
-        || matches!(name, "data" | "svg")
+        || name == "data"
 }
 
 #[allow(clippy::too_many_arguments)]

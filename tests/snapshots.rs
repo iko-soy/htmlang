@@ -4788,7 +4788,7 @@ fn svg_directive_inline() {
     let svg_path = dir.join("test.svg");
     std::fs::write(&svg_path, r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></svg>"#).unwrap();
 
-    let input = format!("@svg {}", svg_path.display());
+    let input = format!("@image [inline] {}", svg_path.display());
     let result = htmlang::parser::parse(&input);
     assert!(
         result
@@ -4824,7 +4824,7 @@ fn svg_directive_with_attrs() {
     )
     .unwrap();
 
-    let input = format!("@svg [width 24, color red] {}", svg_path.display());
+    let input = format!("@image [inline, width 24, color red] {}", svg_path.display());
     let result = htmlang::parser::parse(&input);
     let html = htmlang::codegen::generate(&result.document);
     assert!(
@@ -4843,7 +4843,7 @@ fn svg_directive_with_attrs() {
 
 #[test]
 fn svg_directive_missing_file() {
-    let result = htmlang::parser::parse("@svg /nonexistent/missing.svg");
+    let result = htmlang::parser::parse("@image [inline] /nonexistent/missing.svg");
     let errors: Vec<_> = result
         .diagnostics
         .iter()

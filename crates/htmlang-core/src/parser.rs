@@ -1076,81 +1076,6 @@ impl Parser {
         }
 
 
-        // --- @svg (inline SVG from file) ---
-
-        if let Some(rest) = content.strip_prefix("@svg ") {
-            let rest = rest.trim();
-            // @svg file.svg  OR  @svg [attrs] file.svg
-            let (attrs_part, filename) = if rest.starts_with('[') {
-                if let Some(bracket_end) = rest.find(']') {
-                    let attrs_str = &rest[..=bracket_end];
-                    let file = rest[bracket_end + 1..].trim();
-                    (Some(attrs_str.to_string()), file.to_string())
-                } else {
-                    (None, rest.to_string())
-                }
-            } else {
-                (None, rest.to_string())
-            };
-
-            let filename = substitute_vars(&filename, &ctx.variables);
-            let resolved = match &ctx.base_path {
-                Some(base) => base.join(&filename),
-                None => PathBuf::from(&filename),
-            };
-
-            match std::fs::read_to_string(&resolved) {
-                Ok(svg_content) => {
-                    let mut svg = svg_content.trim().to_string();
-                    // Apply attributes (width, height, color/fill, class)
-                    if let Some(ref attrs_str) = attrs_part {
-                        let (attrs, _) = parse_attr_brackets(attrs_str, line_num, ctx)?;
-                        for attr in &attrs {
-                            match attr.key.as_str() {
-                                "width" => {
-                                    if let Some(ref val) = attr.value {
-                                        svg = set_svg_attr(&svg, "width", val);
-                                    }
-                                }
-                                "height" => {
-                                    if let Some(ref val) = attr.value {
-                                        svg = set_svg_attr(&svg, "height", val);
-                                    }
-                                }
-                                "color" | "fill" => {
-                                    if let Some(ref val) = attr.value {
-                                        svg = set_svg_attr(&svg, "fill", val);
-                                    }
-                                }
-                                "class" => {
-                                    if let Some(ref val) = attr.value {
-                                        svg = set_svg_attr(&svg, "class", val);
-                                    }
-                                }
-                                "id" => {
-                                    if let Some(ref val) = attr.value {
-                                        svg = set_svg_attr(&svg, "id", val);
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                    return Ok(Some(vec![Node::Raw(svg)]));
-                }
-                Err(e) => {
-                    ctx.diagnostics.push(Diagnostic {
-                        line: line_num,
-                        column: None,
-                        message: format!("cannot load SVG '{}': {}", filename, e),
-                        severity: Severity::Error,
-                        source_line: Some(content.clone()),
-                    });
-                    return Ok(None);
-                }
-            }
-        }
-
 
         // --- @data (load JSON file into variables) ---
 
@@ -1778,7 +1703,7 @@ impl Parser {
 
         if content.starts_with('@') || content.starts_with('[') {
             let node = self.parse_element_line(&content, current_indent, line_num, ctx)?;
-            return Ok(Some(vec![node]));
+            return Ok(Some(vec![inline_svg(node, line_num, ctx)]));
         }
 
         // --- Bare text ---
@@ -2279,7 +2204,6 @@ const KNOWN_DIRECTIVES: &[&str] = &[
     "assert",
     "markdown",
     "data",
-    "svg",
 ];
 
 fn parse_element_kind(s: &str, line_num: usize) -> Result<ElementKind, ParseError> {
@@ -2340,6 +2264,7 @@ const REMOVED_SYNTAX: &[(&str, &str)] = &[
     ("@base", "use `@page [base ...] Title`"),
     ("@og", "use `@meta og:NAME VALUE`"),
     ("@debug", "use `@warn`"),
+    ("@svg", "use `@image [inline] file.svg`"),
     ("@match", "use `@if $x == a` / `@else if $x == b` / `@else`"),
     ("@case", "use `@if $x == a` / `@else if $x == b` / `@else`"),
     ("@default", "use `@else` in an `@if` chain"),
@@ -3854,6 +3779,51 @@ fn substitute_vars(input: &str, vars: &HashMap<String, String>) -> String {
     }
     result.push_str(rest);
     result
+}
+
+/// `@image [inline] icon.svg` becomes the SVG's markup, with `width`,
+/// `height`, `color` / `fill`, `class=` and `id=` applied to the `<svg>`
+/// tag. Other nodes are returned unchanged.
+fn inline_svg(node: Node, line_num: usize, ctx: &mut ParseContext) -> Node {
+    let Node::Element(elem) = &node else {
+        return node;
+    };
+    let is_inline_svg = elem.kind == ElementKind::Image
+        && elem.attrs.iter().any(|a| a.key == "inline" && !a.html)
+        && elem.argument.as_deref().is_some_and(|src| src.ends_with(".svg"));
+    if !is_inline_svg {
+        return node;
+    }
+    let filename = elem.argument.clone().unwrap_or_default();
+    let resolved = match &ctx.base_path {
+        Some(base) => base.join(&filename),
+        None => PathBuf::from(&filename),
+    };
+    let mut svg = match std::fs::read_to_string(&resolved) {
+        Ok(text) => text.trim().to_string(),
+        Err(e) => {
+            ctx.diagnostics.push(Diagnostic {
+                line: line_num,
+                column: None,
+                message: format!("cannot load SVG '{}': {}", filename, e),
+                severity: Severity::Error,
+                source_line: None,
+            });
+            return node;
+        }
+    };
+    ctx.included_files.push(resolved);
+    for attr in &elem.attrs {
+        let Some(value) = &attr.value else { continue };
+        let target = match (attr.key.as_str(), attr.html) {
+            ("width", false) | ("height", false) => attr.key.as_str(),
+            ("color", false) | ("fill", false) => "fill",
+            ("class", true) | ("id", true) => attr.key.as_str(),
+            _ => continue,
+        };
+        svg = set_svg_attr(&svg, target, value);
+    }
+    Node::Raw(svg)
 }
 
 /// The first `$name|filter` (old filter syntax) in `text`, as (name, filter).

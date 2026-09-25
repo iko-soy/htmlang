@@ -653,6 +653,28 @@ fn rewrite_directive_line(
         ));
         return line.to_string();
     }
+    // @svg [attrs] file.svg → @image [inline, attrs] file.svg
+    if let Some(rest) = trimmed.strip_prefix("@svg ") {
+        let rest = rest.trim();
+        let (attrs, file) = match rest.strip_prefix('[').and_then(|r| r.split_once(']')) {
+            Some((attrs, file)) => (attrs.trim(), file.trim()),
+            None => ("", rest),
+        };
+        let attrs: Vec<String> = split_top_level_commas(attrs)
+            .into_iter()
+            .map(str::trim)
+            .filter(|a| !a.is_empty())
+            .map(|a| match a.split_once(' ') {
+                Some((key @ ("class" | "id"), value)) => format!("{}={}", key, value.trim()),
+                _ => a.to_string(),
+            })
+            .collect();
+        let list = std::iter::once("inline".to_string())
+            .chain(attrs)
+            .collect::<Vec<_>>()
+            .join(", ");
+        return format!("{pad}@image [{}] {}", list, file);
+    }
     if let Some(rest) = trimmed.strip_prefix("@import ") {
         return format!("{pad}@include {}", rest);
     }
@@ -1349,6 +1371,15 @@ mod tests {
         assert_eq!(up("@let short = $title|truncate:5"), "@let short = truncate($title, 5)");
         assert_eq!(up("Hi $who|default:friend"), "Hi ${default($who, \"friend\")}");
         assert_eq!(up("a | b $x | c"), "a | b $x | c");
+    }
+
+    #[test]
+    fn svg_becomes_inline_image() {
+        assert_eq!(up("@svg icons/a.svg"), "@image [inline] icons/a.svg");
+        assert_eq!(
+            up("@svg [width 24, color red, class icon] a.svg"),
+            "@image [inline, width 24, color red, class=icon] a.svg"
+        );
     }
 
     #[test]
