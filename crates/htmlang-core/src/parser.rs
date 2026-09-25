@@ -3,6 +3,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use crate::ast::*;
+use crate::syntax::{self, Syntax};
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -48,23 +49,10 @@ impl fmt::Display for ParseError {
 // ---------------------------------------------------------------------------
 
 #[derive(Clone)]
-enum LineContent {
-    Normal(String),
-    Raw(String),
-}
-
-#[derive(Clone)]
-struct Line {
-    indent: usize,
-    content: LineContent,
-    line_num: usize,
-}
-
-#[derive(Clone)]
 struct FnDef {
     params: Vec<String>,
     defaults: HashMap<String, String>,
-    body_lines: Vec<Line>,
+    body: Vec<Syntax>,
 }
 
 struct ParseContext {
@@ -111,10 +99,8 @@ struct ParseContext {
     import_stack: Vec<PathBuf>,
 }
 
-struct Parser {
-    lines: Vec<Line>,
-    pos: usize,
-}
+/// Evaluates a syntax tree (see `syntax.rs`) into the document's nodes.
+struct Evaluator;
 
 impl ParseContext {
     /// Evaluate an expression (see `expr.rs`), reporting errors at `line`.
@@ -149,11 +135,7 @@ impl ParseContext {
 const PRELUDE: &str = include_str!("std.hl");
 
 fn load_prelude(ctx: &mut ParseContext) {
-    let mut prelude = Parser {
-        lines: preprocess(PRELUDE),
-        pos: 0,
-    };
-    let _ = prelude.parse_children(0, ctx);
+    let _ = Evaluator.eval_block(&syntax::parse(PRELUDE), ctx);
     // Library definitions aren't the file's own: never report them unused.
     ctx.fn_lines.clear();
     ctx.define_lines.clear();
@@ -165,8 +147,7 @@ pub fn parse(input: &str) -> ParseResult {
 }
 
 pub fn parse_with_base(input: &str, base_path: Option<&Path>) -> ParseResult {
-    let lines = preprocess(input);
-    let mut parser = Parser { lines, pos: 0 };
+    let tree = syntax::parse(input);
     let mut ctx = ParseContext {
         current_line: 0,
         scoped_functions: std::collections::HashSet::new(),
@@ -199,7 +180,7 @@ pub fn parse_with_base(input: &str, base_path: Option<&Path>) -> ParseResult {
         import_stack: Vec::new(),
     };
     load_prelude(&mut ctx);
-    let nodes = parser.parse_children(0, &mut ctx);
+    let nodes = Evaluator.eval_block(&tree, &mut ctx);
     validate_tree(&nodes, None, &mut ctx.diagnostics);
     check_unused(&mut ctx);
     ParseResult {
@@ -260,232 +241,43 @@ fn collect_images_recursive(nodes: &[Node], hints: &mut Vec<crate::ast::PreloadH
 // Preprocessing: strip comments/blanks, collapse @raw blocks
 // ---------------------------------------------------------------------------
 
-fn preprocess(input: &str) -> Vec<Line> {
-    let raw_lines: Vec<&str> = input.lines().collect();
-    let mut lines = Vec::new();
-    let mut i = 0;
-
-    while i < raw_lines.len() {
-        let line = raw_lines[i];
-        let trimmed = line.trim();
-
-        if trimmed.is_empty() || trimmed.starts_with("--") {
-            i += 1;
-            continue;
-        }
-
-        let indent = line.len() - line.trim_start().len();
-
-        // Inline `@markdown` and `@script` blocks keep their bodies verbatim:
-        // in Markdown, blank lines separate paragraphs, `---` is a rule (not
-        // a comment) and code indentation matters; in JavaScript, newlines,
-        // `{...}` and `$` must reach the output untouched.
-        let verbatim_body = trimmed == "@markdown"
-            || trimmed == "@script"
-            || trimmed.starts_with("@script ")
-            || trimmed.starts_with("@script[");
-        if verbatim_body {
-            lines.push(Line {
-                indent,
-                content: LineContent::Normal(trimmed.to_string()),
-                line_num: i + 1,
-            });
-            let body_start = i + 1;
-            let mut body_end = body_start;
-            let mut j = body_start;
-            while j < raw_lines.len() {
-                let l = raw_lines[j];
-                if l.trim().is_empty() {
-                    j += 1;
-                    continue;
-                }
-                if l.len() - l.trim_start().len() <= indent {
-                    break;
-                }
-                j += 1;
-                body_end = j;
-            }
-            let body = &raw_lines[body_start..body_end];
-            let body_indent = body
-                .iter()
-                .filter(|l| !l.trim().is_empty())
-                .map(|l| l.len() - l.trim_start().len())
-                .min()
-                .unwrap_or(0);
-            if !body.is_empty() {
-                let text: Vec<&str> = body
-                    .iter()
-                    .map(|l| l.get(body_indent..).unwrap_or("").trim_end())
-                    .collect();
-                lines.push(Line {
-                    indent: indent + 1,
-                    content: LineContent::Raw(text.join("\n")),
-                    line_num: body_start + 1,
-                });
-            }
-            i = body_end.max(body_start);
-            continue;
-        }
-
-        // Handle @raw """..."""
-        if let Some(raw_rest) = trimmed.strip_prefix("@raw") {
-            let after_raw = raw_rest.trim_start();
-            if let Some(after_open) = after_raw.strip_prefix("\"\"\"") {
-                // Single-line: @raw """content"""
-                if after_open.ends_with("\"\"\"") && after_open.len() >= 3 {
-                    let content = &after_open[..after_open.len() - 3];
-                    lines.push(Line {
-                        indent,
-                        content: LineContent::Raw(content.to_string()),
-                        line_num: i + 1,
-                    });
-                    i += 1;
-                    continue;
-                }
-
-                // Multiline: collect until closing """
-                let mut raw_content = String::new();
-                if !after_open.is_empty() {
-                    raw_content.push_str(after_open);
-                    raw_content.push('\n');
-                }
-                i += 1;
-                while i < raw_lines.len() {
-                    if raw_lines[i].trim() == "\"\"\"" {
-                        i += 1;
-                        break;
-                    }
-                    raw_content.push_str(raw_lines[i]);
-                    raw_content.push('\n');
-                    i += 1;
-                }
-
-                lines.push(Line {
-                    indent,
-                    content: LineContent::Raw(raw_content.trim_end_matches('\n').to_string()),
-                    line_num: i,
-                });
-                continue;
-            }
-        }
-
-        // Join continuation lines for multi-line attribute brackets
-        let first_line_num = i + 1;
-        let mut full = trimmed.to_string();
-        while open_attr_depth(&full) > 0 && i + 1 < raw_lines.len() {
-            i += 1;
-            let next = raw_lines[i].trim();
-            if next.is_empty() || next.starts_with("--") {
-                continue;
-            }
-            full.push(' ');
-            full.push_str(next);
-        }
-
-        lines.push(Line {
-            indent,
-            content: LineContent::Normal(full),
-            line_num: first_line_num,
-        });
-        i += 1;
-    }
-
-    lines
-}
-
-/// Bracket depth left open at the end of `line`, counting only attribute
-/// lists: a `[` that starts the line or follows an `@name` token (optionally
-/// with one more word, as in `@let name [`). Brackets in text content, such
-/// as `@text [bold] Use [ to open`, are ignored.
-fn open_attr_depth(line: &str) -> i32 {
-    if !line.starts_with('@') && !line.starts_with('[') {
-        return 0;
-    }
-    let bytes = line.as_bytes();
-    let mut depth: i32 = 0;
-    for (i, &b) in bytes.iter().enumerate() {
-        match b {
-            b'[' if depth > 0 => depth += 1,
-            b'[' => {
-                // Is this the start of an attribute list?
-                let before = line[..i].trim_end();
-                let last_directive = before
-                    .rsplit([']', '>'])
-                    .next()
-                    .unwrap_or("")
-                    .trim();
-                let tokens: Vec<&str> = last_directive.split_whitespace().collect();
-                let starts_list = match tokens.as_slice() {
-                    [] => before.is_empty() || before.ends_with('>'),
-                    [name] => name.starts_with('@'),
-                    [name, _] => name.starts_with('@'),
-                    _ => false,
-                };
-                if starts_list {
-                    depth = 1;
-                } else if before.ends_with(']') {
-                    // Text after a closed attribute list: stop scanning.
-                    return 0;
-                }
-            }
-            b']' if depth > 0 => depth -= 1,
-            _ => {}
-        }
-    }
-    depth
-}
-
 // ---------------------------------------------------------------------------
-// Parser
+// Evaluation
 // ---------------------------------------------------------------------------
 
-impl Parser {
-    fn parse_children(&mut self, min_indent: usize, ctx: &mut ParseContext) -> Vec<Node> {
+impl Evaluator {
+    fn eval_block(&mut self, block: &[Syntax], ctx: &mut ParseContext) -> Vec<Node> {
         let mut nodes = Vec::new();
-
-        while self.pos < self.lines.len() {
-            let indent = self.lines[self.pos].indent;
-            if indent < min_indent {
-                break;
-            }
-
-            match self.parse_line(ctx) {
+        for node in block {
+            match self.eval(node, ctx) {
                 Ok(Some(new_nodes)) => nodes.extend(new_nodes),
                 Ok(None) => {}
-                Err(e) => {
-                    // Error recovery: record the diagnostic and continue parsing
-                    // to report multiple errors in a single pass
-                    let source = if self.pos > 0 && self.pos <= self.lines.len() {
-                        match &self.lines[self.pos.saturating_sub(1)].content {
-                            LineContent::Normal(s) => Some(s.clone()),
-                            LineContent::Raw(s) => Some(s.clone()),
-                        }
-                    } else {
-                        None
-                    };
-                    ctx.diagnostics.push(Diagnostic {
-                        line: e.line,
-                        column: None,
-                        message: e.message,
-                        severity: Severity::Error,
-                        source_line: source,
-                    });
-                    // Skip forward past any deeper-indented children of the errored line
-                    while self.pos < self.lines.len() && self.lines[self.pos].indent > indent {
-                        self.pos += 1;
-                    }
-                }
+                // Record the error and go on, to report several in one pass
+                Err(e) => ctx.diagnostics.push(Diagnostic {
+                    line: e.line,
+                    column: None,
+                    message: e.message,
+                    severity: Severity::Error,
+                    source_line: Some(node.source()),
+                }),
             }
         }
-
         nodes
     }
 
-    fn parse_line(&mut self, ctx: &mut ParseContext) -> Result<Option<Vec<Node>>, ParseError> {
-        let line_num = self.lines[self.pos].line_num;
+    /// Evaluate a block in its own scope: `@let` inside doesn't leak out.
+    fn eval_scoped(&mut self, block: &[Syntax], ctx: &mut ParseContext) -> Vec<Node> {
+        let saved_vars = ctx.variables.clone();
+        let nodes = self.eval_block(block, ctx);
+        ctx.variables = saved_vars;
+        nodes
+    }
+
+    fn eval(&mut self, node: &Syntax, ctx: &mut ParseContext) -> Result<Option<Vec<Node>>, ParseError> {
+        let line_num = node.line();
         ctx.current_line = line_num;
-        if let LineContent::Normal(text) = &self.lines[self.pos].content
-            && let Some(filter) = old_filter_syntax(text)
+        if !matches!(node, Syntax::Raw { .. })
+            && let Some(filter) = old_filter_syntax(&node.source())
         {
             ctx.diagnostics.push(Diagnostic {
                 line: line_num,
@@ -495,29 +287,35 @@ impl Parser {
                     filter.0, filter.1, filter.1, filter.0
                 ),
                 severity: Severity::Warning,
-                source_line: Some(text.clone()),
+                source_line: Some(node.source()),
             });
         }
-        let current_indent = self.lines[self.pos].indent;
-
-        // Handle raw content
-        if let LineContent::Raw(s) = &self.lines[self.pos].content {
-            let content = s.clone();
-            self.pos += 1;
-            return Ok(Some(vec![Node::Raw(content)]));
-        }
-
-        // Normal content — clone to release borrow. Raw is already handled
-        // above; a let-else pattern avoids a panic path if new LineContent
-        // variants are added in the future.
-        let LineContent::Normal(content) = &self.lines[self.pos].content else {
-            return Err(ParseError {
-                line: line_num,
-                message: "internal: unexpected line content variant".to_string(),
-            });
+        let (content, current_indent, children) = match node {
+            Syntax::Raw { text, .. } => return Ok(Some(vec![Node::Raw(text.clone())])),
+            Syntax::Function { name, params, defaults, body, .. } => {
+                self.define_function(name, params, defaults, body, line_num, ctx);
+                return Ok(None);
+            }
+            Syntax::If { branches } => {
+                // Every condition is checked (and its errors reported);
+                // the first that holds picks the branch.
+                let mut chosen = None;
+                for branch in branches {
+                    let holds = match &branch.condition {
+                        Some(condition) => ctx.condition(condition, branch.line),
+                        None => true,
+                    };
+                    if holds && chosen.is_none() {
+                        chosen = Some(&branch.body);
+                    }
+                }
+                return Ok(chosen.map(|body| self.eval_scoped(body, ctx)));
+            }
+            Syntax::Each { header, body, empty, .. } => {
+                return self.eval_each(header, body, empty, line_num, ctx).map(Some);
+            }
+            Syntax::Line { text, indent, children, .. } => (text.clone(), *indent, children),
         };
-        let content = content.clone();
-        self.pos += 1;
 
         // --- Directives ---
 
@@ -569,76 +367,11 @@ impl Parser {
         if let Some(rest) = content.strip_prefix("@let ") {
             let rest = rest.trim();
 
-            // A `"""` value opens a multi-line string, whose indented lines
-            // are its content — not a function body.
-            let opens_triple_quote = rest.split_once(' ').is_some_and(|(_, v)| {
-                let v = v.trim();
-                v.strip_prefix("= ").unwrap_or(v).trim_start().starts_with("\"\"\"")
-            });
-            // Check if next lines are indented (function/component definition)
-            let has_body = !opens_triple_quote
-                && self.pos < self.lines.len()
-                && self.lines[self.pos].indent > current_indent;
-
-            if has_body {
-                // Function definition: @let name $param1 $param2=default
-                let parts: Vec<&str> = rest.split_whitespace().collect();
-                if parts.is_empty() {
-                    return Err(ParseError {
-                        line: line_num,
-                        message: "@let with body requires a name".to_string(),
-                    });
-                }
-                let name = parts[0].to_string();
-                let mut params = Vec::new();
-                let mut defaults = HashMap::new();
-                for part in &parts[1..] {
-                    let part = part.strip_prefix('$').unwrap_or(part);
-                    if let Some((param_name, default_val)) = part.split_once('=') {
-                        params.push(param_name.to_string());
-                        defaults.insert(param_name.to_string(), default_val.to_string());
-                    } else {
-                        params.push(part.to_string());
-                    }
-                }
-
-                // Collect body lines (all lines indented deeper than @let)
-                let mut body_lines = Vec::new();
-                while self.pos < self.lines.len() && self.lines[self.pos].indent > current_indent {
-                    body_lines.push(self.lines[self.pos].clone());
-                    self.pos += 1;
-                }
-
-                // An @style block at the top of the body is scoped to the
-                // function: its rules apply inside a `.hl-NAME` wrapper.
-                let (body_lines, style_lines) = split_style_block(body_lines);
-                if !style_lines.is_empty() {
-                    let scope_class = format!("hl-{}", name);
-                    let scoped_css: String = style_lines
-                        .iter()
-                        .filter_map(|line| match &line.content {
-                            LineContent::Normal(s) if !s.trim().is_empty() => {
-                                Some(format!(".{} {}\n", scope_class, s.trim()))
-                            }
-                            _ => None,
-                        })
-                        .collect();
-                    if !scoped_css.is_empty() {
-                        ctx.custom_css.push(scoped_css);
-                    }
-                    ctx.scoped_functions.insert(name.clone());
-                }
-
-                ctx.fn_lines.entry(name.clone()).or_insert(line_num);
-                ctx.functions.insert(
-                    name,
-                    FnDef {
-                        params,
-                        defaults,
-                        body_lines,
-                    },
-                );
-                return Ok(None);
+            if !children.is_empty() {
+                return Err(ParseError {
+                    line: line_num,
+                    message: "@let with body requires a name".to_string(),
+                });
             }
 
             if let Some((name, value)) = rest.split_once(' ') {
@@ -666,40 +399,10 @@ impl Parser {
                     return Ok(None);
                 }
 
-                // Multi-line @let with triple quotes: @let name """..."""
-                let value_str;
+                // Triple quotes: @let name """...""" (syntax.rs joins the
+                // lines of a multi-line string)
                 let value = if let Some(after_open) = value.strip_prefix("\"\"\"") {
-                    if after_open.ends_with("\"\"\"") && after_open.len() >= 3 {
-                        // Single-line triple-quote: @let name """value"""
-                        value_str = after_open[..after_open.len() - 3].to_string();
-                        value_str.as_str()
-                    } else {
-                        // Multi-line: collect indented body lines until closing """
-                        let mut lines_buf = String::new();
-                        if !after_open.is_empty() {
-                            lines_buf.push_str(after_open);
-                            lines_buf.push('\n');
-                        }
-                        while self.pos < self.lines.len() {
-                            match &self.lines[self.pos].content {
-                                LineContent::Normal(s) if s.trim() == "\"\"\"" => {
-                                    self.pos += 1;
-                                    break;
-                                }
-                                LineContent::Normal(s) => {
-                                    lines_buf.push_str(s);
-                                    lines_buf.push('\n');
-                                }
-                                LineContent::Raw(s) => {
-                                    lines_buf.push_str(s);
-                                    lines_buf.push('\n');
-                                }
-                            }
-                            self.pos += 1;
-                        }
-                        value_str = lines_buf.trim_end_matches('\n').to_string();
-                        value_str.as_str()
-                    }
+                    after_open.strip_suffix("\"\"\"").unwrap_or(after_open)
                 } else if value.starts_with('"') && value.ends_with('"') && value.len() >= 2 {
                     // Support quoted string interpolation: @let greeting "Hello $name"
                     &value[1..value.len() - 1]
@@ -733,22 +436,7 @@ impl Parser {
 
 
         if content == "@head" || content.starts_with("@head ") {
-            // Collect indented body lines as raw head content
-            let mut head_content = String::new();
-            while self.pos < self.lines.len() && self.lines[self.pos].indent > current_indent {
-                match &self.lines[self.pos].content {
-                    LineContent::Normal(s) => {
-                        head_content.push_str(s.trim());
-                        head_content.push('\n');
-                    }
-                    LineContent::Raw(s) => {
-                        head_content.push_str(s);
-                        head_content.push('\n');
-                    }
-                }
-                self.pos += 1;
-            }
-            let trimmed = head_content.trim().to_string();
+            let trimmed = block_text(children).trim().to_string();
             if !trimmed.is_empty() {
                 ctx.head_blocks.push(trimmed);
             }
@@ -757,21 +445,7 @@ impl Parser {
 
         // --- @style block (raw CSS) ---
         if content.trim() == "@style" {
-            let mut style_content = String::new();
-            while self.pos < self.lines.len() && self.lines[self.pos].indent > current_indent {
-                match &self.lines[self.pos].content {
-                    LineContent::Normal(s) => {
-                        style_content.push_str(s.trim());
-                        style_content.push('\n');
-                    }
-                    LineContent::Raw(s) => {
-                        style_content.push_str(s);
-                        style_content.push('\n');
-                    }
-                }
-                self.pos += 1;
-            }
-            let trimmed = style_content.trim().to_string();
+            let trimmed = block_text(children).trim().to_string();
             if !trimmed.is_empty() {
                 ctx.custom_css.push(trimmed);
             }
@@ -784,14 +458,7 @@ impl Parser {
             let arg = content.trim().strip_prefix("@markdown").unwrap().trim();
             if arg.is_empty() {
                 // Inline markdown block: indented children
-                let mut md_lines = Vec::new();
-                while self.pos < self.lines.len() && self.lines[self.pos].indent > current_indent {
-                    match &self.lines[self.pos].content {
-                        LineContent::Normal(s) => md_lines.push(s.clone()),
-                        LineContent::Raw(s) => md_lines.extend(s.lines().map(String::from)),
-                    }
-                    self.pos += 1;
-                }
+                let md_lines: Vec<String> = block_text(children).lines().map(String::from).collect();
                 let html = markdown_to_html(&md_lines);
                 return Ok(Some(vec![Node::Raw(html)]));
             } else {
@@ -940,12 +607,7 @@ impl Parser {
                         }
                         None => format!("@include \"{}\"", rel_name),
                     };
-                    let synth_lines = preprocess(&import_line);
-                    let mut synth_parser = Parser {
-                        lines: synth_lines,
-                        pos: 0,
-                    };
-                    matched_nodes.extend(synth_parser.parse_children(0, ctx));
+                    matched_nodes.extend(self.eval_block(&syntax::parse(&import_line), ctx));
                 }
                 return Ok(Some(matched_nodes));
             }
@@ -1011,12 +673,7 @@ impl Parser {
                 let var_keys_before: std::collections::HashSet<String> =
                     ctx.variables.keys().cloned().collect();
 
-                let imported_lines = preprocess(&imported_text);
-                let mut imported_parser = Parser {
-                    lines: imported_lines,
-                    pos: 0,
-                };
-                let _discarded_nodes = imported_parser.parse_children(0, ctx);
+                let _discarded_nodes = self.eval_block(&syntax::parse(&imported_text), ctx);
 
                 // Remove newly added entries and re-insert them under the prefix.
                 let new_fn_keys: Vec<String> = ctx
@@ -1055,12 +712,7 @@ impl Parser {
                     }
                 }
             } else {
-                let included_lines = preprocess(&imported_text);
-                let mut included_parser = Parser {
-                    lines: included_lines,
-                    pos: 0,
-                };
-                included_nodes = included_parser.parse_children(0, ctx);
+                included_nodes = self.eval_block(&syntax::parse(&imported_text), ctx);
             }
 
             // Annotate new diagnostics with import chain
@@ -1210,91 +862,6 @@ impl Parser {
 
         // --- @if / @else ---
 
-        if let Some(rest) = content.strip_prefix("@if ") {
-            let result = ctx.condition(rest.trim(), line_num);
-
-            // Collect then-body lines
-            let mut then_lines = Vec::new();
-            while self.pos < self.lines.len() && self.lines[self.pos].indent > current_indent {
-                then_lines.push(self.lines[self.pos].clone());
-                self.pos += 1;
-            }
-
-            // Build branches: [(condition_result, body_lines), ...]
-            let mut branches: Vec<(bool, Vec<Line>)> = vec![(result, then_lines)];
-
-            // Check for @else if / @else chains at same indent
-            loop {
-                if self.pos >= self.lines.len() || self.lines[self.pos].indent != current_indent {
-                    break;
-                }
-                if let LineContent::Normal(ref s) = self.lines[self.pos].content {
-                    let trimmed = s.trim();
-                    if let Some(else_if_cond) = trimmed.strip_prefix("@else if ") {
-                        self.pos += 1; // consume @else if
-                        let cond_result =
-                            ctx.condition(else_if_cond.trim(), self.lines[self.pos - 1].line_num);
-                        let mut body = Vec::new();
-                        while self.pos < self.lines.len()
-                            && self.lines[self.pos].indent > current_indent
-                        {
-                            body.push(self.lines[self.pos].clone());
-                            self.pos += 1;
-                        }
-                        branches.push((cond_result, body));
-                    } else if trimmed == "@else" {
-                        self.pos += 1; // consume @else
-                        let mut body = Vec::new();
-                        while self.pos < self.lines.len()
-                            && self.lines[self.pos].indent > current_indent
-                        {
-                            body.push(self.lines[self.pos].clone());
-                            self.pos += 1;
-                        }
-                        // @else is always true (fallback)
-                        branches.push((true, body));
-                        break;
-                    } else {
-                        break;
-                    }
-                } else {
-                    break;
-                }
-            }
-
-            // Pick the first branch whose condition is true
-            let body_lines = branches
-                .into_iter()
-                .find(|(cond, _)| *cond)
-                .map(|(_, lines)| lines)
-                .unwrap_or_default();
-
-            if body_lines.is_empty() {
-                return Ok(None);
-            }
-
-            let min_indent = body_lines.iter().map(|l| l.indent).min().unwrap_or(0);
-            let adjusted: Vec<Line> = body_lines
-                .iter()
-                .map(|l| Line {
-                    indent: l.indent - min_indent,
-                    content: l.content.clone(),
-                    line_num: l.line_num,
-                })
-                .collect();
-
-            // Scope variables: @let inside @if doesn't leak out
-            let saved_vars = ctx.variables.clone();
-            let mut body_parser = Parser {
-                lines: adjusted,
-                pos: 0,
-            };
-            let nodes = body_parser.parse_children(0, ctx);
-            ctx.variables = saved_vars;
-            return Ok(Some(nodes));
-        }
-
-
         if content.trim() == "@else" || content.trim().starts_with("@else if ") {
             return Err(ParseError {
                 line: line_num,
@@ -1303,157 +870,6 @@ impl Parser {
         }
 
         // --- @each loop ---
-
-        if let Some(rest) = content.strip_prefix("@each ") {
-            let rest = rest.trim();
-            // Support: @each $var in list  OR  @each $var, $index in list
-            // OR  @each $name, $url in Alice /alice, Bob /bob (destructuring)
-            let (var_names, list_str) = if let Some((before_in, after_in)) = rest.split_once(" in ")
-            {
-                let before_in = before_in.trim();
-                let vars: Vec<String> = before_in
-                    .split(',')
-                    .map(|v| v.trim().strip_prefix('$').unwrap_or(v.trim()).to_string())
-                    .collect();
-                (vars, after_in.trim().to_string())
-            } else {
-                return Err(ParseError {
-                    line: line_num,
-                    message: "@each requires: @each $var in list".to_string(),
-                });
-            };
-            let var_name = var_names[0].clone();
-            let index_var = var_names.get(1).cloned();
-
-            if list_str.trim_end().ends_with(']') && list_str.contains("[page ") {
-                return Err(ParseError {
-                    line: line_num,
-                    message: "@each pagination (`[page N]`) was removed: split the list or \
-                              filter it with @if"
-                        .to_string(),
-                });
-            }
-            track_var_refs(&list_str, &mut ctx.used_variables);
-            let list_str = substitute_vars(&list_str, &ctx.variables);
-            // Support range syntax: @each $i in 1..5  or  @each $i in 0..100 step 10
-            let items: Vec<String> = if let Some((start_s, rest)) = list_str.split_once("..") {
-                let (end_s, step) = if let Some((e, s)) = rest.split_once(" step ") {
-                    (e.trim(), s.trim().parse::<i64>().unwrap_or(1).max(1))
-                } else {
-                    (rest.trim(), 1i64)
-                };
-                if let (Ok(start), Ok(end)) = (start_s.trim().parse::<i64>(), end_s.parse::<i64>())
-                {
-                    numeric_range(start, end, step)
-                } else {
-                    list_str
-                        .split(',')
-                        .map(|s| s.trim().to_string())
-                        .filter(|s| !s.is_empty())
-                        .collect()
-                }
-            } else {
-                list_str
-                    .split(',')
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect()
-            };
-
-            // Collect body lines
-            let mut body_lines = Vec::new();
-            while self.pos < self.lines.len() && self.lines[self.pos].indent > current_indent {
-                body_lines.push(self.lines[self.pos].clone());
-                self.pos += 1;
-            }
-
-            // Check for @else block (empty-state fallback)
-            let mut else_lines = Vec::new();
-            if self.pos < self.lines.len()
-                && self.lines[self.pos].indent == current_indent
-                && let LineContent::Normal(ref s) = self.lines[self.pos].content
-                && s.trim() == "@else"
-            {
-                self.pos += 1; // consume @else
-                while self.pos < self.lines.len() && self.lines[self.pos].indent > current_indent {
-                    else_lines.push(self.lines[self.pos].clone());
-                    self.pos += 1;
-                }
-            }
-
-            if body_lines.is_empty() {
-                return Ok(None);
-            }
-
-            // If list is empty, render @else body
-            if items.is_empty() {
-                if else_lines.is_empty() {
-                    return Ok(None);
-                }
-                let min_indent = else_lines.iter().map(|l| l.indent).min().unwrap_or(0);
-                let adjusted: Vec<Line> = else_lines
-                    .iter()
-                    .map(|l| Line {
-                        indent: l.indent - min_indent,
-                        content: l.content.clone(),
-                        line_num: l.line_num,
-                    })
-                    .collect();
-                let mut body_parser = Parser {
-                    lines: adjusted,
-                    pos: 0,
-                };
-                let saved_vars = ctx.variables.clone();
-                let nodes = body_parser.parse_children(0, ctx);
-                ctx.variables = saved_vars;
-                return Ok(Some(nodes));
-            }
-
-            let min_indent = body_lines.iter().map(|l| l.indent).min().unwrap_or(0);
-            let adjusted: Vec<Line> = body_lines
-                .iter()
-                .map(|l| Line {
-                    indent: l.indent - min_indent,
-                    content: l.content.clone(),
-                    line_num: l.line_num,
-                })
-                .collect();
-
-            let saved_vars = ctx.variables.clone();
-            let mut all_nodes = Vec::new();
-
-            let has_extra_vars = var_names.len() > 2
-                || (var_names.len() == 2 && items.first().is_some_and(|it| it.contains(' ')));
-
-            for (i, item) in items.iter().enumerate() {
-                // Always expose $_index for the current iteration
-                ctx.variables.insert("_index".to_string(), i.to_string());
-                if has_extra_vars {
-                    // Destructuring: split item by spaces and assign to each variable
-                    let parts: Vec<&str> = item.splitn(var_names.len(), ' ').collect();
-                    for (vi, vn) in var_names.iter().enumerate() {
-                        let val = parts.get(vi).unwrap_or(&"").to_string();
-                        ctx.variables.insert(vn.clone(), val);
-                    }
-                } else {
-                    ctx.variables.insert(var_name.clone(), item.clone());
-                    if let Some(ref idx_name) = index_var {
-                        ctx.variables.insert(idx_name.clone(), i.to_string());
-                    }
-                }
-                let mut body_parser = Parser {
-                    lines: adjusted.clone(),
-                    pos: 0,
-                };
-                let nodes = body_parser.parse_children(0, ctx);
-                all_nodes.extend(nodes);
-            }
-
-            ctx.variables = saved_vars;
-            return Ok(Some(all_nodes));
-        }
-
-
 
         // --- @warn / @debug ---
 
@@ -1480,11 +896,10 @@ impl Parser {
                     message: "@keyframes requires a name".to_string(),
                 });
             }
-            // Collect body lines (indented deeper)
             let mut body = String::new();
-            while self.pos < self.lines.len() && self.lines[self.pos].indent > current_indent {
-                if let LineContent::Normal(ref s) = self.lines[self.pos].content {
-                    let trimmed = s.trim();
+            for_each_line(children, &mut |node| {
+                if let Syntax::Line { text, .. } = node {
+                    let trimmed = text.trim();
                     // Support htmlang-style: from [opacity 0] / to [opacity 1] / 50% [transform scale(1.5)]
                     if let Some(kf_css) = parse_keyframe_line(trimmed) {
                         body.push_str(&kf_css);
@@ -1492,8 +907,7 @@ impl Parser {
                         body.push_str(trimmed);
                     }
                 }
-                self.pos += 1;
-            }
+            });
             ctx.keyframes.push((name, body));
             return Ok(None);
         }
@@ -1506,7 +920,7 @@ impl Parser {
             let name = extract_element_name(&content);
             if ctx.functions.contains_key(name) {
                 ctx.used_functions.insert(name.to_string());
-                let nodes = self.expand_fn_call(name, &content, current_indent, line_num, ctx)?;
+                let nodes = self.expand_fn_call(name, &content, children, line_num, ctx)?;
                 return Ok(Some(nodes));
             }
         }
@@ -1514,7 +928,7 @@ impl Parser {
         // --- Elements ---
 
         if content.starts_with('@') || content.starts_with('[') {
-            let node = self.parse_element_line(&content, current_indent, line_num, ctx)?;
+            let node = self.parse_element_line(&content, children, line_num, ctx)?;
             return Ok(Some(vec![inline_svg(node, line_num, ctx)]));
         }
 
@@ -1612,11 +1026,153 @@ impl Parser {
         ctx.variables.insert(name.to_string(), stems.join(", "));
     }
 
+    fn eval_each(
+        &mut self,
+        header: &str,
+        body: &[Syntax],
+        empty: &[Syntax],
+        line_num: usize,
+        ctx: &mut ParseContext,
+    ) -> Result<Vec<Node>, ParseError> {
+        // Support: @each $var in list  OR  @each $var, $index in list
+        // OR  @each $name, $url in Alice /alice, Bob /bob (destructuring)
+        let (var_names, list_str) = if let Some((before_in, after_in)) = header.split_once(" in ") {
+            let before_in = before_in.trim();
+            let vars: Vec<String> = before_in
+                .split(',')
+                .map(|v| v.trim().strip_prefix('$').unwrap_or(v.trim()).to_string())
+                .collect();
+            (vars, after_in.trim().to_string())
+        } else {
+            return Err(ParseError {
+                line: line_num,
+                message: "@each requires: @each $var in list".to_string(),
+            });
+        };
+        let var_name = var_names[0].clone();
+        let index_var = var_names.get(1).cloned();
+
+        if list_str.trim_end().ends_with(']') && list_str.contains("[page ") {
+            return Err(ParseError {
+                line: line_num,
+                message: "@each pagination (`[page N]`) was removed: split the list or \
+                          filter it with @if"
+                    .to_string(),
+            });
+        }
+        track_var_refs(&list_str, &mut ctx.used_variables);
+        let list_str = substitute_vars(&list_str, &ctx.variables);
+        // Support range syntax: @each $i in 1..5  or  @each $i in 0..100 step 10
+        let items: Vec<String> = if let Some((start_s, rest)) = list_str.split_once("..") {
+            let (end_s, step) = if let Some((e, s)) = rest.split_once(" step ") {
+                (e.trim(), s.trim().parse::<i64>().unwrap_or(1).max(1))
+            } else {
+                (rest.trim(), 1i64)
+            };
+            if let (Ok(start), Ok(end)) = (start_s.trim().parse::<i64>(), end_s.parse::<i64>())
+            {
+                numeric_range(start, end, step)
+            } else {
+                list_str
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            }
+        } else {
+            list_str
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        };
+
+        if body.is_empty() {
+            return Ok(Vec::new());
+        }
+        // An empty list renders the @else body
+        if items.is_empty() {
+            return Ok(self.eval_scoped(empty, ctx));
+        }
+
+        let saved_vars = ctx.variables.clone();
+        let mut all_nodes = Vec::new();
+
+        let has_extra_vars = var_names.len() > 2
+            || (var_names.len() == 2 && items.first().is_some_and(|it| it.contains(' ')));
+
+        for (i, item) in items.iter().enumerate() {
+            // Always expose $_index for the current iteration
+            ctx.variables.insert("_index".to_string(), i.to_string());
+            if has_extra_vars {
+                // Destructuring: split item by spaces and assign to each variable
+                let parts: Vec<&str> = item.splitn(var_names.len(), ' ').collect();
+                for (vi, vn) in var_names.iter().enumerate() {
+                    let val = parts.get(vi).unwrap_or(&"").to_string();
+                    ctx.variables.insert(vn.clone(), val);
+                }
+            } else {
+                ctx.variables.insert(var_name.clone(), item.clone());
+                if let Some(ref idx_name) = index_var {
+                    ctx.variables.insert(idx_name.clone(), i.to_string());
+                }
+            }
+            all_nodes.extend(self.eval_block(body, ctx));
+        }
+
+        ctx.variables = saved_vars;
+        Ok(all_nodes)
+    }
+
+    fn define_function(
+        &mut self,
+        name: &str,
+        params: &[String],
+        defaults: &HashMap<String, String>,
+        body: &[Syntax],
+        line_num: usize,
+        ctx: &mut ParseContext,
+    ) {
+        // An @style block at the top of the body is scoped to the
+        // function: its rules apply inside a `.hl-NAME` wrapper.
+        let (style, body): (Vec<&Syntax>, Vec<&Syntax>) = body
+            .iter()
+            .partition(|node| matches!(node, Syntax::Line { text, .. } if text == "@style"));
+        if !style.is_empty() {
+            let mut scoped_css = String::new();
+            for node in style {
+                if let Syntax::Line { children, .. } = node {
+                    for_each_line(children, &mut |node| {
+                        if let Syntax::Line { text, .. } = node
+                            && !text.trim().is_empty()
+                        {
+                            scoped_css.push_str(&format!(".hl-{} {}\n", name, text.trim()));
+                        }
+                    });
+                }
+            }
+            if !scoped_css.is_empty() {
+                ctx.custom_css.push(scoped_css);
+            }
+            ctx.scoped_functions.insert(name.to_string());
+        }
+
+        ctx.fn_lines.entry(name.to_string()).or_insert(line_num);
+        ctx.functions.insert(
+            name.to_string(),
+            FnDef {
+                params: params.to_vec(),
+                defaults: defaults.clone(),
+                body: body.into_iter().cloned().collect(),
+            },
+        );
+    }
+
     fn expand_fn_call(
         &mut self,
         name: &str,
         content: &str,
-        current_indent: usize,
+        children: &[Syntax],
         line_num: usize,
         ctx: &mut ParseContext,
     ) -> Result<Vec<Node>, ParseError> {
@@ -1658,7 +1214,7 @@ impl Parser {
         };
 
         // Parse caller's children, separating named slots from default children
-        let all_caller_children = self.parse_children(current_indent + 1, ctx);
+        let all_caller_children = self.eval_block(children, ctx);
         let mut slot_contents: HashMap<String, Vec<Node>> = HashMap::new();
         let mut caller_children = Vec::new();
         for child in all_caller_children {
@@ -1716,29 +1272,8 @@ impl Parser {
             .map(|(a, _)| a.clone())
             .collect();
 
-        // Normalize body indentation so it parses from indent 0
-        let min_indent = fn_def
-            .body_lines
-            .iter()
-            .map(|l| l.indent)
-            .min()
-            .unwrap_or(0);
-        let adjusted: Vec<Line> = fn_def
-            .body_lines
-            .iter()
-            .map(|l| Line {
-                indent: l.indent - min_indent,
-                content: l.content.clone(),
-                line_num: l.line_num,
-            })
-            .collect();
-
-        // Parse body with params in scope
-        let mut body_parser = Parser {
-            lines: adjusted,
-            pos: 0,
-        };
-        let body_nodes = body_parser.parse_children(0, ctx);
+        // Evaluate the body with the parameters in scope
+        let body_nodes = self.eval_block(&fn_def.body, ctx);
 
         // Restore variables and call stack
         ctx.variables = saved_vars;
@@ -1796,7 +1331,7 @@ impl Parser {
     fn parse_element_line(
         &mut self,
         content: &str,
-        current_indent: usize,
+        children: &[Syntax],
         line_num: usize,
         ctx: &mut ParseContext,
     ) -> Result<Node, ParseError> {
@@ -1810,7 +1345,7 @@ impl Parser {
         }
 
         // Parse indented children (belong to the innermost element)
-        let children = self.parse_children(current_indent + 1, ctx);
+        let children = self.eval_block(children, ctx);
 
         // Build chain right-to-left: rightmost gets children, each wraps the next
         let mut current_children = children;
@@ -3949,26 +3484,32 @@ fn parse_json_with_error(input: &str) -> Result<JsonValue, String> {
     }
 }
 
-/// Split a function body into its content and an @style block at the
-/// body's top level (the block's CSS lines, without the `@style` line).
-fn split_style_block(body: Vec<Line>) -> (Vec<Line>, Vec<Line>) {
-    let top = body.iter().map(|l| l.indent).min().unwrap_or(0);
-    let mut content = Vec::new();
-    let mut style = Vec::new();
-    let mut in_style = false;
-    for line in body {
-        let is_style_header =
-            line.indent == top && matches!(&line.content, LineContent::Normal(s) if s.trim() == "@style");
-        if is_style_header {
-            in_style = true;
-        } else if in_style && line.indent > top {
-            style.push(line);
-        } else {
-            in_style = false;
-            content.push(line);
+/// Visit the lines of a block in source order, children after their line.
+fn for_each_line<'a>(block: &'a [Syntax], f: &mut impl FnMut(&'a Syntax)) {
+    for node in block {
+        f(node);
+        if let Syntax::Line { children, .. } = node {
+            for_each_line(children, f);
         }
     }
-    (content, style)
+}
+
+/// The text of a block whose lines are content, not htmlang (`@head`,
+/// `@style`, `@markdown`): each line trimmed, verbatim text as is.
+fn block_text(block: &[Syntax]) -> String {
+    let mut text = String::new();
+    for_each_line(block, &mut |node| match node {
+        Syntax::Line { text: line, .. } => {
+            text.push_str(line.trim());
+            text.push('\n');
+        }
+        Syntax::Raw { text: raw, .. } => {
+            text.push_str(raw);
+            text.push('\n');
+        }
+        _ => {}
+    });
+    text
 }
 
 fn parse_json_value(chars: &[char], mut pos: usize) -> Option<(JsonValue, usize)> {

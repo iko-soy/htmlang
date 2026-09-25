@@ -398,3 +398,21 @@ fn inline_svg_resolves_from_the_page_and_keeps_attributes() {
     let out = compile_in(&dir, "@image [inline, width 24, class=icon] icons/a.svg");
     assert!(out.contains(r#"<svg viewBox="0 0 24 24" width="24" class="icon">"#), "{}", out);
 }
+
+#[test]
+fn inline_element_attributes_can_continue_on_the_next_line() {
+    let result = htmlang::parser::parse(
+        "@paragraph\n  Press {@kbd [\n    padding 2 6, rounded 4\n  ] Ctrl+K} to search.\n",
+    );
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    let html = htmlang::codegen::generate(&result.document);
+    assert!(html.contains(">Ctrl+K</kbd> to search."), "{}", html);
+}
+
+#[test]
+fn lines_under_text_are_its_siblings() {
+    let html = htmlang::codegen::generate(
+        &htmlang::parser::parse("@el\n  Some text\n    more text\n").document,
+    );
+    assert!(html.contains("<span>Some text</span><span>more text</span>"), "{}", html);
+}
