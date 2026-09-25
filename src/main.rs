@@ -158,25 +158,6 @@ fn json_escape_string(s: &str) -> String {
     out
 }
 
-/// Rename attribute key `from` to `to` wherever it appears as a whole key:
-/// preceded by `[`, `,`, whitespace or a `prefix:` and followed by a space.
-fn rename_attr_key(line: &str, from: &str, to: &str) -> String {
-    let needle = format!("{from} ");
-    let mut out = String::with_capacity(line.len());
-    let mut rest = line;
-    while let Some(pos) = rest.find(&needle) {
-        let whole_key = rest[..pos]
-            .chars()
-            .next_back()
-            .is_none_or(|c| matches!(c, '[' | ',' | ':') || c.is_whitespace());
-        out.push_str(&rest[..pos]);
-        out.push_str(if whole_key { to } else { from });
-        out.push(' ');
-        rest = &rest[pos + needle.len()..];
-    }
-    out.push_str(rest);
-    out
-}
 
 fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;")
@@ -2412,7 +2393,7 @@ fn main() {
             let mut deps = Vec::new();
             for line in input.lines() {
                 let trimmed = line.trim();
-                for directive in &["@include ", "@import ", "@extends ", "@use "] {
+                for directive in &["@include ", "@import ", "@extends "] {
                     if let Some(rest) = trimmed.strip_prefix(directive) {
                         let dep = rest.split_whitespace().next().unwrap_or("").to_string();
                         if !dep.is_empty() {
@@ -2506,7 +2487,6 @@ fn main() {
                     && !trimmed.starts_with("@theme")
                     && !trimmed.starts_with("@deprecated ")
                     && !trimmed.starts_with("@breakpoint ")
-                    && !trimmed.starts_with("@use ")
                     && !trimmed.starts_with("@slot ")
                     && !trimmed.starts_with("@lang ")
                     && !trimmed.starts_with("@favicon ")
@@ -3085,78 +3065,6 @@ compile();
         return;
     }
 
-    // Handle "migrate" subcommand — auto-upgrade deprecated syntax
-    if args.len() >= 2 && args[1] == "migrate" {
-        let target = if args.len() >= 3 { &args[2] } else { "." };
-        let path = Path::new(target);
-        let hl_files = if path.is_dir() {
-            collect_hl_files_recursive(path)
-        } else {
-            vec![PathBuf::from(target)]
-        };
-        if hl_files.is_empty() {
-            eprintln!("no .hl files found in {}", target);
-            process::exit(1);
-        }
-        let mut total_changes = 0usize;
-        for file in &hl_files {
-            let input = match fs::read_to_string(file) {
-                Ok(s) => s,
-                Err(_) => continue,
-            };
-            let mut output = String::new();
-            let mut changes = 0usize;
-            for line in input.lines() {
-                let mut migrated = line.to_string();
-                // Migrate @divider -> @hr
-                if migrated.trim().starts_with("@divider") {
-                    migrated = migrated.replace("@divider", "@hr");
-                    changes += 1;
-                }
-                // Migrate @ul -> @list
-                if migrated.trim().starts_with("@ul") && !migrated.trim().starts_with("@unless") {
-                    migrated = migrated.replacen("@ul", "@list", 1);
-                    changes += 1;
-                }
-                // Migrate align-center -> center-x (common mistake)
-                if migrated.contains("align-center") {
-                    migrated = migrated.replace("align-center", "center-x");
-                    changes += 1;
-                }
-                output.push_str(&migrated);
-                output.push('\n');
-            }
-            // Remove trailing extra newline if original didn't end with one
-            if !input.ends_with('\n') && output.ends_with('\n') {
-                output.pop();
-            }
-            if changes > 0 {
-                match fs::write(file, &output) {
-                    Ok(()) => {
-                        eprintln!(
-                            "migrated {} ({} change{})",
-                            file.display(),
-                            changes,
-                            if changes == 1 { "" } else { "s" }
-                        );
-                        total_changes += changes;
-                    }
-                    Err(e) => eprintln!("error: {}: {}", file.display(), e),
-                }
-            }
-        }
-        if total_changes == 0 {
-            eprintln!("no migrations needed");
-        } else {
-            eprintln!(
-                "\n{} total change(s) across {} file(s)",
-                total_changes,
-                hl_files.len()
-            );
-        }
-        return;
-    }
-
     // Handle "bundle" subcommand — inline images/fonts as data URIs
     if args.len() >= 2 && args[1] == "bundle" {
         if args.len() < 3 {
@@ -3528,8 +3436,9 @@ compile();
         return;
     }
 
-    // Handle "upgrade" subcommand — comprehensive version-to-version migration
-    if args.len() >= 2 && args[1] == "upgrade" {
+    // Handle "upgrade" subcommand (and its old name "migrate"): rewrite
+    // removed or renamed syntax to its current form.
+    if args.len() >= 2 && (args[1] == "upgrade" || args[1] == "migrate") {
         let target = if args.len() >= 3 { &args[2] } else { "." };
         let path = Path::new(target);
         let hl_files = if path.is_dir() {
@@ -3542,89 +3451,39 @@ compile();
             process::exit(1);
         }
         let mut total_changes = 0usize;
+        let mut needs_manual = false;
         for file in &hl_files {
             let input = match fs::read_to_string(file) {
                 Ok(s) => s,
                 Err(_) => continue,
             };
-            let mut output = String::new();
-            let mut changes = 0usize;
-            for line in input.lines() {
-                let mut migrated = line.to_string();
-                // Migrate @divider -> @hr
-                if migrated.trim().starts_with("@divider") {
-                    migrated = migrated.replace("@divider", "@hr");
-                    changes += 1;
-                }
-                // Migrate @ul -> @list
-                if migrated.trim().starts_with("@ul") && !migrated.trim().starts_with("@unless") {
-                    migrated = migrated.replacen("@ul", "@list", 1);
-                    changes += 1;
-                }
-                // Migrate @col -> @column (full form)
-                if migrated.trim().starts_with("@col ") || migrated.trim() == "@col" {
-                    migrated = migrated.replacen("@col", "@column", 1);
-                    changes += 1;
-                }
-                // Migrate @img -> @image (full form)
-                if migrated.trim().starts_with("@img ") || migrated.trim() == "@img" {
-                    migrated = migrated.replacen("@img", "@image", 1);
-                    changes += 1;
-                }
-                // Migrate @p -> @paragraph (full form)
-                if migrated.trim().starts_with("@p ") || migrated.trim() == "@p" {
-                    migrated = migrated.replacen("@p ", "@paragraph ", 1);
-                    changes += 1;
-                }
-                // Migrate @btn -> @button (full form)
-                if migrated.trim().starts_with("@btn ") || migrated.trim() == "@btn" {
-                    migrated = migrated.replacen("@btn", "@button", 1);
-                    changes += 1;
-                }
-                // Migrate @li -> @item (full form)
-                if migrated.trim().starts_with("@li ") || migrated.trim() == "@li" {
-                    migrated = migrated.replacen("@li", "@item", 1);
-                    changes += 1;
-                }
-                // Migrate align-center -> center-x
-                if migrated.contains("align-center") {
-                    migrated = migrated.replace("align-center", "center-x");
-                    changes += 1;
-                }
-                // Migrate spacing -> gap (modern naming). Only the whole
-                // attribute key: `letter-spacing` must stay as it is.
-                if migrated.contains('[') {
-                    let renamed = rename_attr_key(&migrated, "spacing", "gap");
-                    if renamed != migrated {
-                        migrated = renamed;
-                        changes += 1;
-                    }
-                }
-                output.push_str(&migrated);
-                output.push('\n');
+            let result = htmlang::upgrade::upgrade(&input);
+            for (line, message) in &result.manual {
+                eprintln!("{}:{}: manual change needed: {}", file.display(), line, message);
+                needs_manual = true;
             }
-            if !input.ends_with('\n') && output.ends_with('\n') {
-                output.pop();
-            }
-            if changes > 0 {
-                match fs::write(file, &output) {
+            if result.changes > 0 {
+                match fs::write(file, &result.output) {
                     Ok(()) => {
                         eprintln!(
                             "upgraded {} ({} change{})",
                             file.display(),
-                            changes,
-                            if changes == 1 { "" } else { "s" }
+                            result.changes,
+                            if result.changes == 1 { "" } else { "s" }
                         );
-                        total_changes += changes;
+                        total_changes += result.changes;
                     }
                     Err(e) => eprintln!("error: {}: {}", file.display(), e),
                 }
             }
         }
-        if total_changes == 0 {
+        if total_changes == 0 && !needs_manual {
             eprintln!("no upgrades needed — all files are up to date");
-        } else {
+        } else if total_changes > 0 {
             eprintln!("\n{} total change(s) applied", total_changes);
+        }
+        if needs_manual {
+            process::exit(1);
         }
         return;
     }
@@ -3682,7 +3541,7 @@ compile();
         match fs::write(file_path, &template) {
             Ok(()) => {
                 eprintln!("created {}", file_name);
-                eprintln!("import with: @use \"{}\" {}", file_name, comp_name);
+                eprintln!("import with: @import {}  (then call @{})", file_name, comp_name);
             }
             Err(e) => {
                 eprintln!("error: {}: {}", file_name, e);
@@ -4271,18 +4130,6 @@ fn watch_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn rename_attr_key_only_touches_whole_keys() {
-        assert_eq!(
-            rename_attr_key(
-                "@row [spacing 10, letter-spacing 2, hover:spacing 4]",
-                "spacing",
-                "gap"
-            ),
-            "@row [gap 10, letter-spacing 2, hover:gap 4]"
-        );
-    }
 
     #[test]
     fn json_escape_handles_control_characters() {

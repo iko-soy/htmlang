@@ -2,10 +2,10 @@
 
 @let show false
 
-@unless $show
+@if not $show
   @text This shows because show is false
 
 @let visible true
 
-@unless $visible
+@if not $visible
   @text This should not appear

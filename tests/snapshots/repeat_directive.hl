@@ -1,2 +1,2 @@
-@repeat 3
+@each $_ in 1..3
   @text [bold] Item $_index

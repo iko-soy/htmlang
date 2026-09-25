@@ -68,6 +68,9 @@ struct FnDef {
 }
 
 struct ParseContext {
+    /// Source line currently being parsed, for diagnostics raised deep
+    /// inside helpers that don't take a line number.
+    current_line: usize,
     page_title: Option<String>,
     lang: Option<String>,
     favicon: Option<String>,
@@ -111,10 +114,6 @@ struct ParseContext {
     font_faces: Vec<(String, String)>,
     /// @json-ld blocks
     json_ld_blocks: Vec<String>,
-    /// @scope CSS blocks
-    scope_blocks: Vec<String>,
-    /// @starting-style CSS blocks
-    starting_style_blocks: Vec<String>,
     /// @manifest configuration
     manifest: Option<crate::ast::ManifestConfig>,
     /// Track @import paths for circular dependency detection
@@ -138,6 +137,7 @@ pub fn parse_with_base(input: &str, base_path: Option<&Path>) -> ParseResult {
     let lines = preprocess(input);
     let mut parser = Parser { lines, pos: 0 };
     let mut ctx = ParseContext {
+        current_line: 0,
         page_title: None,
         lang: None,
         favicon: None,
@@ -169,8 +169,6 @@ pub fn parse_with_base(input: &str, base_path: Option<&Path>) -> ParseResult {
         base_url: None,
         font_faces: Vec::new(),
         json_ld_blocks: Vec::new(),
-        scope_blocks: Vec::new(),
-        starting_style_blocks: Vec::new(),
         manifest: None,
         import_stack: Vec::new(),
         translations: HashMap::new(),
@@ -198,8 +196,6 @@ pub fn parse_with_base(input: &str, base_path: Option<&Path>) -> ParseResult {
             base_url: ctx.base_url,
             font_faces: ctx.font_faces,
             json_ld_blocks: ctx.json_ld_blocks,
-            scope_blocks: ctx.scope_blocks,
-            starting_style_blocks: ctx.starting_style_blocks,
             manifest: ctx.manifest,
             preload_hints: collect_image_preload_hints(&nodes),
             nodes,
@@ -467,6 +463,7 @@ impl Parser {
 
     fn parse_line(&mut self, ctx: &mut ParseContext) -> Result<Option<Vec<Node>>, ParseError> {
         let line_num = self.lines[self.pos].line_num;
+        ctx.current_line = line_num;
         let current_indent = self.lines[self.pos].indent;
 
         // Handle raw content
@@ -489,6 +486,18 @@ impl Parser {
         self.pos += 1;
 
         // --- Directives ---
+
+        // Removed syntax gets a pointer to its replacement — unless the
+        // name is a user function (e.g. `@let divider`).
+        if content.starts_with('@')
+            && !ctx.functions.contains_key(extract_element_name(&content))
+            && let Some(hint) = removed_syntax_hint(&content)
+        {
+            return Err(ParseError {
+                line: line_num,
+                message: hint,
+            });
+        }
 
         if let Some(rest) = content.strip_prefix("@page ") {
             ctx.page_title = Some(substitute_vars(rest, &ctx.variables));
@@ -721,61 +730,6 @@ impl Parser {
             return Ok(None);
         }
 
-        // --- @scope block (CSS scoping) ---
-        if content.trim() == "@scope" || content.starts_with("@scope ") {
-            let scope_selector = content
-                .strip_prefix("@scope")
-                .unwrap_or("")
-                .trim()
-                .to_string();
-            let mut scope_content = String::new();
-            while self.pos < self.lines.len() && self.lines[self.pos].indent > current_indent {
-                match &self.lines[self.pos].content {
-                    LineContent::Normal(s) => {
-                        scope_content.push_str(s.trim());
-                        scope_content.push('\n');
-                    }
-                    LineContent::Raw(s) => {
-                        scope_content.push_str(s);
-                        scope_content.push('\n');
-                    }
-                }
-                self.pos += 1;
-            }
-            let trimmed = scope_content.trim().to_string();
-            if !trimmed.is_empty() {
-                let block = if scope_selector.is_empty() {
-                    format!("@scope {{\n{}\n}}", trimmed)
-                } else {
-                    format!("@scope ({}) {{\n{}\n}}", scope_selector, trimmed)
-                };
-                ctx.scope_blocks.push(block);
-            }
-            return Ok(None);
-        }
-
-        // --- @starting-style block (entry animations) ---
-        if content.trim() == "@starting-style" {
-            let mut ss_content = String::new();
-            while self.pos < self.lines.len() && self.lines[self.pos].indent > current_indent {
-                match &self.lines[self.pos].content {
-                    LineContent::Normal(s) => {
-                        ss_content.push_str(s.trim());
-                        ss_content.push('\n');
-                    }
-                    LineContent::Raw(s) => {
-                        ss_content.push_str(s);
-                        ss_content.push('\n');
-                    }
-                }
-                self.pos += 1;
-            }
-            let trimmed = ss_content.trim().to_string();
-            if !trimmed.is_empty() {
-                ctx.starting_style_blocks.push(trimmed);
-            }
-            return Ok(None);
-        }
 
         // --- @markdown block or file (convert markdown to HTML) ---
         if content.trim() == "@markdown" || content.trim().starts_with("@markdown ") {
@@ -882,35 +836,6 @@ impl Parser {
             return Ok(None);
         }
 
-        // --- @with $var as alias (temporary variable rebinding) ---
-        if let Some(rest) = content.strip_prefix("@with ") {
-            let rest = rest.trim();
-            // Parse: @with $source as alias
-            if let Some((source_part, alias)) = rest.split_once(" as ") {
-                let source_name = source_part
-                    .trim()
-                    .strip_prefix('$')
-                    .unwrap_or(source_part.trim());
-                let alias = alias.trim();
-                ctx.used_variables.insert(source_name.to_string());
-                let value = ctx.variables.get(source_name).cloned().unwrap_or_default();
-                let old_value = ctx.variables.get(alias).cloned();
-                ctx.variables.insert(alias.to_string(), value);
-                // Parse body
-                let children = self.parse_children(current_indent + 1, ctx);
-                // Restore previous value
-                if let Some(old) = old_value {
-                    ctx.variables.insert(alias.to_string(), old);
-                } else {
-                    ctx.variables.remove(alias);
-                }
-                return Ok(Some(children));
-            }
-            return Err(ParseError {
-                line: line_num,
-                message: "@with requires: @with $var as alias".to_string(),
-            });
-        }
 
         // --- @assert directive (compile-time assertions) ---
 
@@ -1413,45 +1338,6 @@ impl Parser {
             }
         }
 
-        // --- @css-property (CSS @property rule for typed custom properties) ---
-
-        if let Some(rest) = content.strip_prefix("@css-property ") {
-            let rest = rest.trim();
-            // @css-property --name
-            //   syntax "<color>"
-            //   inherits true
-            //   initial-value #000
-            let prop_name = substitute_vars(rest, &ctx.variables);
-            let mut syntax = String::from("\"*\"");
-            let mut inherits = String::from("false");
-            let mut initial_value = String::new();
-
-            while self.pos < self.lines.len() && self.lines[self.pos].indent > current_indent {
-                if let LineContent::Normal(ref s) = self.lines[self.pos].content {
-                    let trimmed = s.trim();
-                    if let Some((key, value)) = trimmed.split_once(' ') {
-                        let value = substitute_vars(value.trim(), &ctx.variables);
-                        match key.trim() {
-                            "syntax" => syntax = value,
-                            "inherits" => inherits = value,
-                            "initial-value" | "initial_value" => initial_value = value,
-                            _ => {}
-                        }
-                    }
-                }
-                self.pos += 1;
-            }
-
-            let mut rule = format!("@property {} {{", prop_name);
-            rule.push_str(&format!("syntax:{};", syntax));
-            rule.push_str(&format!("inherits:{};", inherits));
-            if !initial_value.is_empty() {
-                rule.push_str(&format!("initial-value:{};", initial_value));
-            }
-            rule.push('}');
-            ctx.custom_css.push(rule);
-            return Ok(None);
-        }
 
         // --- @data (load JSON file into variables) ---
 
@@ -1540,111 +1426,6 @@ impl Parser {
             return Ok(None);
         }
 
-        // --- @use (selective import) ---
-
-        if let Some(rest) = content.strip_prefix("@use ") {
-            let rest = rest.trim();
-            // @use "./file.hl" fn1, fn2, define1
-            let (filename, names_str) = if let Some(after_quote) = rest.strip_prefix('"') {
-                if let Some(end_quote) = after_quote.find('"') {
-                    let filename = &after_quote[..end_quote];
-                    let names = after_quote[end_quote + 1..].trim();
-                    (filename.to_string(), names.to_string())
-                } else {
-                    return Err(ParseError {
-                        line: line_num,
-                        message: "@use requires: @use \"file.hl\" name1, name2".to_string(),
-                    });
-                }
-            } else if let Some((filename, names)) = rest.split_once(' ') {
-                (filename.to_string(), names.to_string())
-            } else {
-                return Err(ParseError {
-                    line: line_num,
-                    message: "@use requires: @use file.hl name1, name2".to_string(),
-                });
-            };
-
-            let wanted: HashSet<String> = names_str
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
-
-            let filename = substitute_vars(&filename, &ctx.variables);
-            let resolved = match &ctx.base_path {
-                Some(base) => base.join(&filename),
-                None => PathBuf::from(&filename),
-            };
-
-            if ctx.include_stack.contains(&resolved) {
-                ctx.diagnostics.push(Diagnostic {
-                    line: line_num,
-                    column: None,
-                    message: format!("circular use '{}'", filename),
-                    severity: Severity::Error,
-                    source_line: Some(content.clone()),
-                });
-                return Ok(None);
-            }
-
-            let use_text = if let Some(cached) = ctx.file_cache.get(&resolved) {
-                cached.clone()
-            } else {
-                match std::fs::read_to_string(&resolved) {
-                    Ok(text) => {
-                        ctx.file_cache.insert(resolved.clone(), text.clone());
-                        text
-                    }
-                    Err(e) => {
-                        ctx.diagnostics.push(Diagnostic {
-                            line: line_num,
-                            column: None,
-                            message: format!("cannot use '{}': {}", filename, e),
-                            severity: Severity::Error,
-                            source_line: Some(content.clone()),
-                        });
-                        return Ok(None);
-                    }
-                }
-            };
-
-            ctx.included_files.push(resolved.clone());
-            ctx.include_stack.push(resolved.clone());
-            let saved_base = ctx.base_path.clone();
-            ctx.base_path = resolved.parent().map(|p| p.to_path_buf());
-
-            // Parse the file fully, then filter to only keep wanted definitions
-            let saved_fns = ctx.functions.clone();
-            let saved_defines = ctx.defines.clone();
-
-            let use_lines = preprocess(&use_text);
-            let mut use_parser = Parser {
-                lines: use_lines,
-                pos: 0,
-            };
-            let _discarded = use_parser.parse_children(0, ctx);
-
-            // Keep only the wanted functions/defines, restore everything else
-            let mut new_fns = HashMap::new();
-            let mut new_defines = HashMap::new();
-            for name in &wanted {
-                if let Some(f) = ctx.functions.get(name) {
-                    new_fns.insert(name.clone(), f.clone());
-                }
-                if let Some(d) = ctx.defines.get(name) {
-                    new_defines.insert(name.clone(), d.clone());
-                }
-            }
-            ctx.functions = saved_fns;
-            ctx.defines = saved_defines;
-            ctx.functions.extend(new_fns);
-            ctx.defines.extend(new_defines);
-
-            ctx.base_path = saved_base;
-            ctx.include_stack.pop();
-            return Ok(None);
-        }
 
         // --- @collection (load multiple JSON files matching a glob pattern) ---
 
@@ -1826,37 +1607,6 @@ impl Parser {
             return Ok(Some(nodes));
         }
 
-        if let Some(rest) = content.strip_prefix("@unless ") {
-            let rest = rest.trim();
-            track_var_refs(rest, &mut ctx.used_variables);
-            let condition = substitute_vars(rest, &ctx.variables);
-            let result = !evaluate_condition(&condition);
-            let mut body_lines = Vec::new();
-            while self.pos < self.lines.len() && self.lines[self.pos].indent > current_indent {
-                body_lines.push(self.lines[self.pos].clone());
-                self.pos += 1;
-            }
-            if !result || body_lines.is_empty() {
-                return Ok(None);
-            }
-            let min_indent = body_lines.iter().map(|l| l.indent).min().unwrap_or(0);
-            let adjusted: Vec<Line> = body_lines
-                .iter()
-                .map(|l| Line {
-                    indent: l.indent - min_indent,
-                    content: l.content.clone(),
-                    line_num: l.line_num,
-                })
-                .collect();
-            let saved_vars = ctx.variables.clone();
-            let mut body_parser = Parser {
-                lines: adjusted,
-                pos: 0,
-            };
-            let nodes = body_parser.parse_children(0, ctx);
-            ctx.variables = saved_vars;
-            return Ok(Some(nodes));
-        }
 
         if content.trim() == "@else" || content.trim().starts_with("@else if ") {
             return Err(ParseError {
@@ -2071,131 +1821,6 @@ impl Parser {
             return Ok(Some(all_nodes));
         }
 
-        // --- @for numeric loop ---
-
-        if let Some(rest) = content.strip_prefix("@for ") {
-            let rest = rest.trim();
-            // @for $var in start..end  OR  @for $var in start..end step N
-            let (var_name, range_str) = if let Some((before_in, after_in)) = rest.split_once(" in ")
-            {
-                let var = before_in
-                    .trim()
-                    .strip_prefix('$')
-                    .unwrap_or(before_in.trim());
-                (var.to_string(), after_in.trim().to_string())
-            } else {
-                return Err(ParseError {
-                    line: line_num,
-                    message: "@for requires: @for $var in start..end".to_string(),
-                });
-            };
-            track_var_refs(&range_str, &mut ctx.used_variables);
-            let range_str = substitute_vars(&range_str, &ctx.variables);
-
-            let items: Vec<String> = if let Some((start_s, rest_range)) = range_str.split_once("..")
-            {
-                let (end_s, step) = if let Some((e, s)) = rest_range.split_once(" step ") {
-                    (e.trim(), s.trim().parse::<i64>().unwrap_or(1).max(1))
-                } else {
-                    (rest_range.trim(), 1i64)
-                };
-                if let (Ok(start), Ok(end)) = (start_s.trim().parse::<i64>(), end_s.parse::<i64>())
-                {
-                    numeric_range(start, end, step)
-                } else {
-                    return Err(ParseError {
-                        line: line_num,
-                        message: "@for range requires numeric bounds: @for $i in 1..10".to_string(),
-                    });
-                }
-            } else {
-                return Err(ParseError {
-                    line: line_num,
-                    message: "@for requires range syntax: @for $i in 1..10".to_string(),
-                });
-            };
-
-            // Collect body lines
-            let mut body_lines = Vec::new();
-            while self.pos < self.lines.len() && self.lines[self.pos].indent > current_indent {
-                body_lines.push(self.lines[self.pos].clone());
-                self.pos += 1;
-            }
-
-            if body_lines.is_empty() || items.is_empty() {
-                return Ok(None);
-            }
-
-            let min_indent = body_lines.iter().map(|l| l.indent).min().unwrap_or(0);
-            let adjusted: Vec<Line> = body_lines
-                .iter()
-                .map(|l| Line {
-                    indent: l.indent - min_indent,
-                    content: l.content.clone(),
-                    line_num: l.line_num,
-                })
-                .collect();
-
-            let saved_vars = ctx.variables.clone();
-            let mut all_nodes = Vec::new();
-            for item in &items {
-                ctx.variables.insert(var_name.clone(), item.clone());
-                let mut body_parser = Parser {
-                    lines: adjusted.clone(),
-                    pos: 0,
-                };
-                let nodes = body_parser.parse_children(0, ctx);
-                all_nodes.extend(nodes);
-            }
-            ctx.variables = saved_vars;
-            return Ok(Some(all_nodes));
-        }
-
-        // --- @repeat N (simple repetition) ---
-
-        if let Some(rest) = content.strip_prefix("@repeat ") {
-            let rest = rest.trim();
-            let count_str = substitute_vars(rest, &ctx.variables);
-            track_var_refs(rest, &mut ctx.used_variables);
-            let count: usize = count_str.parse().unwrap_or(0);
-
-            // Collect body lines
-            let mut body_lines = Vec::new();
-            while self.pos < self.lines.len() && self.lines[self.pos].indent > current_indent {
-                body_lines.push(self.lines[self.pos].clone());
-                self.pos += 1;
-            }
-
-            if body_lines.is_empty() || count == 0 {
-                return Ok(None);
-            }
-
-            let min_indent = body_lines.iter().map(|l| l.indent).min().unwrap_or(0);
-            let adjusted: Vec<Line> = body_lines
-                .iter()
-                .map(|l| Line {
-                    indent: l.indent - min_indent,
-                    content: l.content.clone(),
-                    line_num: l.line_num,
-                })
-                .collect();
-
-            let mut all_nodes = Vec::new();
-            let saved_vars = ctx.variables.clone();
-            for i in 0..count {
-                ctx.variables.insert("_index".to_string(), i.to_string());
-                ctx.variables
-                    .insert("_count".to_string(), count.to_string());
-                let mut iter_parser = Parser {
-                    lines: adjusted.clone(),
-                    pos: 0,
-                };
-                let nodes = iter_parser.parse_children(0, ctx);
-                all_nodes.extend(nodes);
-            }
-            ctx.variables = saved_vars;
-            return Ok(Some(all_nodes));
-        }
 
         // --- @defer (lazy-load below-fold content via IntersectionObserver) ---
 
@@ -2356,121 +1981,6 @@ impl Parser {
             return Ok(Some(nodes));
         }
 
-        // --- @switch (variant-based attribute switching) ---
-        // @switch $variant
-        //   @case primary [background #3b82f6, color white]
-        //   @case danger [background #ef4444, color white]
-        //   @default [background #gray, color black]
-        // Registers matching @define and emits the matching case's children
-
-        if let Some(rest) = content.strip_prefix("@switch ") {
-            let switch_val = substitute_vars(rest.trim(), &ctx.variables);
-            track_var_refs(rest.trim(), &mut ctx.used_variables);
-
-            let mut switch_lines = Vec::new();
-            while self.pos < self.lines.len() && self.lines[self.pos].indent > current_indent {
-                switch_lines.push(self.lines[self.pos].clone());
-                self.pos += 1;
-            }
-
-            if switch_lines.is_empty() {
-                return Ok(None);
-            }
-
-            let case_indent = switch_lines[0].indent;
-            let mut si = 0;
-            let mut matched_attrs: Option<Vec<Attribute>> = None;
-            let mut matched_body: Vec<Line> = Vec::new();
-
-            while si < switch_lines.len() {
-                if switch_lines[si].indent == case_indent {
-                    if let LineContent::Normal(ref s) = switch_lines[si].content {
-                        let trimmed = s.trim();
-                        if let Some(case_rest) = trimmed.strip_prefix("@case ") {
-                            let case_rest = case_rest.trim();
-                            // Extract case value and optional [attrs]
-                            let (case_val, case_attrs_str) =
-                                if let Some(bracket_pos) = case_rest.find('[') {
-                                    (
-                                        substitute_vars(
-                                            case_rest[..bracket_pos].trim(),
-                                            &ctx.variables,
-                                        ),
-                                        Some(&case_rest[bracket_pos..]),
-                                    )
-                                } else {
-                                    (substitute_vars(case_rest, &ctx.variables), None)
-                                };
-                            si += 1;
-                            // Collect body lines
-                            let mut body = Vec::new();
-                            while si < switch_lines.len() && switch_lines[si].indent > case_indent {
-                                body.push(switch_lines[si].clone());
-                                si += 1;
-                            }
-                            if matched_attrs.is_none() && case_val == switch_val {
-                                if let Some(attrs_str) = case_attrs_str {
-                                    let (attrs, _) = parse_attr_brackets(attrs_str, line_num, ctx)?;
-                                    matched_attrs = Some(attrs);
-                                }
-                                matched_body = body;
-                            }
-                        } else if trimmed == "@default" || trimmed.starts_with("@default ") {
-                            let default_rest =
-                                trimmed.strip_prefix("@default").unwrap_or("").trim();
-                            si += 1;
-                            let mut body = Vec::new();
-                            while si < switch_lines.len() && switch_lines[si].indent > case_indent {
-                                body.push(switch_lines[si].clone());
-                                si += 1;
-                            }
-                            if matched_attrs.is_none() {
-                                if !default_rest.is_empty() && default_rest.starts_with('[') {
-                                    let (attrs, _) =
-                                        parse_attr_brackets(default_rest, line_num, ctx)?;
-                                    matched_attrs = Some(attrs);
-                                }
-                                matched_body = body;
-                            }
-                        } else {
-                            si += 1;
-                        }
-                    } else {
-                        si += 1;
-                    }
-                } else {
-                    si += 1;
-                }
-            }
-
-            // Store matched attrs as a temporary define for use with $__switch
-            if let Some(attrs) = matched_attrs {
-                ctx.defines.insert("__switch".to_string(), attrs);
-            }
-
-            // Parse matched body if any
-            if !matched_body.is_empty() {
-                let min_indent = matched_body.iter().map(|l| l.indent).min().unwrap_or(0);
-                let adjusted: Vec<Line> = matched_body
-                    .iter()
-                    .map(|l| Line {
-                        indent: l.indent - min_indent,
-                        content: l.content.clone(),
-                        line_num: l.line_num,
-                    })
-                    .collect();
-                let saved_vars = ctx.variables.clone();
-                let mut body_parser = Parser {
-                    lines: adjusted,
-                    pos: 0,
-                };
-                let nodes = body_parser.parse_children(0, ctx);
-                ctx.variables = saved_vars;
-                return Ok(Some(nodes));
-            }
-
-            return Ok(None);
-        }
 
         // --- @warn / @debug ---
 
@@ -2759,8 +2269,11 @@ impl Parser {
                 }
             };
 
-            // Collect slot blocks defined in the extending file
+            // Collect slot blocks defined in the extending file. Everything
+            // else becomes the default content, filling the layout's
+            // @children.
             let mut slot_contents: HashMap<String, Vec<Line>> = HashMap::new();
+            let mut default_lines: Vec<Line> = Vec::new();
             while self.pos < self.lines.len() {
                 let line_indent = self.lines[self.pos].indent;
                 if line_indent < current_indent {
@@ -2782,8 +2295,27 @@ impl Parser {
                         continue;
                     }
                 }
+                default_lines.push(self.lines[self.pos].clone());
                 self.pos += 1;
             }
+            let default_nodes = if default_lines.is_empty() {
+                Vec::new()
+            } else {
+                let min_indent = default_lines.iter().map(|l| l.indent).min().unwrap_or(0);
+                let adjusted: Vec<Line> = default_lines
+                    .iter()
+                    .map(|l| Line {
+                        indent: l.indent - min_indent,
+                        content: l.content.clone(),
+                        line_num: l.line_num,
+                    })
+                    .collect();
+                let mut default_parser = Parser {
+                    lines: adjusted,
+                    pos: 0,
+                };
+                default_parser.parse_children(0, ctx)
+            };
 
             // Parse slot contents into nodes
             let mut slot_nodes: HashMap<String, Vec<Node>> = HashMap::new();
@@ -2824,77 +2356,11 @@ impl Parser {
             ctx.base_path = saved_base;
             ctx.include_stack.pop();
 
-            // Replace @slot placeholders in layout with provided content
-            let result_nodes = replace_extends_slots(layout_nodes, &slot_nodes);
+            // Fill @slot placeholders and @children in the layout
+            let result_nodes = replace_children_and_slots(layout_nodes, &default_nodes, &slot_nodes);
             return Ok(Some(result_nodes));
         }
 
-        // --- @layout (lightweight layout wrapper using @children) ---
-
-        if let Some(rest) = content.strip_prefix("@layout ") {
-            let filename = substitute_vars(rest.trim(), &ctx.variables);
-            let resolved = match &ctx.base_path {
-                Some(base) => base.join(&filename),
-                None => PathBuf::from(&filename),
-            };
-
-            if ctx.include_stack.contains(&resolved) {
-                ctx.diagnostics.push(Diagnostic {
-                    line: line_num,
-                    column: None,
-                    message: format!("circular layout '{}'", filename),
-                    severity: Severity::Error,
-                    source_line: Some(content.clone()),
-                });
-                return Ok(None);
-            }
-
-            let layout_text = if let Some(cached) = ctx.file_cache.get(&resolved) {
-                cached.clone()
-            } else {
-                match std::fs::read_to_string(&resolved) {
-                    Ok(text) => {
-                        ctx.file_cache.insert(resolved.clone(), text.clone());
-                        text
-                    }
-                    Err(e) => {
-                        ctx.diagnostics.push(Diagnostic {
-                            line: line_num,
-                            column: None,
-                            message: format!("cannot load layout '{}': {}", filename, e),
-                            severity: Severity::Error,
-                            source_line: Some(content.clone()),
-                        });
-                        return Ok(None);
-                    }
-                }
-            };
-
-            // Parse the body content (children of @layout)
-            let caller_children = self.parse_children(current_indent + 1, ctx);
-
-            // Parse the layout file
-            ctx.included_files.push(resolved.clone());
-            ctx.include_stack.push(resolved.clone());
-            let saved_base = ctx.base_path.clone();
-            ctx.base_path = resolved.parent().map(|p| p.to_path_buf());
-
-            let layout_lines = preprocess(&layout_text);
-            let mut layout_parser = Parser {
-                lines: layout_lines,
-                pos: 0,
-            };
-            let layout_nodes = layout_parser.parse_children(0, ctx);
-
-            ctx.base_path = saved_base;
-            ctx.include_stack.pop();
-
-            // Replace @children in layout with the caller's body content
-            let empty_slots: HashMap<String, Vec<Node>> = HashMap::new();
-            let result_nodes =
-                replace_children_and_slots(layout_nodes, &caller_children, &empty_slots);
-            return Ok(Some(result_nodes));
-        }
 
         // --- @component definition (scoped @fn) ---
 
@@ -3319,6 +2785,16 @@ fn parse_single_element(
         kind
     };
 
+    // Every other element treats its argument as leading text content, as
+    // in `@el [padding 8] Hello` or `@paragraph Read {@link /more more}`.
+    let argument = match argument {
+        Some(_) if !argument_is_special(&kind) && !renders_argument_as_text(&kind) => {
+            children.insert(0, Node::Text(parse_text_segments(&rest, ctx)));
+            None
+        }
+        other => other,
+    };
+
     Ok(Element {
         kind,
         attrs,
@@ -3328,16 +2804,30 @@ fn parse_single_element(
     })
 }
 
+/// Elements whose argument is not text content: a URL, a source, an action,
+/// or a slot name.
+fn argument_is_special(kind: &ElementKind) -> bool {
+    matches!(
+        kind,
+        ElementKind::Link
+            | ElementKind::Image
+            | ElementKind::Video
+            | ElementKind::Audio
+            | ElementKind::Source
+            | ElementKind::Form
+            | ElementKind::Iframe
+            | ElementKind::Script
+            | ElementKind::Slot(_)
+    )
+}
+
 const KNOWN_ELEMENTS: &[&str] = &[
     "row",
     "column",
-    "col",
     "el",
     "text",
     "paragraph",
-    "p",
     "image",
-    "img",
     "link",
     "children",
     "input",
@@ -3356,7 +2846,6 @@ const KNOWN_ELEMENTS: &[&str] = &[
     "aside",
     "list",
     "item",
-    "li",
     "table",
     "thead",
     "tbody",
@@ -3373,14 +2862,11 @@ const KNOWN_ELEMENTS: &[&str] = &[
     "code",
     "pre",
     "hr",
-    "divider",
     "figure",
     "figcaption",
     "progress",
     "meter",
     "fragment",
-    "btn",
-    "ul",
     "dialog",
     "dl",
     "dt",
@@ -3439,12 +2925,10 @@ const KNOWN_DIRECTIVES: &[&str] = &[
     "default",
     "warn",
     "debug",
-    "unless",
     "og",
     "breakpoint",
     "lang",
     "favicon",
-    "use",
     "theme",
     "deprecated",
     "extends",
@@ -3453,36 +2937,29 @@ const KNOWN_DIRECTIVES: &[&str] = &[
     "font-face",
     "json-ld",
     "assert",
-    "for",
     "component",
-    "switch",
     "log",
     "markdown",
-    "repeat",
-    "with",
-    "layout",
     "collection",
     "manifest",
-    "scope",
-    "starting-style",
     "translations",
 ];
 
 fn parse_element_kind(s: &str, line_num: usize) -> Result<ElementKind, ParseError> {
     match s {
         "row" => Ok(ElementKind::Row),
-        "column" | "col" => Ok(ElementKind::Column),
+        "column" => Ok(ElementKind::Column),
         "el" => Ok(ElementKind::El),
         "text" => Ok(ElementKind::Text),
-        "paragraph" | "p" => Ok(ElementKind::Paragraph),
-        "image" | "img" => Ok(ElementKind::Image),
+        "paragraph" => Ok(ElementKind::Paragraph),
+        "image" => Ok(ElementKind::Image),
         "link" => Ok(ElementKind::Link),
         "children" => Ok(ElementKind::Children),
         "input" => Ok(ElementKind::Input),
-        "button" | "btn" => Ok(ElementKind::Button),
+        "button" => Ok(ElementKind::Button),
         "select" => Ok(ElementKind::Select),
         "textarea" => Ok(ElementKind::Textarea),
-        "option" | "opt" => Ok(ElementKind::Option),
+        "option" => Ok(ElementKind::Option),
         "label" => Ok(ElementKind::Label),
         "slot" => Ok(ElementKind::Slot(String::new())), // slot name filled in by parse_single_element
         "nav" => Ok(ElementKind::Nav),
@@ -3493,7 +2970,7 @@ fn parse_element_kind(s: &str, line_num: usize) -> Result<ElementKind, ParseErro
         "article" => Ok(ElementKind::Article),
         "aside" => Ok(ElementKind::Aside),
         "list" => Ok(ElementKind::List),
-        "item" | "li" => Ok(ElementKind::ListItem),
+        "item" => Ok(ElementKind::ListItem),
         "table" => Ok(ElementKind::Table),
         "thead" => Ok(ElementKind::TableHead),
         "tbody" => Ok(ElementKind::TableBody),
@@ -3509,7 +2986,7 @@ fn parse_element_kind(s: &str, line_num: usize) -> Result<ElementKind, ParseErro
         "cite" => Ok(ElementKind::Cite),
         "code" => Ok(ElementKind::Code),
         "pre" => Ok(ElementKind::Pre),
-        "hr" | "divider" => Ok(ElementKind::HorizontalRule),
+        "hr" => Ok(ElementKind::HorizontalRule),
         "figure" => Ok(ElementKind::Figure),
         "figcaption" => Ok(ElementKind::FigCaption),
         "progress" => Ok(ElementKind::Progress),
@@ -3537,7 +3014,6 @@ fn parse_element_kind(s: &str, line_num: usize) -> Result<ElementKind, ParseErro
         "iframe" => Ok(ElementKind::Iframe),
         "output" => Ok(ElementKind::Output),
         "canvas" => Ok(ElementKind::Canvas),
-        "ul" => Ok(ElementKind::List),
         "grid" => Ok(ElementKind::Grid),
         "stack" => Ok(ElementKind::Stack),
         "spacer" => Ok(ElementKind::Spacer),
@@ -3555,6 +3031,12 @@ fn parse_element_kind(s: &str, line_num: usize) -> Result<ElementKind, ParseErro
         "in-front" => Ok(ElementKind::InFront),
         "behind" => Ok(ElementKind::Behind),
         _ => {
+            if let Some(hint) = removed_syntax_hint(&format!("@{}", s)) {
+                return Err(ParseError {
+                    line: line_num,
+                    message: hint,
+                });
+            }
             let all_known: Vec<&str> = KNOWN_ELEMENTS
                 .iter()
                 .chain(KNOWN_DIRECTIVES.iter())
@@ -3571,6 +3053,56 @@ fn parse_element_kind(s: &str, line_num: usize) -> Result<ElementKind, ParseErro
             })
         }
     }
+}
+
+/// Directives and element names removed when the language was simplified,
+/// with what replaces each. `htmlang upgrade` rewrites all of them.
+const REMOVED_SYNTAX: &[(&str, &str)] = &[
+    ("@fn", "use `@let name $param` with an indented body"),
+    ("@define", "use `@let name [attributes]`"),
+    ("@mixin", "use `@let name [attributes]`"),
+    ("@unless", "use `@if not <condition>`"),
+    ("@for", "use `@each $i in 1..10`"),
+    ("@repeat", "use `@each $_ in 1..N`"),
+    (
+        "@switch",
+        "use `@match`, with `@let __switch [...]` inside a case for its attributes",
+    ),
+    ("@use", "use `@import`"),
+    ("@with", "use `@let alias $source`"),
+    (
+        "@layout",
+        "use `@extends` (page content outside `@slot` blocks fills `@children`)",
+    ),
+    ("@scope", "write the `@scope` rule in an `@style` block"),
+    (
+        "@starting-style",
+        "write the `@starting-style` rule in an `@style` block",
+    ),
+    ("@css-property", "write an `@property` rule in an `@style` block"),
+    ("@col", "use `@column`"),
+    ("@p", "use `@paragraph`"),
+    ("@img", "use `@image`"),
+    ("@li", "use `@item`"),
+    ("@btn", "use `@button`"),
+    ("@ul", "use `@list`"),
+    ("@divider", "use `@hr`"),
+    ("@opt", "use `@option`"),
+];
+
+/// If `content` starts with removed syntax, the error message for it.
+fn removed_syntax_hint(content: &str) -> Option<String> {
+    let trimmed = content.trim_start();
+    REMOVED_SYNTAX.iter().find_map(|(name, replacement)| {
+        let rest = trimmed.strip_prefix(name)?;
+        if !(rest.is_empty() || rest.starts_with([' ', '['])) {
+            return None;
+        }
+        Some(format!(
+            "`{}` was removed: {} (run `htmlang upgrade` to rewrite it automatically)",
+            name, replacement
+        ))
+    })
 }
 
 /// Format include/import stack as a readable chain for error messages.
@@ -4054,7 +3586,6 @@ const KNOWN_ATTRS: &[&str] = &[
     // View transitions
     "view-transition-name",
     // Animate shorthand
-    "animate",
     // Critical CSS hint
     "critical",
     // CSS subgrid
@@ -4071,7 +3602,6 @@ const KNOWN_ATTRS: &[&str] = &[
     "anchor-name",
     "position-anchor",
     "position-area",
-    "inset-area",
     // Drop caps
     "initial-letter",
     // Responsive images
@@ -4516,15 +4046,6 @@ fn parse_attr_list(
             continue;
         }
 
-        // ...$name spread — expand define/attribute bundle
-        if let Some(name) = part.strip_prefix("...$")
-            && let Some(define_attrs) = ctx.defines.get(name)
-        {
-            ctx.used_defines.insert(name.to_string());
-            attrs.extend(define_attrs.clone());
-            continue;
-        }
-
         // $define reference — expand attribute bundle
         if let Some(name) = part.strip_prefix('$')
             && let Some(define_attrs) = ctx.defines.get(name)
@@ -4764,12 +4285,24 @@ fn parse_text_segments(input: &str, ctx: &mut ParseContext) -> Vec<TextSegment> 
             let inner: String = chars[start..i].iter().collect();
             i += 1; // skip }
 
-            if let Ok(elem) = parse_single_element(&inner, 0, ctx) {
-                segments.push(TextSegment::Inline(elem));
-            } else {
-                current_text.push('{');
-                current_text.push_str(&inner);
-                current_text.push('}');
+            match parse_single_element(&inner, ctx.current_line, ctx) {
+                Ok(elem) => segments.push(TextSegment::Inline(elem)),
+                Err(e) => {
+                    // Keep the braces as literal text, but flag what looks
+                    // like a mistyped inline element.
+                    if inner.trim_start().starts_with('@') {
+                        ctx.diagnostics.push(Diagnostic {
+                            line: ctx.current_line,
+                            column: None,
+                            message: e.message,
+                            severity: Severity::Warning,
+                            source_line: Some(input.to_string()),
+                        });
+                    }
+                    current_text.push('{');
+                    current_text.push_str(&inner);
+                    current_text.push('}');
+                }
             }
         } else {
             current_text.push(chars[i]);
@@ -4821,8 +4354,9 @@ fn numeric_range(start: i64, end: i64, step: i64) -> Vec<String> {
 }
 
 fn evaluate_condition(condition: &str) -> bool {
-    // Ternary expression support: condition ? true_val : false_val
-    // (just check the condition part, the ternary is handled in substitute_ternary)
+    if let Some(rest) = condition.trim_start().strip_prefix("not ") {
+        return !evaluate_condition(rest);
+    }
 
     if let Some((left, right)) = condition.split_once("!=") {
         left.trim() != right.trim()
@@ -5685,32 +5219,6 @@ fn parse_keyframe_line(line: &str) -> Option<String> {
     Some(format!("{}{{{}}}", selector, css))
 }
 
-/// Replace @slot placeholders in the base layout with content from @extends
-fn replace_extends_slots(nodes: Vec<Node>, slot_nodes: &HashMap<String, Vec<Node>>) -> Vec<Node> {
-    let mut result = Vec::new();
-    for node in nodes {
-        match node {
-            Node::Element(elem) if matches!(&elem.kind, ElementKind::Slot(name) if !name.is_empty()) =>
-            {
-                if let ElementKind::Slot(ref name) = elem.kind {
-                    if let Some(content) = slot_nodes.get(name) {
-                        result.extend(content.iter().cloned());
-                    } else if !elem.children.is_empty() {
-                        // Use slot's own children as default
-                        result.extend(elem.children);
-                    }
-                }
-            }
-            Node::Element(mut elem) => {
-                elem.children = replace_extends_slots(elem.children, slot_nodes);
-                result.push(Node::Element(elem));
-            }
-            other => result.push(other),
-        }
-    }
-    result
-}
-
 fn apply_filter(value: &str, filter: &str) -> String {
     if let Some(arg) = filter.strip_prefix("truncate:") {
         if let Ok(n) = arg.parse::<usize>()
@@ -5776,9 +5284,9 @@ fn apply_filter(value: &str, filter: &str) -> String {
         return value.to_string();
     }
     match filter {
-        "uppercase" | "upper" => value.to_uppercase(),
-        "lowercase" | "lower" => value.to_lowercase(),
-        "capitalize" | "cap" => {
+        "uppercase" => value.to_uppercase(),
+        "lowercase" => value.to_lowercase(),
+        "capitalize" => {
             let mut chars = value.chars();
             match chars.next() {
                 Some(c) => format!("{}{}", c.to_uppercase(), chars.as_str()),
@@ -5786,7 +5294,7 @@ fn apply_filter(value: &str, filter: &str) -> String {
             }
         }
         "trim" => value.trim().to_string(),
-        "length" | "len" => value.chars().count().to_string(),
+        "length" => value.chars().count().to_string(),
         "reverse" => value.chars().rev().collect(),
         _ => value.to_string(),
     }

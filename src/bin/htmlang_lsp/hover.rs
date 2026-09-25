@@ -224,7 +224,7 @@ fn hover_builtin(word: &str) -> Option<String> {
         "@row" => {
             "**@row** \u{2014} Horizontal layout\n\nRenders as `<div>` with `display: flex; flex-direction: row`.\n\nChildren are laid out left-to-right."
         }
-        "@column" | "@col" => {
+        "@column" => {
             "**@column** \u{2014} Vertical layout\n\nRenders as `<div>` with `display: flex; flex-direction: column`.\n\nChildren are laid out top-to-bottom."
         }
         "@el" => {
@@ -233,7 +233,7 @@ fn hover_builtin(word: &str) -> Option<String> {
         "@text" => {
             "**@text** \u{2014} Inline text\n\nRenders as `<span>`.\n\nUsage: `@text [bold, size 24] Hello world`"
         }
-        "@paragraph" | "@p" => {
+        "@paragraph" => {
             "**@paragraph** \u{2014} Text block\n\nRenders as `<p>`.\n\nSupports inline elements: `{@text [bold] word}`"
         }
         "@h1" => {
@@ -248,7 +248,7 @@ fn hover_builtin(word: &str) -> Option<String> {
         "@h4" => "**@h4** \u{2014} Heading level 4\n\nRenders as `<h4>`.",
         "@h5" => "**@h5** \u{2014} Heading level 5\n\nRenders as `<h5>`.",
         "@h6" => "**@h6** \u{2014} Heading level 6\n\nRenders as `<h6>`.",
-        "@image" | "@img" => {
+        "@image" => {
             "**@image** \u{2014} Image\n\nRenders as `<img>`.\n\nUsage: `@image [width 200] https://example.com/photo.jpg`"
         }
         "@link" => {
@@ -272,7 +272,7 @@ fn hover_builtin(word: &str) -> Option<String> {
         "@input" => {
             "**@input** \u{2014} Form input\n\nRenders as self-closing `<input>`.\n\nUsage: `@input [type text, placeholder Name, name user]`"
         }
-        "@button" | "@btn" => {
+        "@button" => {
             "**@button** \u{2014} Button\n\nRenders as `<button>`.\n\nUsage: `@button [type submit] Click me`"
         }
         "@select" => {
@@ -281,7 +281,7 @@ fn hover_builtin(word: &str) -> Option<String> {
         "@textarea" => {
             "**@textarea** \u{2014} Multi-line text input\n\nRenders as `<textarea>`.\n\nUsage: `@textarea [name bio, rows 4] Default text`"
         }
-        "@option" | "@opt" => {
+        "@option" => {
             "**@option** \u{2014} Select option\n\nRenders as `<option>`.\n\nUsage: `@option [value red] Red`"
         }
         "@label" => {
@@ -337,7 +337,7 @@ fn hover_builtin(word: &str) -> Option<String> {
         "@list" => {
             "**@list** \u{2014} List\n\nRenders as `<ul>` (or `<ol>` with `[ordered]`).\n\nUsage:\n```\n@list [ordered]\n  @item First\n  @item Second\n```"
         }
-        "@item" | "@li" => "**@item** \u{2014} List item\n\nRenders as `<li>`. Use inside `@list`.",
+        "@item" => "**@item** \u{2014} List item\n\nRenders as `<li>`. Use inside `@list`.",
         // Table elements
         "@table" => {
             "**@table** \u{2014} Table\n\nRenders as `<table>`.\n\n```\n@table\n  @thead\n    @tr\n      @th Name\n      @th Age\n  @tbody\n    @tr\n      @td Alice\n      @td 30\n```"
@@ -378,7 +378,7 @@ fn hover_builtin(word: &str) -> Option<String> {
         "@pre" => {
             "**@pre** \u{2014} Preformatted\n\nRenders as `<pre>` with preserved whitespace and monospace font."
         }
-        "@hr" | "@divider" => {
+        "@hr" => {
             "**@hr** \u{2014} Horizontal Rule\n\nRenders as self-closing `<hr>`. Visual divider.\n\nUsage: `@hr [border-top 1 #ccc]`"
         }
         "@figure" => {
@@ -456,9 +456,6 @@ fn hover_builtin(word: &str) -> Option<String> {
         "@favicon" => {
             "**@favicon** \u{2014} Favicon\n\nInlines a favicon as a base64 data URI in the `<head>`.\n\nUsage: `@favicon favicon.png`"
         }
-        "@unless" => {
-            "**@unless** \u{2014} Inverse conditional\n\nRenders children when the condition is false (opposite of `@if`).\n\nUsage: `@unless $debug`"
-        }
         "@og" => {
             "**@og** \u{2014} Open Graph meta tag\n\nAdds an Open Graph `<meta>` tag to `<head>`.\n\nUsage: `@og title My Page Title`"
         }
@@ -473,9 +470,6 @@ fn hover_builtin(word: &str) -> Option<String> {
         }
         "@extends" => {
             "**@extends** `<file.hl>`\n\nInherit a layout template. Fill named `@slot` blocks.\n\n```\n@extends layout.hl\n@slot content\n  My page content\n@slot sidebar\n  Sidebar content\n```"
-        }
-        "@use" => {
-            "**@use** `<file.hl> name1, name2`\n\nSelective import: only imports named `@let` definitions.\n\n```\n@use components.hl card, button\n```"
         }
         "@canonical" => {
             "**@canonical** `<url>`\n\nSets the canonical URL for the page. Adds `<link rel=\"canonical\">` to `<head>`.\n\nUsage: `@canonical https://example.com/page`"
@@ -979,10 +973,6 @@ fn hover_builtin(word: &str) -> Option<String> {
         // View transitions
         "view-transition-name" => {
             "**view-transition-name** `<name>` \u{2014} Assign a View Transition API name.\n\nEnables smooth transitions between pages.\n\nUsage: `@el [view-transition-name hero]`"
-        }
-        // Animate shorthand
-        "animate" => {
-            "**animate** `<name> <duration> [timing]` \u{2014} Animation shorthand.\n\nAlias for the CSS `animation` property.\n\nUsage: `@el [animate fade-in 0.3s ease]`\n\nRequires a matching `@keyframes fade-in` definition."
         }
         // Has pseudo-selector
         "has(" => {

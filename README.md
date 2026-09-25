@@ -193,6 +193,7 @@ A `@let` with an indented body defines a function. `@children` is where the
 caller's children go:
 
 ```
+@let primary #3b82f6
 @let button $label
   @el [padding 12, background $primary, rounded 8]
     @text [color white, bold] $label
@@ -204,7 +205,13 @@ caller's children go:
 ### File includes
 
 ```
--- inline another .hl file
+-- header.hl
+@nav [spacing 10]
+  @link / Home
+```
+
+```
+-- page.hl: insert header.hl here
 @include header.hl
 ```
 

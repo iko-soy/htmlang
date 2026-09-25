@@ -38,7 +38,6 @@ Commands:
   create-component <name> [params...]  Scaffold a new component file
   outline <file.hl>     Show document structure tree
   doctor                Check toolchain health
-  migrate [dir|file]    Auto-upgrade deprecated syntax
   bundle <file|dir> [-o <out>]  Compile and inline all assets as data URIs
   size <file|dir>       Report output sizes (raw, minified, ~gzip)
   benchmark <file|dir>  Measure compile time and output size
@@ -143,7 +142,7 @@ fn print_bash_completions() {
     local cur prev commands
     cur="${{COMP_WORDS[COMP_CWORD]}}"
     prev="${{COMP_WORDS[COMP_CWORD-1]}}"
-    commands="init new build serve watch check convert fmt sitemap lint stats preview diff export repl feed components deps dead-code deploy playground clean upgrade create-component outline doctor migrate bundle size benchmark explain test lsp completions"
+    commands="init new build serve watch check convert fmt sitemap lint stats preview diff export repl feed components deps dead-code deploy playground clean upgrade create-component outline doctor bundle size benchmark explain test lsp completions"
 
     if [ "$COMP_CWORD" -eq 1 ]; then
         COMPREPLY=( $(compgen -W "$commands" -- "$cur") )
@@ -202,7 +201,6 @@ _htmlang() {{
         'create-component:Scaffold component'
         'outline:Show document structure'
         'doctor:Check toolchain health'
-        'migrate:Upgrade deprecated syntax'
         'bundle:Inline all assets'
         'size:Report output sizes'
         'benchmark:Measure compile time'
@@ -276,7 +274,6 @@ fn print_fish_completions() {
         ("create-component", "Scaffold component"),
         ("outline", "Show document structure"),
         ("doctor", "Check toolchain health"),
-        ("migrate", "Upgrade deprecated syntax"),
         ("bundle", "Inline all assets as data URIs"),
         ("size", "Report output sizes"),
         ("benchmark", "Measure compile time"),

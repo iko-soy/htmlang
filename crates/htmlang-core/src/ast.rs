@@ -20,8 +20,6 @@ pub struct Document {
     pub base_url: Option<String>,
     pub font_faces: Vec<(String, String)>,
     pub json_ld_blocks: Vec<String>,
-    pub scope_blocks: Vec<String>,
-    pub starting_style_blocks: Vec<String>,
     pub manifest: Option<ManifestConfig>,
     pub preload_hints: Vec<PreloadHint>,
     pub nodes: Vec<Node>,
@@ -170,4 +168,41 @@ pub enum ElementKind {
 pub struct Attribute {
     pub key: String,
     pub value: Option<String>,
+}
+
+/// Elements that print their argument as their text (`@text Hello`,
+/// `@item First`).
+pub fn renders_argument_as_text(kind: &ElementKind) -> bool {
+    matches!(
+        kind,
+        ElementKind::Text
+            | ElementKind::Button
+            | ElementKind::Label
+            | ElementKind::Option
+            | ElementKind::Textarea
+            | ElementKind::ListItem
+            | ElementKind::TableCell
+            | ElementKind::TableHeaderCell
+            | ElementKind::Summary
+            | ElementKind::Cite
+            | ElementKind::Code
+            | ElementKind::FigCaption
+            | ElementKind::Legend
+            | ElementKind::DefinitionTerm
+            | ElementKind::Mark
+            | ElementKind::Kbd
+            | ElementKind::Abbr
+            | ElementKind::Time
+            | ElementKind::DefinitionDescription
+            | ElementKind::Badge
+            | ElementKind::Tooltip
+            | ElementKind::Chip
+            | ElementKind::Tag
+            | ElementKind::H1
+            | ElementKind::H2
+            | ElementKind::H3
+            | ElementKind::H4
+            | ElementKind::H5
+            | ElementKind::H6
+    )
 }

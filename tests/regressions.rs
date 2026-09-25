@@ -77,7 +77,7 @@ fn page_zero_does_not_underflow() {
 
 #[test]
 fn range_at_integer_limit_terminates() {
-    let out = compile("@for $i in 9223372036854775806..9223372036854775807\n  @text $i");
+    let out = compile("@each $i in 9223372036854775806..9223372036854775807\n  @text $i");
     assert!(out.contains("9223372036854775807"), "{}", out);
     let out = compile("@each $i in -9223372036854775807..-9223372036854775808\n  @text $i");
     assert!(out.contains("-9223372036854775808"), "{}", out);
@@ -119,13 +119,13 @@ fn css_vars_are_not_substituted_into_media_queries() {
 }
 
 #[test]
-fn partial_output_includes_scope_and_starting_style() {
+fn partial_output_includes_style_and_keyframes() {
     let result = parser::parse(
-        "@scope .card\n  .title { font-weight: bold; }\n@starting-style\n  .x { opacity: 0; }\n@text hi",
+        "@style\n  @scope (.card) { .title { font-weight: bold; } }\n@keyframes k\n  from [opacity 0]\n@text hi",
     );
     let out = codegen::generate_partial(&result.document);
     assert!(out.contains(".title"), "{}", out);
-    assert!(out.contains("@starting-style"), "{}", out);
+    assert!(out.contains("@keyframes k"), "{}", out);
 }
 
 #[test]
@@ -268,7 +268,7 @@ fn variables_used_in_loops_conditions_and_text_are_not_unused() {
     for src in [
         "@let items a, b\n@each $x in $items\n  @text $x",
         "@let on true\n@if $on\n  @text y",
-        "@let n 3\n@for $i in 1..$n\n  @text $i",
+        "@let n 3\n@each $i in 1..$n\n  @text $i",
         "@let score \"10 - 2\"\n@text Score: $score",
         "@let who World\nHello $who",
     ] {
@@ -283,4 +283,20 @@ fn variables_used_in_loops_conditions_and_text_are_not_unused() {
             result.diagnostics
         );
     }
+}
+
+#[test]
+fn container_arguments_are_rendered_as_text() {
+    for src in [
+        "@el [padding 8] Hello",
+        "@paragraph Hello",
+        "@row Hello",
+        "@section Hello",
+        "@nav [id x] Hello",
+    ] {
+        let out = compile(src);
+        assert!(out.contains("Hello"), "{:?} dropped its text: {}", src, out);
+    }
+    let out = compile("@paragraph Read {@link /more more}");
+    assert!(out.contains("<a href=\"/more\">more</a>"), "{}", out);
 }

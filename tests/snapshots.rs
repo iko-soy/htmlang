@@ -731,10 +731,56 @@ fn list_renders_ol_with_ordered() {
 }
 
 #[test]
-fn item_alias_li() {
-    let output = compile("@page T\n@list\n  @li Works");
-    assert!(output.contains("<li"));
-    assert!(output.contains("Works"));
+fn removed_aliases_point_to_upgrade() {
+    for (src, replacement) in [
+        ("@li Works", "@item"),
+        ("@divider", "@hr"),
+        ("@el > @col x", "@column"),
+        ("Say {@img a.png}", "@image"),
+    ] {
+        let diags = parse_diagnostics(src);
+        assert!(
+            diags.iter().any(|d| d.message.contains(replacement)
+                && d.message.contains("htmlang upgrade")),
+            "{:?} should point to {}: {:?}",
+            src,
+            replacement,
+            diags
+        );
+    }
+}
+
+#[test]
+fn removed_directives_point_to_upgrade() {
+    for src in [
+        "@unless $x\n  hi",
+        "@for $i in 1..2\n  $i",
+        "@repeat 2\n  hi",
+        "@switch $v\n  @case a\n    hi",
+        "@use \"a.hl\" x",
+        "@with $a as b\n  hi",
+        "@layout base.hl\n  hi",
+        "@scope .c\n  .t {}",
+        "@starting-style\n  .t {}",
+        "@css-property --x\n  syntax \"*\"",
+        "@fn card $t\n  @text $t",
+        "@define c [bold]",
+    ] {
+        let diags = parse_diagnostics(src);
+        assert!(
+            diags.iter().any(|d| d.message.contains("was removed")
+                && d.message.contains("htmlang upgrade")),
+            "{:?} should report removed syntax: {:?}",
+            src,
+            diags
+        );
+    }
+}
+
+#[test]
+fn user_function_may_reuse_a_removed_name() {
+    let output = compile("@page T\n@let divider\n  @hr\n@divider");
+    assert!(output.contains("<hr"), "{}", output);
 }
 
 // ---------------------------------------------------------------------------
@@ -1133,11 +1179,11 @@ fn warning_controls_on_non_media() {
 
 #[test]
 fn fmt_normalizes_indentation() {
-    let input = "@row\n      @col\n            @text hello\n      @col\n            @text world";
+    let input = "@row\n      @column\n            @text hello\n      @column\n            @text world";
     let formatted = htmlang::fmt::format(input);
     assert_eq!(
         formatted,
-        "@row\n  @col\n    @text hello\n  @col\n    @text world\n"
+        "@row\n  @column\n    @text hello\n  @column\n    @text world\n"
     );
 }
 
@@ -1239,12 +1285,6 @@ fn pre_renders_with_whitespace() {
 #[test]
 fn hr_renders_self_closing() {
     let output = compile("@page T\n@hr");
-    assert!(output.contains("<hr"));
-}
-
-#[test]
-fn divider_alias_for_hr() {
-    let output = compile("@page T\n@divider");
     assert!(output.contains("<hr"));
 }
 
@@ -2042,13 +2082,13 @@ fn media_portrait() {
 
 #[test]
 fn unless_false_shows_content() {
-    let output = compile("@page T\n@let show false\n@unless $show\n  @text Visible");
+    let output = compile("@page T\n@let show false\n@if not $show\n  @text Visible");
     assert!(output.contains("Visible"));
 }
 
 #[test]
 fn unless_true_hides_content() {
-    let output = compile("@page T\n@let show true\n@unless $show\n  @text Hidden");
+    let output = compile("@page T\n@let show true\n@if not $show\n  @text Hidden");
     assert!(!output.contains("Hidden"));
 }
 
@@ -3119,16 +3159,16 @@ fn test_carousel_children_snap() {
 }
 
 #[test]
-fn test_use_directive() {
+fn test_import_missing_file() {
     // We can't test @use with actual files in unit tests easily, but we can verify
     // the parser recognizes the directive without errors when it can't find the file
-    let result = htmlang::parser::parse("@use nonexistent.hl card");
+    let result = htmlang::parser::parse("@import nonexistent.hl");
     let has_use_error = result.diagnostics.iter().any(|d| {
-        d.message.contains("cannot use") && d.severity == htmlang::parser::Severity::Error
+        d.message.contains("cannot import") && d.severity == htmlang::parser::Severity::Error
     });
     assert!(
         has_use_error,
-        "@use should report error for missing file, got: {:?}",
+        "@import should report error for missing file, got: {:?}",
         result.diagnostics
     );
 }
@@ -3397,7 +3437,7 @@ fn view_transition_name_passthrough() {
 #[test]
 fn animate_generates_animation_css() {
     let output = compile(
-        "@page T\n@keyframes fade\n  from [opacity 0]\n  to [opacity 1]\n@el [animate fade 0.3s ease]\n  Content",
+        "@page T\n@keyframes fade\n  from [opacity 0]\n  to [opacity 1]\n@el [animation fade 0.3s ease]\n  Content",
     );
     assert!(
         output.contains("animation:fade 0.3s ease"),
@@ -3506,7 +3546,7 @@ fn fn_named_slot_default() {
 #[test]
 fn no_warning_new_attrs_batch6() {
     let diags = parse_diagnostics(
-        "@el [grid-template-areas \"a b\", grid-area a, view-transition-name hero, animate fade 1s, critical]",
+        "@el [grid-template-areas \"a b\", grid-area a, view-transition-name hero, animation fade 1s, critical]",
     );
     assert!(
         !diags
@@ -3741,7 +3781,7 @@ fn snapshot_mixin_spread() {
 
 #[test]
 fn mixin_expands_in_attrs() {
-    let output = compile("@let card [padding 20, rounded 8]\n@el [...$card]\n  Hi");
+    let output = compile("@let card [padding 20, rounded 8]\n@el [$card]\n  Hi");
     assert!(
         output.contains("padding:20px"),
         "mixin should expand padding: {}",
@@ -3766,7 +3806,7 @@ fn mixin_with_dollar_syntax() {
 
 #[test]
 fn mixin_compose_with_extra_attrs() {
-    let output = compile("@let base [padding 10]\n@el [...$base, background red]\n  Hi");
+    let output = compile("@let base [padding 10]\n@el [$base, background red]\n  Hi");
     assert!(
         output.contains("padding:10px"),
         "mixin should expand: {}",
@@ -3793,7 +3833,7 @@ fn warning_unused_mixin() {
 
 #[test]
 fn no_warning_used_mixin() {
-    let diags = parse_diagnostics("@let card [padding 10]\n@el [...$card]");
+    let diags = parse_diagnostics("@let card [padding 10]\n@el [$card]");
     assert!(
         !diags
             .iter()
@@ -3935,7 +3975,7 @@ fn round_trip_basic() {
 
 #[test]
 fn for_basic_range() {
-    let html = compile("@for $i in 1..3\n  @text $i\n");
+    let html = compile("@each $i in 1..3\n  @text $i\n");
     assert!(html.contains("1"));
     assert!(html.contains("2"));
     assert!(html.contains("3"));
@@ -3943,7 +3983,7 @@ fn for_basic_range() {
 
 #[test]
 fn for_with_step() {
-    let html = compile("@for $i in 0..10 step 5\n  @text $i\n");
+    let html = compile("@each $i in 0..10 step 5\n  @text $i\n");
     assert!(html.contains("0"));
     assert!(html.contains("5"));
     assert!(html.contains("10"));
@@ -3951,7 +3991,7 @@ fn for_with_step() {
 
 #[test]
 fn for_reverse_range() {
-    let html = compile("@for $i in 3..1\n  @text $i\n");
+    let html = compile("@each $i in 3..1\n  @text $i\n");
     assert!(html.contains("3"));
     assert!(html.contains("2"));
     assert!(html.contains("1"));
@@ -3959,7 +3999,7 @@ fn for_reverse_range() {
 
 #[test]
 fn for_with_variable_bounds() {
-    let html = compile("@let start 1\n@let end 3\n@for $i in $start..$end\n  @text $i\n");
+    let html = compile("@let start 1\n@let end 3\n@each $i in $start..$end\n  @text $i\n");
     assert!(html.contains("1"));
     assert!(html.contains("2"));
     assert!(html.contains("3"));
@@ -4018,7 +4058,7 @@ fn component_with_children() {
 #[test]
 fn switch_matches_case() {
     let html = compile(
-        "@let variant primary\n@switch $variant\n  @case primary\n    @text Primary\n  @case danger\n    @text Danger\n",
+        "@let variant primary\n@match $variant\n  @case primary\n    @text Primary\n  @case danger\n    @text Danger\n",
     );
     assert!(html.contains("Primary"));
     assert!(!html.contains("Danger"));
@@ -4027,7 +4067,7 @@ fn switch_matches_case() {
 #[test]
 fn switch_falls_to_default() {
     let html = compile(
-        "@let variant unknown\n@switch $variant\n  @case primary\n    @text Primary\n  @default\n    @text Default\n",
+        "@let variant unknown\n@match $variant\n  @case primary\n    @text Primary\n  @default\n    @text Default\n",
     );
     assert!(!html.contains("Primary"));
     assert!(html.contains("Default"));
@@ -4036,11 +4076,11 @@ fn switch_falls_to_default() {
 #[test]
 fn switch_with_attrs() {
     let _html = compile(
-        "@let variant primary\n@switch $variant\n  @case primary [background blue, color white]\n  @case danger [background red, color white]\n",
+        "@let variant primary\n@match $variant\n  @case primary\n    @let __switch [background blue, color white]\n  @case danger\n    @let __switch [background red, color white]\n",
     );
     // The @switch should register matched attrs as __switch define
     let result = htmlang::parser::parse(
-        "@let variant primary\n@switch $variant\n  @case primary [background blue, color white]\n  @case danger [background red, color white]\n",
+        "@let variant primary\n@match $variant\n  @case primary\n    @let __switch [background blue, color white]\n  @case danger\n    @let __switch [background red, color white]\n",
     );
     assert!(result.document.defines.contains_key("__switch"));
 }
@@ -4278,9 +4318,9 @@ fn test_error_each_missing_in() {
 
 #[test]
 fn test_error_for_missing_range() {
-    let diags = parse_diagnostics("@for $i\n  @text $i");
+    let diags = parse_diagnostics("@each $i\n  @text $i");
     assert!(
-        diags.iter().any(|d| d.message.contains("@for requires")),
+        diags.iter().any(|d| d.message.contains("@each requires")),
         "should report @for syntax error"
     );
 }
@@ -4362,7 +4402,7 @@ fn test_children_fallback_content() {
 
 #[test]
 fn test_spread_define() {
-    let html = compile("@let btn [padding 12, bold]\n@el [...$btn]\n  Click");
+    let html = compile("@let btn [padding 12, bold]\n@el [$btn]\n  Click");
     assert!(
         html.contains("padding:12px"),
         "spread define should apply padding"
@@ -4485,7 +4525,7 @@ fn snapshot_initial_letter() {
 
 #[test]
 fn repeat_directive_basic() {
-    let output = compile("@repeat 3\n  @text hello");
+    let output = compile("@each $_ in 1..3\n  @text hello");
     // Should contain 3 spans with "hello"
     let count = output.matches("hello").count();
     assert_eq!(count, 3, "expected 3 repetitions, got {}", count);
@@ -4493,7 +4533,7 @@ fn repeat_directive_basic() {
 
 #[test]
 fn with_directive_rebinding() {
-    let output = compile("@let x hello\n@with $x as y\n  @text $y");
+    let output = compile("@let x hello\n@let y $x\n@text $y");
     assert!(
         output.contains("hello"),
         "expected @with to rebind variable"
@@ -4559,16 +4599,16 @@ fn markdown_renders_list() {
 
 #[test]
 fn scope_block_generates_css() {
-    let output = compile("@page Test\n@scope .card\n  .title { color: red; }\n@text hello");
+    let output = compile("@page Test\n@style\n  @scope (.card) {\n    .title { color: red; }\n  }\n@text hello");
     assert!(
-        output.contains("@scope"),
+        output.contains("@scope (.card)"),
         "should generate @scope CSS block"
     );
 }
 
 #[test]
 fn starting_style_generates_css() {
-    let output = compile("@page Test\n@starting-style\n  .fade { opacity: 0; }\n@text hello");
+    let output = compile("@page Test\n@style\n  @starting-style {\n    .fade { opacity: 0; }\n  }\n@text hello");
     assert!(
         output.contains("@starting-style"),
         "should generate @starting-style CSS block"
@@ -4727,7 +4767,7 @@ fn parser_multiple_errors() {
 
 #[test]
 fn repeat_with_index() {
-    let output = compile("@repeat 3\n  @text $_index");
+    let output = compile("@each $_ in 1..3\n  @text $_index");
     assert!(output.contains("0"), "should have index 0");
     assert!(output.contains("1"), "should have index 1");
     assert!(output.contains("2"), "should have index 2");
@@ -4893,7 +4933,7 @@ fn svg_directive_missing_file() {
 
 #[test]
 fn css_property_directive() {
-    let input = "@css-property --my-color\n  syntax \"<color>\"\n  inherits true\n  initial-value #000\n\n@el [background var(--my-color)] Content";
+    let input = "@style\n  @property --my-color {\n    syntax:\"<color>\";\n    inherits:true;\n    initial-value:#000;\n  }\n\n@el [background var(--my-color)] Content";
     let result = htmlang::parser::parse(input);
     assert!(
         result
@@ -4906,7 +4946,7 @@ fn css_property_directive() {
     let html = htmlang::codegen::generate(&result.document);
     assert!(
         html.contains("@property --my-color"),
-        "@css-property should emit CSS @property rule, got: {}",
+        "@property rule should be emitted, got: {}",
         html
     );
     assert!(

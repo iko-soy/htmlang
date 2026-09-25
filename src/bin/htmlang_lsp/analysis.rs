@@ -506,31 +506,6 @@ pub(crate) fn code_actions(
                                             }),
                                             ..Default::default()
                                         }));
-
-                                        // Also offer @use (selective import)
-                                        let use_line = format!("@use \"{}\" {}\n", rel, fn_name);
-                                        let use_edit = TextEdit {
-                                            range: Range::new(
-                                                Position::new(0, 0),
-                                                Position::new(0, 0),
-                                            ),
-                                            new_text: use_line,
-                                        };
-                                        let mut use_changes = HashMap::new();
-                                        use_changes.insert(uri.clone(), vec![use_edit]);
-                                        actions.push(CodeActionOrCommand::CodeAction(CodeAction {
-                                            title: format!(
-                                                "Add '@use \"{}\" {}' (selective)",
-                                                rel, fn_name
-                                            ),
-                                            kind: Some(CodeActionKind::QUICKFIX),
-                                            diagnostics: Some(vec![diag.clone()]),
-                                            edit: Some(WorkspaceEdit {
-                                                changes: Some(use_changes),
-                                                ..Default::default()
-                                            }),
-                                            ..Default::default()
-                                        }));
                                     }
                                 }
                             }
@@ -1069,10 +1044,10 @@ pub(crate) fn semantic_tokens(text: &str, result: &ParseResult) -> Vec<SemanticT
                     "@page" | "@let" | "@if" | "@else" | "@each" | "@include" | "@import"
                     | "@meta" | "@head" | "@style" | "@keyframes" | "@match" | "@case"
                     | "@default" | "@slot" | "@children" | "@warn" | "@debug" | "@lang"
-                    | "@favicon" | "@fragment" | "@unless" | "@og" | "@breakpoint"
+                    | "@favicon" | "@fragment" | "@og" | "@breakpoint"
                     | "@canonical" | "@base" | "@font-face" | "@json-ld" | "@assert" | "@theme"
-                    | "@deprecated" | "@extends" | "@use" | "@data" | "@env" | "@fetch"
-                    | "@svg" | "@css-property" => 0, // keyword
+                    | "@deprecated" | "@extends" | "@data" | "@env" | "@fetch"
+                    | "@svg" => 0, // keyword
                     _ => {
                         // Check if it's a user function call (starts with @ but not a builtin element)
                         if is_builtin_element(word) { 0 } else { 2 } // function
@@ -1140,21 +1115,16 @@ fn is_builtin_element(word: &str) -> bool {
         word,
         "@row"
             | "@column"
-            | "@col"
             | "@el"
             | "@text"
             | "@paragraph"
-            | "@p"
             | "@image"
-            | "@img"
             | "@link"
             | "@input"
             | "@button"
-            | "@btn"
             | "@select"
             | "@textarea"
             | "@option"
-            | "@opt"
             | "@label"
             | "@raw"
             | "@nav"
@@ -1166,7 +1136,6 @@ fn is_builtin_element(word: &str) -> bool {
             | "@aside"
             | "@list"
             | "@item"
-            | "@li"
             | "@table"
             | "@thead"
             | "@tbody"
@@ -1183,7 +1152,6 @@ fn is_builtin_element(word: &str) -> bool {
             | "@code"
             | "@pre"
             | "@hr"
-            | "@divider"
             | "@figure"
             | "@figcaption"
             | "@progress"

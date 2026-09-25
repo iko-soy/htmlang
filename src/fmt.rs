@@ -93,8 +93,6 @@ fn is_raw_body_header(code: &str) -> bool {
         "@markdown",
         "@json-ld",
         "@head",
-        "@scope",
-        "@starting-style",
     ]
     .iter()
     .any(|d| code == *d || code.strip_prefix(d).is_some_and(|r| r.starts_with(' ')))

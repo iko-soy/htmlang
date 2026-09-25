@@ -1,8 +1,10 @@
 @page Scope Test
 
-@scope .card
-  .title { font-weight: bold; }
-  .body { color: #333; }
+@style
+  @scope (.card) {
+    .title { font-weight: bold; }
+    .body { color: #333; }
+  }
 
 @column [padding 20]
   @text Hello

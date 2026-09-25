@@ -1,8 +1,10 @@
 @page CSS Property Test
-@css-property --accent
-  syntax "<color>"
-  inherits true
-  initial-value #3b82f6
+@style
+  @property --accent {
+    syntax:"<color>";
+    inherits:true;
+    initial-value:#3b82f6;
+  }
 
 @el [background var(--accent), padding 20]
   Custom property element

@@ -19,7 +19,7 @@ mod state;
 use analysis::{
     code_actions, find_colors, folding_ranges, get_signature_help, inlay_hints, semantic_tokens,
 };
-use completion::{completions, path_completions, use_symbol_completions};
+use completion::{completions, path_completions};
 use hover::hover_at;
 use navigation::{
     definition_at, find_references, linked_editing_ranges, prepare_rename_at, rename_at,
@@ -384,20 +384,6 @@ impl LanguageServer for Backend {
                     return Ok(Some(CompletionResponse::Array(items)));
                 }
             }
-            if let Some(after_use) = trimmed.strip_prefix("@use ") {
-                let has_file = after_use.contains(".hl");
-                if has_file {
-                    let items = use_symbol_completions(uri, trimmed, pos);
-                    if !items.is_empty() {
-                        return Ok(Some(CompletionResponse::Array(items)));
-                    }
-                } else {
-                    let items = path_completions(uri, pos);
-                    if !items.is_empty() {
-                        return Ok(Some(CompletionResponse::Array(items)));
-                    }
-                }
-            }
         }
 
         let items = completions(text, pos);
@@ -719,8 +705,6 @@ impl LanguageServer for Backend {
                 ("@include ", rest)
             } else if let Some(rest) = trimmed.strip_prefix("@import ") {
                 ("@import ", rest)
-            } else if let Some(rest) = trimmed.strip_prefix("@use ") {
-                ("@use ", rest)
             } else if let Some(rest) = trimmed.strip_prefix("@extends ") {
                 ("@extends ", rest)
             } else {

@@ -184,21 +184,16 @@ fn element_completions(range: Range) -> Vec<CompletionItem> {
     [
         ("@row", "Horizontal layout (flexbox row)"),
         ("@column", "Vertical layout (flexbox column)"),
-        ("@col", "Vertical layout (short for @column)"),
         ("@el", "Generic container"),
         ("@text", "Styled inline text (span)"),
         ("@paragraph", "Flowing text block (p)"),
-        ("@p", "Flowing text block (short for @paragraph)"),
         ("@image", "Image element"),
-        ("@img", "Image element (short for @image)"),
         ("@link", "Anchor/link element"),
         ("@input", "Form input element (self-closing)"),
         ("@button", "Button element"),
-        ("@btn", "Button element (short for @button)"),
         ("@select", "Select dropdown element"),
         ("@textarea", "Multi-line text input"),
         ("@option", "Option inside @select"),
-        ("@opt", "Option (short for @option)"),
         ("@label", "Label element"),
         ("@raw", "Raw HTML escape hatch"),
         ("@children", "Slot for caller's children (inside component)"),
@@ -214,7 +209,6 @@ fn element_completions(range: Range) -> Vec<CompletionItem> {
         // List elements
         ("@list", "List container (ul/ol, use [ordered] for ol)"),
         ("@item", "List item (li)"),
-        ("@li", "List item (short for @item)"),
         // Table elements
         ("@table", "Table element"),
         ("@thead", "Table head group"),
@@ -234,7 +228,6 @@ fn element_completions(range: Range) -> Vec<CompletionItem> {
         ("@code", "Inline code (monospace)"),
         ("@pre", "Preformatted text block"),
         ("@hr", "Horizontal rule/divider"),
-        ("@divider", "Horizontal rule (alias for @hr)"),
         ("@figure", "Figure with optional caption"),
         ("@figcaption", "Caption for @figure"),
         ("@progress", "Progress bar (value, max attributes)"),
@@ -350,11 +343,6 @@ fn directive_completions(range: Range) -> Vec<CompletionItem> {
             "Set favicon (inlined as base64 data URI)",
             "@favicon ",
         ),
-        (
-            "@unless",
-            "Inverse conditional (renders when false)",
-            "@unless ",
-        ),
         ("@og", "Add Open Graph meta tag", "@og "),
         (
             "@breakpoint",
@@ -375,11 +363,6 @@ fn directive_completions(range: Range) -> Vec<CompletionItem> {
             "@extends",
             "Inherit a layout template and fill @slot blocks",
             "@extends ",
-        ),
-        (
-            "@use",
-            "Selective import of definitions from a file",
-            "@use ",
         ),
         (
             "@canonical",
@@ -406,11 +389,6 @@ fn directive_completions(range: Range) -> Vec<CompletionItem> {
         ("@env", "Access compile-time environment variable", "@env "),
         ("@fetch", "Fetch data from URL at compile time", "@fetch "),
         ("@svg", "Inline SVG file with optional attributes", "@svg "),
-        (
-            "@css-property",
-            "Define typed CSS custom property (@property)",
-            "@css-property ",
-        ),
     ]
     .iter()
     .map(|(name, detail, insert)| item(name, CompletionItemKind::SNIPPET, detail, insert, range))
@@ -505,11 +483,6 @@ fn snippet_completions(range: Range) -> Vec<CompletionItem> {
             "@match \\$${1:value}\n  @case ${2:option1}\n    ${3:content}\n  @default\n    ${4:fallback}",
         ),
         (
-            "@for range loop",
-            "Loop over a numeric range",
-            "@for \\$${1:i} in ${2:0}..${3:10}\n  @text \\$${1:i}",
-        ),
-        (
             "@data JSON load",
             "Load variables from a JSON file",
             "@data ${1:data.json}",
@@ -584,103 +557,6 @@ pub(crate) fn path_completions(uri: &Url, position: Position) -> Vec<CompletionI
     items
 }
 
-/// Suggest exported names from a file referenced in @use
-pub(crate) fn use_symbol_completions(
-    uri: &Url,
-    line: &str,
-    position: Position,
-) -> Vec<CompletionItem> {
-    let file_path = match uri.to_file_path() {
-        Ok(p) => p,
-        Err(_) => return vec![],
-    };
-    let dir = match file_path.parent() {
-        Some(d) => d,
-        None => return vec![],
-    };
-
-    // Extract the filename from @use "file.hl" or @use file.hl
-    let after_use = &line.trim_start()[5..]; // skip "@use "
-    let filename = if let Some(after_quote) = after_use.strip_prefix('"') {
-        let end = after_quote.find('"').unwrap_or(after_quote.len());
-        &after_quote[..end]
-    } else {
-        after_use.split_whitespace().next().unwrap_or("")
-    };
-
-    if filename.is_empty() {
-        return vec![];
-    }
-
-    let target_path = dir.join(filename);
-    let target_content = match std::fs::read_to_string(&target_path) {
-        Ok(s) => s,
-        Err(_) => return vec![],
-    };
-
-    let col = position.character;
-    let edit_range = Range::new(
-        Position::new(position.line, col),
-        Position::new(position.line, col),
-    );
-
-    let mut items = Vec::new();
-
-    for target_line in target_content.lines() {
-        let trimmed = target_line.trim();
-        if let Some(rest) = trimmed.strip_prefix("@let ") {
-            if let Some(name) = rest.split_whitespace().next() {
-                let name = name.trim_end_matches('[');
-                let params: Vec<&str> = rest
-                    .split_whitespace()
-                    .skip(1)
-                    .filter(|p| p.starts_with('$'))
-                    .collect();
-                let (kind, detail) = if !params.is_empty() {
-                    (
-                        CompletionItemKind::FUNCTION,
-                        format!("@let {} {} (from {})", name, params.join(" "), filename),
-                    )
-                } else if rest[name.len()..].trim_start().starts_with('[') {
-                    (
-                        CompletionItemKind::VARIABLE,
-                        format!("@let {} [...] (from {})", name, filename),
-                    )
-                } else {
-                    (
-                        CompletionItemKind::VARIABLE,
-                        format!("@let {} (from {})", name, filename),
-                    )
-                };
-                items.push(CompletionItem {
-                    label: name.to_string(),
-                    kind: Some(kind),
-                    detail: Some(detail),
-                    text_edit: Some(CompletionTextEdit::Edit(TextEdit {
-                        range: edit_range,
-                        new_text: name.to_string(),
-                    })),
-                    ..Default::default()
-                });
-            }
-        } else if let Some(rest) = trimmed.strip_prefix("@component ")
-            && let Some(name) = rest.split_whitespace().next()
-        {
-            items.push(CompletionItem {
-                label: name.to_string(),
-                kind: Some(CompletionItemKind::CLASS),
-                detail: Some(format!("@component {} (from {})", name, filename)),
-                text_edit: Some(CompletionTextEdit::Edit(TextEdit {
-                    range: edit_range,
-                    new_text: name.to_string(),
-                })),
-                ..Default::default()
-            });
-        }
-    }
-
-    items
-}
 
 /// Walk back from `position` to find the element directive that opened the
 /// nearest unmatched `[`. Returns the bare name without the leading `@`
@@ -1579,12 +1455,6 @@ fn attr_completions(range: Range, element: Option<&str>) -> Vec<CompletionItem> 
         (
             "view-transition-name",
             "Assign a view transition name",
-            true,
-        ),
-        // Animate shorthand
-        (
-            "animate",
-            "Animation shorthand (name duration [timing])",
             true,
         ),
         // Has pseudo-selector

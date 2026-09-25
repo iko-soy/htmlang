@@ -155,18 +155,11 @@ impl StyleCollector {
         Some(name)
     }
 
-    fn to_css_formatted(&self, dev: bool, use_layer: bool) -> String {
+    /// All generated rules, wrapped in `@layer htmlang`.
+    fn to_css_formatted(&self, dev: bool) -> String {
         let mut css = String::new();
-        let inner_indent = if use_layer && dev { "  " } else { "" };
-
-        // Wrap in @layer for specificity management
-        if use_layer {
-            if dev {
-                css.push_str("@layer htmlang {\n");
-            } else {
-                css.push_str("@layer htmlang{");
-            }
-        }
+        let inner_indent = if dev { "  " } else { "" };
+        css.push_str(if dev { "@layer htmlang {\n" } else { "@layer htmlang{" });
 
         // Non-responsive rules. Base and pseudo rules are merged separately by
         // identical body so that e.g. `.a,.b{display:flex;flex-direction:column;}`
@@ -342,15 +335,7 @@ impl StyleCollector {
             );
         }
 
-        // Close @layer
-        if use_layer {
-            if dev {
-                css.push_str("}\n");
-            } else {
-                css.push('}');
-            }
-        }
-
+        css.push_str(if dev { "}\n" } else { "}" });
         css
     }
 }
@@ -1047,7 +1032,7 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
         ""
     };
 
-    let reset_css = reset_css(doc, dev, focus_visible_css, skip_link_css);
+    let reset_css = reset_css(dev, focus_visible_css, skip_link_css);
 
     match &doc.page_title {
         Some(title) => {
@@ -1189,7 +1174,9 @@ fn build_element_css(doc: &Document, styles: &StyleCollector, dev: bool) -> Stri
         }
     }
 
-    let styles_css = styles.to_css_formatted(dev, uses_layer(doc));
+    // Generated rules always go in `@layer htmlang`, so unlayered user CSS
+    // (`@style`, `@raw`) overrides them regardless of specificity.
+    let styles_css = styles.to_css_formatted(dev);
     // Fold literal values declared via `@theme` / `@let --name` back into
     // `var(--name)` references so the generated CSS actually uses the
     // custom properties emitted in `:root`.
@@ -1246,52 +1233,31 @@ fn build_element_css(doc: &Document, styles: &StyleCollector, dev: bool) -> Stri
         }
     }
 
-    let push_block = |css: &mut String, block: &str| {
+    // @style blocks (custom CSS)
+    for block in &doc.custom_css {
         if dev {
-            css.push_str(block);
-            css.push('\n');
+            element_css.push_str(block);
+            element_css.push('\n');
         } else {
             let minified: String = block.lines().map(|l| l.trim()).collect::<Vec<_>>().join("");
-            css.push_str(&minified);
+            element_css.push_str(&minified);
         }
-    };
-
-    // @style and @scope blocks (custom CSS)
-    for block in doc.custom_css.iter().chain(&doc.scope_blocks) {
-        push_block(&mut element_css, block);
-    }
-
-    // @starting-style blocks
-    if !doc.starting_style_blocks.is_empty() {
-        element_css.push_str(if dev { "@starting-style {\n" } else { "@starting-style{" });
-        for block in &doc.starting_style_blocks {
-            push_block(&mut element_css, block);
-        }
-        element_css.push_str(if dev { "}\n" } else { "}" });
     }
 
     element_css
 }
 
-/// Generated class rules go in `@layer htmlang` unless the page has custom
-/// `@style` CSS (which is unlayered and would then always win).
-fn uses_layer(doc: &Document) -> bool {
-    doc.custom_css.is_empty()
-}
-
-/// Built-in reset rules. When generated rules are layered, the reset must be
-/// layered too (in an earlier layer): unlayered CSS beats every layer, so an
-/// unlayered `a{color:inherit}` would override `@link [color red]`.
-fn reset_css(doc: &Document, dev: bool, focus_visible_css: &str, skip_link_css: &str) -> String {
+/// Built-in reset rules, in a layer before `htmlang`: unlayered CSS beats
+/// every layer, so an unlayered `a{color:inherit}` would override
+/// `@link [color red]`.
+fn reset_css(dev: bool, focus_visible_css: &str, skip_link_css: &str) -> String {
     let base = if dev {
         "*, *::before, *::after { box-sizing: border-box; }\nbody { margin: 0; font-family: system-ui, -apple-system, sans-serif; }\nimg { display: block; }\na { text-decoration: none; color: inherit; }\n"
     } else {
         "*,*::before,*::after{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,sans-serif}img{display:block}a{text-decoration:none;color:inherit}"
     };
     let rules = format!("{}{}{}", base, focus_visible_css, skip_link_css);
-    if !uses_layer(doc) {
-        rules
-    } else if dev {
+    if dev {
         format!("@layer hl-reset, htmlang;\n@layer hl-reset {{\n{}}}\n", rules)
     } else {
         format!("@layer hl-reset,htmlang;@layer hl-reset{{{}}}", rules)
@@ -1966,38 +1932,8 @@ fn generate_element(
     out.push_str(ctx.nl());
 
     // Inline text argument
-    if matches!(
-        elem.kind,
-        ElementKind::Text
-            | ElementKind::Button
-            | ElementKind::Label
-            | ElementKind::Option
-            | ElementKind::Textarea
-            | ElementKind::ListItem
-            | ElementKind::TableCell
-            | ElementKind::TableHeaderCell
-            | ElementKind::Summary
-            | ElementKind::Cite
-            | ElementKind::Code
-            | ElementKind::FigCaption
-            | ElementKind::Legend
-            | ElementKind::DefinitionTerm
-            | ElementKind::Mark
-            | ElementKind::Kbd
-            | ElementKind::Abbr
-            | ElementKind::Time
-            | ElementKind::DefinitionDescription
-            | ElementKind::Badge
-            | ElementKind::Tooltip
-            | ElementKind::Chip
-            | ElementKind::Tag
-            | ElementKind::H1
-            | ElementKind::H2
-            | ElementKind::H3
-            | ElementKind::H4
-            | ElementKind::H5
-            | ElementKind::H6
-    ) && let Some(text) = &elem.argument
+    if renders_argument_as_text(&elem.kind)
+        && let Some(text) = &elem.argument
     {
         out.push_str(&html_escape(text));
     }
@@ -3637,12 +3573,6 @@ fn attrs_to_css(
                 }
             }
 
-            // Animate shorthand (alias for animation)
-            "animate" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "animation", v);
-                }
-            }
 
             // CSS subgrid
             "grid-template-columns" => {
@@ -3700,12 +3630,6 @@ fn attrs_to_css(
                 }
             }
             "position-area" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "position-area", v);
-                }
-            }
-            "inset-area" => {
-                // Legacy alias for position-area
                 if let Some(v) = val {
                     push_css(&mut css, "position-area", v);
                 }
