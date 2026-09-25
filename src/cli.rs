@@ -3,7 +3,7 @@ use std::process;
 
 /// Subcommands understood by the CLI.
 pub const COMMANDS: &[&str] = &[
-    "build", "serve", "watch", "check", "lint", "fmt", "convert", "upgrade", "lsp",
+    "build", "serve", "watch", "check", "lint", "fmt", "upgrade", "lsp",
 ];
 
 pub fn print_help() {
@@ -15,9 +15,9 @@ Usage: htmlang [options] <file.hl | directory>
        htmlang <command> [args]
 
 Commands:
-  build <dir> [-o <out>] [--minify] [--strict] [--shared-css]
+  build <dir> [-o <out>] [--minify] [--strict]
                         Compile every .hl file under a directory
-  serve [dir|file] [-p N] [--open] [--https --cert <pem> --key <pem>]
+  serve [dir|file] [-p N] [--open]
                         Dev server with live reload
   watch [dir|file] [-o <out>]
                         Recompile on change, without a server
@@ -26,7 +26,6 @@ Commands:
   lint <file.hl | dir> [--format json]
                         Stricter checks (accessibility, nesting)
   fmt <file.hl>         Format a file in place
-  convert <file.html>   Convert HTML to .hl (printed to stdout)
   upgrade [dir|file]    Rewrite removed or renamed syntax
   lsp                   Start the language server (stdio)
 

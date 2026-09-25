@@ -49,12 +49,11 @@ htmlang serve .              # dev server with live reload
 | Command | Purpose |
 |---|---|
 | `build <dir> [-o out] [--minify] [--strict]` | Compile every `.hl` file under a directory |
-| `serve [dir\|file] [-p PORT] [--open] [--https --cert C --key K]` | Dev server with live reload |
+| `serve [dir\|file] [-p PORT] [--open]` | Dev server with live reload |
 | `watch [dir\|file] [-o out]` | Recompile on change, without a server |
 | `check <file\|dir> [--format json]` | Report diagnostics without writing output |
 | `lint <file\|dir> [--format json]` | Stricter checks (accessibility, nesting) |
 | `fmt <file.hl>` | Format a file in place |
-| `convert <file.html>` | Convert HTML to htmlang (prints to stdout) |
 | `upgrade [dir\|file]` | Rewrite syntax from older versions of the language |
 | `lsp` | Run the language server over stdio |
 

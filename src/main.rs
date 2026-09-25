@@ -219,7 +219,7 @@ fn copy_non_hl_recursive(base: &Path, dir: &Path, out_dir: &Path, skip_canonical
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
-                // Skip hidden directories (.htmlang-cache, .git, etc.)
+                // Skip hidden directories (.git, etc.)
                 if path
                     .file_name()
                     .is_some_and(|n| n.to_str().is_some_and(|s| s.starts_with('.')))
@@ -322,7 +322,7 @@ fn collect_hl_recursive_inner(dir: &Path, files: &mut Vec<PathBuf>) {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
-                // Skip hidden directories (.htmlang-cache, .git, etc.)
+                // Skip hidden directories (.git, etc.)
                 if path
                     .file_name()
                     .is_some_and(|n| n.to_str().is_some_and(|s| s.starts_with('.')))
@@ -353,147 +353,6 @@ fn lint_file(path: &str) -> Vec<String> {
         .collect()
 }
 
-/// Whether the build cache record at `path` matches `key` and every
-/// dependency it lists still has the recorded content hash.
-fn build_cache_is_fresh(path: &Path, key: u64) -> bool {
-    let Ok(record) = fs::read_to_string(path) else {
-        return false;
-    };
-    let mut lines = record.lines();
-    if lines.next() != Some(key.to_string().as_str()) {
-        return false;
-    }
-    lines.all(|line| {
-        line.split_once(' ').is_some_and(|(hash, dep)| {
-            fs::read(dep).is_ok_and(|content| hash_bytes(&content).to_string() == hash)
-        })
-    })
-}
-
-/// Record a successful build: the source+flags `key`, then one
-/// `<content hash> <path>` line per included file.
-fn write_build_cache(path: &Path, key: u64, deps: &[PathBuf]) {
-    let mut record = key.to_string();
-    for dep in deps {
-        if let Ok(content) = fs::read(dep) {
-            record.push_str(&format!("\n{} {}", hash_bytes(&content), dep.display()));
-        }
-    }
-    if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    let _ = fs::write(path, record);
-}
-
-fn hash_bytes(bytes: &[u8]) -> u64 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    bytes.hash(&mut hasher);
-    hasher.finish()
-}
-
-/// Split a stylesheet into top-level segments: each rule or at-rule block,
-/// together with the whitespace before it, is one segment, so the segments
-/// concatenate back to the original text.
-fn css_segments(css: &str) -> Vec<&str> {
-    let mut segments = Vec::new();
-    let mut start = 0;
-    let mut depth = 0i32;
-    for (i, c) in css.char_indices() {
-        match c {
-            '{' => depth += 1,
-            '}' => {
-                depth -= 1;
-                if depth == 0 {
-                    segments.push(&css[start..=i]);
-                    start = i + 1;
-                }
-            }
-            _ => {}
-        }
-    }
-    if start < css.len() {
-        segments.push(&css[start..]);
-    }
-    segments
-}
-
-/// Locate the first `<style>...</style>` body in `html` as a byte range.
-fn style_body_range(html: &str) -> Option<(usize, usize)> {
-    let start = html.find("<style>")? + "<style>".len();
-    let end = start + html[start..].find("</style>")?;
-    Some((start, end))
-}
-
-/// Extract shared CSS rules across multiple HTML files and write shared.css
-fn extract_shared_css(html_files: &[PathBuf], out_dir: &Path) {
-    let pages: Vec<(&PathBuf, String)> = html_files
-        .iter()
-        .filter_map(|f| fs::read_to_string(f).ok().map(|html| (f, html)))
-        .collect();
-    if pages.len() < 2 {
-        return;
-    }
-
-    // A rule is shared when it appears (verbatim) in every page. Keep the
-    // order of the first page so the cascade stays deterministic.
-    let rule_sets: Vec<std::collections::HashSet<&str>> = pages
-        .iter()
-        .map(|(_, html)| {
-            style_body_range(html)
-                .map(|(s, e)| css_segments(&html[s..e]).into_iter().map(str::trim).collect())
-                .unwrap_or_default()
-        })
-        .collect();
-    let first_css = style_body_range(&pages[0].1).map_or("", |(s, e)| &pages[0].1[s..e]);
-    let mut shared_rules: Vec<&str> = Vec::new();
-    for rule in css_segments(first_css).into_iter().map(str::trim) {
-        if rule.ends_with('}')
-            && !shared_rules.contains(&rule)
-            && rule_sets.iter().all(|set| set.contains(rule))
-        {
-            shared_rules.push(rule);
-        }
-    }
-    if shared_rules.is_empty() {
-        return;
-    }
-    let shared_css_path = out_dir.join("shared.css");
-    if fs::write(&shared_css_path, shared_rules.join("\n")).is_err() {
-        return;
-    }
-    eprintln!(
-        "extracted {} shared CSS rules to {}",
-        shared_rules.len(),
-        shared_css_path.display()
-    );
-
-    // Remove shared rules from individual files and inject <link> tag
-    for (file, html) in &pages {
-        let Some((style_start, style_end)) = style_body_range(html) else {
-            continue;
-        };
-        let filtered: String = css_segments(&html[style_start..style_end])
-            .into_iter()
-            .filter(|seg| !shared_rules.contains(&seg.trim()))
-            .collect();
-        // Link relative to the page so nested pages (blog/post.html) resolve.
-        let depth = file
-            .strip_prefix(out_dir)
-            .map_or(0, |rel| rel.components().count().saturating_sub(1));
-        let href = format!("{}shared.css", "../".repeat(depth));
-        let link_tag = format!("<link rel=\"stylesheet\" href=\"{}\">", href);
-        let head = &html[..style_start - "<style>".len()];
-        let link = if head.contains(&link_tag) { "" } else { &link_tag };
-        let new_html = format!(
-            "{}{}<style>{}</style>{}",
-            head,
-            link,
-            filtered,
-            &html[style_end + "</style>".len()..],
-        );
-        let _ = fs::write(file, new_html);
-    }
-}
 
 fn open_in_browser(port: u16) {
     let url = format!("http://127.0.0.1:{}", port);
@@ -658,7 +517,6 @@ fn main() {
     }
 
 
-
     // Handle "fmt" subcommand
     if args.len() >= 3 && args[1] == "fmt" {
         let file = &args[2];
@@ -687,7 +545,6 @@ fn main() {
         let mut out_dir = None;
         let mut build_minify = false;
         let mut build_strict = false;
-        let mut shared_css = false;
         let mut i = 2;
         while i < args.len() {
             match args[i].as_str() {
@@ -697,7 +554,6 @@ fn main() {
                 }
                 "--minify" => build_minify = true,
                 "--strict" => build_strict = true,
-                "--shared-css" => shared_css = true,
                 _ if src_dir.is_none() => src_dir = Some(args[i].as_str()),
                 _ => {
                     eprintln!("unknown argument: {}", args[i]);
@@ -741,47 +597,15 @@ fn main() {
             })
             .collect();
 
-        // Build content hash cache for incremental compilation
-        let cache_dir = dir.join(".htmlang-cache");
-        let _ = fs::create_dir_all(&cache_dir);
-
-        // Compile files in parallel (with incremental skip for unchanged files)
+        // Compile files in parallel
         let build_start = std::time::Instant::now();
         let any_errors = std::sync::atomic::AtomicBool::new(false);
-        let skipped = std::sync::atomic::AtomicUsize::new(0);
         std::thread::scope(|s| {
             for (file, effective_out) in hl_files.iter().zip(effective_outs.iter()) {
                 let any_errors = &any_errors;
-                let skipped = &skipped;
-                let cache_dir = &cache_dir;
                 s.spawn(move || {
-                    // Content hash-based caching: skip if neither the file, the
-                    // files it includes, nor the build flags have changed.
-                    let rel = file.strip_prefix(dir).unwrap_or(file);
-                    let hash_path = cache_dir.join(rel).with_extension("hl.hash");
-                    let cache_key = fs::read(file).ok().map(|content| {
-                        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                        content.hash(&mut hasher);
-                        (build_minify, build_strict, effective_out).hash(&mut hasher);
-                        hasher.finish()
-                    });
-                    if !shared_css
-                        && let Some(key) = cache_key
-                        && build_cache_is_fresh(&hash_path, key)
-                    {
-                        // Also verify output exists
-                        let out_exists = effective_out
-                            .as_ref()
-                            .map_or(file.with_extension("html").exists(), |p| {
-                                Path::new(p.as_str()).exists()
-                            });
-                        if out_exists {
-                            skipped.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                            return;
-                        }
-                    }
                     let path_str = file.to_string_lossy().to_string();
-                    let (has_errors, included) = compile(
+                    let (has_errors, _) = compile(
                         &path_str,
                         &CompileConfig {
                             output_path: effective_out.as_deref(),
@@ -792,17 +616,11 @@ fn main() {
                     );
                     if has_errors {
                         any_errors.store(true, std::sync::atomic::Ordering::Relaxed);
-                        // Never let a failed build be skipped next time.
-                        let _ = fs::remove_file(&hash_path);
-                    } else if let Some(key) = cache_key {
-                        write_build_cache(&hash_path, key, &included);
                     }
                 });
             }
         });
         let build_elapsed = build_start.elapsed();
-        let skipped_count = skipped.load(std::sync::atomic::Ordering::Relaxed);
-        let compiled_count = hl_files.len() - skipped_count;
 
         // Report build performance
         let total_output_size: usize = effective_outs
@@ -812,15 +630,10 @@ fn main() {
             .map(|m| m.len() as usize)
             .sum();
         eprintln!(
-            "built {} files in {:.2}s ({}){}",
-            compiled_count,
+            "built {} files in {:.2}s ({})",
+            hl_files.len(),
             build_elapsed.as_secs_f64(),
             format_bytes(total_output_size),
-            if skipped_count > 0 {
-                format!(", {} skipped", skipped_count)
-            } else {
-                String::new()
-            },
         );
         if any_errors.load(std::sync::atomic::Ordering::Relaxed) {
             process::exit(1);
@@ -829,22 +642,6 @@ fn main() {
         // Copy non-.hl static assets to output directory
         if let Some(out) = out_dir {
             copy_non_hl_files(dir, Path::new(out));
-
-            // Shared CSS extraction (opt-in): find duplicate CSS rules across
-            // pages. It rewrites the output, so it needs freshly compiled
-            // pages — the incremental cache is bypassed when it's enabled.
-            let out_path = Path::new(out);
-            let html_files: Vec<PathBuf> = hl_files
-                .iter()
-                .map(|f| {
-                    let rel = f.strip_prefix(dir).unwrap_or(f);
-                    out_path.join(rel).with_extension("html")
-                })
-                .filter(|p| p.exists())
-                .collect();
-            if shared_css && html_files.len() > 1 {
-                extract_shared_css(&html_files, out_path);
-            }
         }
         return;
     }
@@ -977,19 +774,11 @@ fn main() {
     }
 
 
-
-
-
-
     // Handle "serve" standalone subcommand
     if args.len() >= 2 && args[1] == "serve" {
         let mut serve_target = None;
         let mut serve_port: u16 = 3000;
         let mut serve_open = false;
-        let mut serve_https = false;
-        let mut cert_path: Option<String> = None;
-        let mut key_path: Option<String> = None;
-        let mut _proxy_routes: Vec<(String, String)> = Vec::new();
         let mut si = 2;
         while si < args.len() {
             match args[si].as_str() {
@@ -998,30 +787,6 @@ fn main() {
                     serve_port = args.get(si).and_then(|p| p.parse().ok()).unwrap_or(3000);
                 }
                 "--open" => serve_open = true,
-                "--https" => serve_https = true,
-                "--cert" => {
-                    si += 1;
-                    cert_path = args.get(si).cloned();
-                }
-                "--key" => {
-                    si += 1;
-                    key_path = args.get(si).cloned();
-                }
-                "--proxy" => {
-                    // --proxy /api http://localhost:3001
-                    si += 1;
-                    let prefix = args.get(si).cloned().unwrap_or_default();
-                    si += 1;
-                    let target_url = args.get(si).cloned().unwrap_or_default();
-                    if !prefix.is_empty() && !target_url.is_empty() {
-                        _proxy_routes.push((prefix, target_url));
-                        eprintln!(
-                            "proxy: {} -> {}",
-                            _proxy_routes.last().unwrap().0,
-                            _proxy_routes.last().unwrap().1
-                        );
-                    }
-                }
                 _ if serve_target.is_none() => serve_target = Some(args[si].clone()),
                 _ => {
                     eprintln!("unknown argument: {}", args[si]);
@@ -1039,36 +804,6 @@ fn main() {
         } else {
             config.port
         };
-
-        // Resolve optional TLS config. Without both --cert and --key, --https is
-        // an error — we intentionally do not generate self-signed certificates
-        // to avoid surprising the user with unpinned trust anchors.
-        let tls_config = if serve_https {
-            let cert = cert_path.clone().unwrap_or_else(|| {
-                eprintln!("error: --https requires --cert <path> and --key <path>");
-                eprintln!("  generate a dev cert with: mkcert localhost 127.0.0.1");
-                process::exit(1);
-            });
-            let key = key_path.clone().unwrap_or_else(|| {
-                eprintln!("error: --https requires --cert <path> and --key <path>");
-                process::exit(1);
-            });
-            match htmlang::serve::load_tls_config(Path::new(&cert), Path::new(&key)) {
-                Ok(cfg) => Some(cfg),
-                Err(e) => {
-                    eprintln!("error: failed to load TLS config: {}", e);
-                    process::exit(1);
-                }
-            }
-        } else {
-            None
-        };
-        let scheme = if tls_config.is_some() {
-            "https"
-        } else {
-            "http"
-        };
-        let _ = scheme; // announced by watch_loop / open_in_browser downstream
 
         // Do initial compile
         if target_path.is_dir() {
@@ -1100,20 +835,9 @@ fn main() {
             let serve_dir = PathBuf::from(out_dir);
             let server_dir = serve_dir.clone();
             let server_tx = tx.clone();
-            let tls_for_thread = tls_config;
             std::thread::spawn(move || {
                 let rt = tokio::runtime::Runtime::new().expect("failed to create runtime");
-                match tls_for_thread {
-                    Some(tls) => rt.block_on(htmlang::serve::run_dir_https(
-                        effective_port,
-                        server_dir,
-                        server_tx,
-                        tls,
-                    )),
-                    None => {
-                        rt.block_on(htmlang::serve::run_dir(effective_port, server_dir, server_tx))
-                    }
-                }
+                rt.block_on(htmlang::serve::run_dir(effective_port, server_dir, server_tx));
             });
             if serve_open {
                 open_in_browser(effective_port);
@@ -1154,18 +878,9 @@ fn main() {
             );
             let (tx, _) = tokio::sync::broadcast::channel::<()>(16);
             let server_tx = tx.clone();
-            let tls_for_thread = tls_config;
             std::thread::spawn(move || {
                 let rt = tokio::runtime::Runtime::new().expect("failed to create runtime");
-                match tls_for_thread {
-                    Some(tls) => rt.block_on(htmlang::serve::run_https(
-                        effective_port,
-                        out_path,
-                        server_tx,
-                        tls,
-                    )),
-                    None => rt.block_on(htmlang::serve::run(effective_port, out_path, server_tx)),
-                }
+                rt.block_on(htmlang::serve::run(effective_port, out_path, server_tx));
             });
             if serve_open {
                 open_in_browser(effective_port);
@@ -1283,19 +998,6 @@ fn main() {
     }
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
     // Handle "upgrade" subcommand: rewrite removed or renamed syntax to its
     // current form.
     if args.len() >= 2 && args[1] == "upgrade" {
@@ -1348,25 +1050,6 @@ fn main() {
         return;
     }
 
-
-    // Handle "convert" subcommand
-    if args.len() >= 2 && args[1] == "convert" {
-        if args.len() < 3 {
-            eprintln!("usage: htmlang convert <file.html>");
-            process::exit(1);
-        }
-        let html_file = &args[2];
-        let html = match fs::read_to_string(html_file) {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("error: {}: {}", html_file, e);
-                process::exit(1);
-            }
-        };
-        let hl_output = htmlang::convert::convert(&html);
-        print!("{}", hl_output);
-        return;
-    }
 
     let mut i = 1;
     while i < args.len() {
@@ -1927,19 +1610,6 @@ mod tests {
         assert_eq!(
             json_escape_string("a\tb\r\u{1}\"\\"),
             "\"a\\tb\\r\\u0001\\\"\\\\\""
-        );
-    }
-
-    #[test]
-    fn css_segments_split_on_rule_boundaries_only() {
-        let css = "body{line-height:1.5}.a{content:\"→\"}@media(x){.a{b:c}}";
-        assert_eq!(
-            css_segments(css),
-            vec![
-                "body{line-height:1.5}",
-                ".a{content:\"→\"}",
-                "@media(x){.a{b:c}}"
-            ]
         );
     }
 }

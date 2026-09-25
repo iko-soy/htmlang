@@ -13,10 +13,8 @@ path = "src/bin/htmlang_lsp/main.rs"
 [dependencies]
 htmlang-core = { path = "crates/htmlang-core" }
 notify = "7"
-rustls-pemfile = "2.2.0"
 serde_json = "1"
 tokio = { version = "1", features = ["io-std", "io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
-tokio-rustls = { version = "0.26.4", features = ["ring"] }
 tower-lsp = "0.20"
 
 [profile.release]

@@ -26,7 +26,7 @@ Linux, macOS, and Windows. Your change should pass all three.
   - `std.hl` — the standard library, written in htmlang and loaded before
     every file.
 - `crates/htmlang-wasm/` — thin wrapper exposing `compile` to the web playground.
-- `src/` — CLI, dev server, formatter, and HTML-to-hl converter.
+- `src/` — CLI, dev server, formatter, and `upgrade` (syntax migrations).
 - `src/bin/htmlang_lsp/` — language server binary (`htmlang-lsp`). Its
   completions come from the compiler's tables; hover and completion text live
   in `docs.rs`.

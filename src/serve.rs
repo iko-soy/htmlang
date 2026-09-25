@@ -1,49 +1,8 @@
 use std::path::{Component, Path, PathBuf};
-use std::sync::Arc;
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
-use tokio_rustls::TlsAcceptor;
-use tokio_rustls::rustls::ServerConfig;
-use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer};
-
-/// TLS configuration for the dev server. Load with `load_tls_config` and pass
-/// to `run_https` / `run_dir_https`.
-pub struct TlsConfig {
-    pub acceptor: TlsAcceptor,
-}
-
-/// Load a PEM-encoded certificate chain and private key into a `TlsConfig`.
-/// Supports PKCS#8, RSA, and SEC1-encoded private keys.
-pub fn load_tls_config(
-    cert_path: &Path,
-    key_path: &Path,
-) -> Result<TlsConfig, Box<dyn std::error::Error + Send + Sync>> {
-    let cert_bytes = std::fs::read(cert_path)?;
-    let key_bytes = std::fs::read(key_path)?;
-
-    let certs: Vec<CertificateDer<'static>> =
-        rustls_pemfile::certs(&mut cert_bytes.as_slice()).collect::<Result<Vec<_>, _>>()?;
-    if certs.is_empty() {
-        return Err(format!("no certificates found in {}", cert_path.display()).into());
-    }
-
-    let key: PrivateKeyDer<'static> = rustls_pemfile::private_key(&mut key_bytes.as_slice())?
-        .ok_or_else(|| format!("no private key found in {}", key_path.display()))?;
-
-    // rustls requires a crypto provider to be installed globally; install the
-    // default ring-based provider once. Subsequent calls are no-ops.
-    let _ = tokio_rustls::rustls::crypto::ring::default_provider().install_default();
-
-    let config = ServerConfig::builder()
-        .with_no_client_auth()
-        .with_single_cert(certs, key)?;
-
-    Ok(TlsConfig {
-        acceptor: TlsAcceptor::from(Arc::new(config)),
-    })
-}
 
 const RELOAD_SCRIPT: &str =
     r#"<script>new EventSource("/_events").onmessage=()=>location.reload()</script>"#;
@@ -69,39 +28,6 @@ pub async fn run(port: u16, html_path: PathBuf, reload: broadcast::Sender<()>) {
     }
 }
 
-/// Same as [`run`], but wraps each accepted connection in TLS.
-pub async fn run_https(
-    port: u16,
-    html_path: PathBuf,
-    reload: broadcast::Sender<()>,
-    tls: TlsConfig,
-) {
-    let listener = match TcpListener::bind(("127.0.0.1", port)).await {
-        Ok(l) => l,
-        Err(e) => {
-            eprintln!("error: failed to bind to port {}: {}", port, e);
-            return;
-        }
-    };
-
-    let acceptor = tls.acceptor;
-    loop {
-        if let Ok((stream, _)) = listener.accept().await {
-            let path = html_path.clone();
-            let rx = reload.subscribe();
-            let acceptor = acceptor.clone();
-            tokio::spawn(async move {
-                match acceptor.accept(stream).await {
-                    Ok(tls_stream) => {
-                        let _ = handle(tls_stream, path, None, rx).await;
-                    }
-                    Err(e) => eprintln!("tls handshake failed: {}", e),
-                }
-            });
-        }
-    }
-}
-
 /// Serve a directory of HTML files with auto-compilation, directory index, and route mapping.
 pub async fn run_dir(port: u16, root_dir: PathBuf, reload: broadcast::Sender<()>) {
     let listener = match TcpListener::bind(("127.0.0.1", port)).await {
@@ -118,39 +44,6 @@ pub async fn run_dir(port: u16, root_dir: PathBuf, reload: broadcast::Sender<()>
             let rx = reload.subscribe();
             tokio::spawn(async move {
                 let _ = handle_dir_request(stream, dir, rx).await;
-            });
-        }
-    }
-}
-
-/// Same as [`run_dir`], but wraps each accepted connection in TLS.
-pub async fn run_dir_https(
-    port: u16,
-    root_dir: PathBuf,
-    reload: broadcast::Sender<()>,
-    tls: TlsConfig,
-) {
-    let listener = match TcpListener::bind(("127.0.0.1", port)).await {
-        Ok(l) => l,
-        Err(e) => {
-            eprintln!("error: failed to bind to port {}: {}", port, e);
-            return;
-        }
-    };
-
-    let acceptor = tls.acceptor;
-    loop {
-        if let Ok((stream, _)) = listener.accept().await {
-            let dir = root_dir.clone();
-            let rx = reload.subscribe();
-            let acceptor = acceptor.clone();
-            tokio::spawn(async move {
-                match acceptor.accept(stream).await {
-                    Ok(tls_stream) => {
-                        let _ = handle_dir_request(tls_stream, dir, rx).await;
-                    }
-                    Err(e) => eprintln!("tls handshake failed: {}", e),
-                }
             });
         }
     }
