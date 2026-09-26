@@ -9,8 +9,8 @@
   @el [background #d0d0d0, padding 16]
     @text Third
 
--- Stack element (position: relative container)
-@stack [width 200, height 200]
+-- Overlays with absolute positioning
+@el [position relative, width 200, height 200]
   @el [position absolute, inset 0, background #3b82f6]
   @el [position absolute, bottom 10, right 10]
     @text [color white] Overlay

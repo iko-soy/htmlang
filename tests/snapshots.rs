@@ -2455,16 +2455,6 @@ fn element_grid() {
 
 // --- Stack element ---
 
-#[test]
-fn element_stack() {
-    let output = compile("@page T\n@stack [width 200, height 200]\n  @el\n    @text Layer");
-    assert!(
-        output.contains("position:relative"),
-        "stack should have position:relative: {}",
-        output
-    );
-}
-
 // --- @in-front / @behind overlay layers ---
 
 #[test]
@@ -2771,14 +2761,6 @@ fn no_warning_new_elements() {
             .iter()
             .any(|d| d.severity == htmlang::parser::Severity::Error),
         "grid should parse, got: {:?}",
-        diags
-    );
-    let diags = parse_diagnostics("@stack\n  @text A");
-    assert!(
-        !diags
-            .iter()
-            .any(|d| d.severity == htmlang::parser::Severity::Error),
-        "stack should parse, got: {:?}",
         diags
     );
     let diags = parse_diagnostics("@row\n  @spacer");

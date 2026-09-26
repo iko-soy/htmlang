@@ -98,7 +98,6 @@ name. Every container lays its children out in a column, except `@row`.
 | `@row` | div, flex row | Horizontal layout |
 | `@el` | div, flex column | The container: children laid out top to bottom |
 | `@grid` | div, grid | Grid container (use `grid-cols`) |
-| `@stack` | div, position relative | Children layered on top of each other |
 | `@in-front` / `@behind` | div, absolute | Overlay layers filling the parent (see below) |
 | `@text` | span | Styled inline text |
 | `@paragraph` | p | Flowing text with inline elements |

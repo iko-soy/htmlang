@@ -248,7 +248,6 @@ pub static TAGS: &[TagSpec] = &[
     TagSpec { name: "audio", html: "audio", arg: TagArg::Attr("src"), ..TagSpec::DEFAULT },
     TagSpec { name: "iframe", html: "iframe", arg: TagArg::Attr("src"), container: true, ..TagSpec::DEFAULT },
     TagSpec { name: "grid", html: "div", css: "display:grid;", wraps_text: true, container: true, ..TagSpec::DEFAULT },
-    TagSpec { name: "stack", html: "div", css: "position:relative;", wraps_text: true, container: true, ..TagSpec::DEFAULT },
     TagSpec { name: "in-front", html: "div", css: "display:flex;flex-direction:column;position:absolute;inset:0;", container: true, ..TagSpec::DEFAULT },
     TagSpec { name: "behind", html: "div", css: "display:flex;flex-direction:column;position:absolute;inset:0;z-index:-1;", container: true, ..TagSpec::DEFAULT },
 ];

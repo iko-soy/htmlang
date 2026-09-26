@@ -60,7 +60,6 @@ pub(crate) const ELEMENTS: &[Doc] = &[
         "@slot header",
     ),
     doc("grid", "Grid container (`display: grid`).", "@grid [grid-cols 3, spacing 20]"),
-    doc("stack", "Children layered on top of each other (`position: relative`).", "@stack"),
     doc(
         "in-front",
         "Overlay layer filling the parent, painted on top of its content.",
