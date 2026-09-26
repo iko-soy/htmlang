@@ -4671,8 +4671,12 @@ fn validate_tree(
             }
             in_function_body(elem, &mut diagnostics[start..]);
 
-            let in_paragraph = (in_paragraph || elem.kind == ElementKind::Paragraph)
-                && !elem.kind.is_tag("button");
+            // An element that ends the <p> takes what is inside it out of
+            // the paragraph too, so only it is reported
+            let in_paragraph = elem.kind == ElementKind::Paragraph
+                || (in_paragraph
+                    && ends_a_paragraph(&elem.kind).is_none()
+                    && !elem.kind.is_tag("button"));
             validate_tree(&elem.children, Some(&elem.kind), in_paragraph, diagnostics);
         }
     }

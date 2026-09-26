@@ -37,7 +37,8 @@ pub(crate) fn completions(text: &str, position: Position) -> Vec<CompletionItem>
         if let Some(colon) = current_word.rfind(':') {
             let prefix = &current_word[..=colon];
             if vocab::is_prefixed(prefix) {
-                return state_attr_completions(prefix, edit_range);
+                let element = owning_element(text, position);
+                return state_attr_completions(prefix, edit_range, element.as_deref());
             }
         }
 
@@ -809,11 +810,7 @@ fn attr_completions(range: Range, element: Option<&str>) -> Vec<CompletionItem> 
         completion.sort_text = Some(format!("{}_{}", rank, label));
         items.push(completion);
     };
-    // `spacing`, `wrap` and `grid-cols` only on a row, column or grid (a
-    // function's root isn't known, so a call gets them all)
-    let lays_out_children = element
-        .and_then(htmlang::ast::ElementKind::from_name)
-        .is_none_or(|kind| kind.layout().is_container());
+    let lays_out_children = lays_out_children(element);
     for name in vocab::HTMLANG_ATTRIBUTES {
         if !lays_out_children && vocab::CONTAINER_ATTRIBUTES.contains(name) {
             continue;
@@ -876,10 +873,27 @@ fn attr_completions(range: Range, element: Option<&str>) -> Vec<CompletionItem> 
     items
 }
 
+/// Does `element` lay out its children, so `spacing`, `wrap` and
+/// `grid-cols` work on it: a row, column or grid. A function's root isn't
+/// known, so a call (or no element) gets them all.
+fn lays_out_children(element: Option<&str>) -> bool {
+    element
+        .and_then(htmlang::ast::ElementKind::from_name)
+        .is_none_or(|kind| kind.layout().is_container())
+}
+
 /// Styles that can follow a state/media prefix: `hover:color`, `md:padding`.
-fn state_attr_completions(prefix: &str, range: Range) -> Vec<CompletionItem> {
+/// `spacing`, `wrap` and `grid-cols` only where `element` lays out its
+/// children, or after `children:`, which puts them on the children.
+fn state_attr_completions(
+    prefix: &str,
+    range: Range,
+    element: Option<&str>,
+) -> Vec<CompletionItem> {
+    let lays_out_children = prefix == "children:" || lays_out_children(element);
     let htmlang = vocab::HTMLANG_ATTRIBUTES
         .iter()
+        .filter(|name| lays_out_children || !vocab::CONTAINER_ATTRIBUTES.contains(name))
         .map(|name| (*name, !vocab::HTMLANG_FLAGS.contains(name)));
     let css = vocab::CSS_PROPERTIES.iter().map(|name| (*name, true));
     htmlang
@@ -1296,6 +1310,17 @@ mod tests {
         // A function's root isn't known
         assert!(offers(Some("card"), "spacing"));
         assert!(offers(None, "spacing"));
+        // After a prefix too, except `children:`, which styles the children
+        let prefixed = |prefix: &str, element: &str, name: &str| {
+            state_attr_completions(prefix, Range::default(), Some(element))
+                .iter()
+                .any(|i| i.label == format!("{}{}", prefix, name))
+        };
+        assert!(prefixed("md:", "row", "spacing"));
+        assert!(!prefixed("md:", "h2", "spacing"));
+        assert!(!prefixed("hover:", "button", "wrap"));
+        assert!(prefixed("hover:", "button", "padding"));
+        assert!(prefixed("children:", "paragraph", "spacing"));
     }
 
     #[test]

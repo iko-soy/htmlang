@@ -1557,3 +1557,12 @@ fn canvas_and_iframe_took_spacing_without_laying_anything_out() {
         );
     }
 }
+
+#[test]
+fn an_empty_fragment_in_text_left_two_spaces() {
+    let out = compile("@paragraph\n  a\n  @fragment\n  b\n");
+    assert!(out.contains(">a b</p>"), "{}", out);
+    // Nor a line break in a native element
+    let out = compile("@pre\n  a\n  @fragment\n  b\n");
+    assert!(out.contains(">a\nb</pre>"), "{}", out);
+}

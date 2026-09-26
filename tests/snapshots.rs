@@ -6310,7 +6310,15 @@ fn a_semantic_container_in_a_paragraph_is_a_warning() {
     assert!(found[0].message.contains("<section>"), "{:?}", found);
     // Deeper, and inline
     let diags = parse_diagnostics("@paragraph\n  @text\n    {@ul {@li x}}\n");
-    assert_eq!(coded(&diags, "block-in-paragraph").len(), 2, "{:?}", diags);
+    let found = coded(&diags, "block-in-paragraph");
+    assert_eq!(found.len(), 1, "{:?}", diags);
+    assert!(found[0].message.contains("<ul>"), "{:?}", found);
+    // What is inside the element that ends the <p> is out of it already,
+    // so only that element is reported
+    let diags = parse_diagnostics("@paragraph\n  @section\n    @ul > @li x\n  @h2 y\n");
+    let found = coded(&diags, "block-in-paragraph");
+    assert_eq!(found.len(), 2, "{:?}", diags);
+    assert_eq!((found[0].line, found[1].line), (2, 4), "{:?}", found);
     // htmlang's own layout elements are spans there, and a button keeps
     // what is inside it
     let diags = parse_diagnostics(

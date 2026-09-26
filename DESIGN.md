@@ -295,8 +295,8 @@ Everything else about layout is plain CSS: `justify-content`, `align-items`,
 A row, column or grid written inside text, inline in a line (`{@el ...}`) or
 as a child of a text element, is laid out inline (`display: inline-flex`, or
 `inline-grid`), and keeps its attributes. Anywhere inside text, `@el`, `@row`
-and `@grid` are written as a `<span>` rather than a `<div>`, since text can't
-hold a `<div>`.
+and `@grid` (and `@in-front` and `@behind`) are written as a `<span>` rather
+than a `<div>`, since text can't hold a `<div>`.
 
 ```
 @paragraph
@@ -308,7 +308,8 @@ hold a `<div>`.
 
 Any other element keeps its HTML element. One whose HTML ends a paragraph,
 such as `@section`, `@ul` or `@h2`, is a warning inside `@paragraph`
-(`block-in-paragraph`): the browser would move it out of the `<p>`.
+(`block-in-paragraph`): the browser would move it, and what follows it, out
+of the `<p>`.
 
 ### Overlays: `@in-front` and `@behind`
 

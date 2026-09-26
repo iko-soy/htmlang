@@ -936,12 +936,20 @@ fn generate_children(
 ) {
     let mut previous: Option<bool> = after_text.then_some(true);
     for child in children {
+        let start = out.len();
         if let Some(previous_is_text) = previous
             && let Some(sep) = separator(layout, previous_is_text, child)
         {
             out.push(sep);
         }
+        let body = out.len();
         generate_node(child, Some(layout), out, styles, ctx);
+        // A child that writes nothing (an empty `@fragment`) takes no
+        // separator either, so text never gets two spaces in a row
+        if out.len() == body {
+            out.truncate(start);
+            continue;
+        }
         previous = Some(matches!(child, Node::Text(_)));
     }
 }
