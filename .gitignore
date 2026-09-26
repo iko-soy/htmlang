@@ -1,3 +1,4 @@
 /target
 *.html
 !tests/snapshots/*.html
+!crates/htmlang-wasm/playground/*.html

@@ -41,10 +41,8 @@ pub(crate) fn definition_at(
     // Find definition location
     let (def_line, def_col, def_len) = if let Some(name) = word.strip_prefix('$') {
         find_definition(text, name)?
-    } else if let Some(name) = word.strip_prefix('@') {
-        find_fn_definition(text, name)?
     } else {
-        return None;
+        find_fn_definition(text, word.strip_prefix('@')?)?
     };
 
     Some(GotoDefinitionResponse::Scalar(Location {

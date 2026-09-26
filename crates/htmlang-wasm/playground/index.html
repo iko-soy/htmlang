@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>htmlang Playground</title>
+<!--
+  The playground deployed to GitHub Pages (.github/workflows/playground.yml).
+  It sits next to the wasm-bindgen output of this crate (htmlang_wasm.js and
+  htmlang_wasm_bg.wasm) and opens with examples/demo.hl, copied as demo.hl.
+-->
+<style>
+*{box-sizing:border-box;margin:0}
+body{font-family:system-ui,-apple-system,sans-serif;display:flex;height:100vh;background:#1a1a2e;color:#eee}
+.panel{flex:1;display:flex;flex-direction:column;min-width:0}
+.header{padding:12px 16px;background:#16213e;border-bottom:1px solid #0f3460;display:flex;align-items:center;gap:12px}
+.header h1{font-size:14px;font-weight:600;color:#e94560}
+.header .tag{font-size:11px;padding:2px 8px;background:#0f3460;border-radius:4px;color:#a8b2d1}
+.editor-wrap{flex:1;position:relative;overflow:hidden}
+textarea{width:100%;height:100%;resize:none;border:none;outline:none;padding:16px;font-family:ui-monospace,monospace;font-size:14px;line-height:1.6;background:#1a1a2e;color:#e6e6e6;tab-size:2;position:absolute;top:0;left:0}
+iframe{flex:1;border:none;background:white}
+.divider{width:1px;background:#0f3460;cursor:col-resize}
+.divider:hover{background:#e94560}
+.toolbar{padding:8px 16px;background:#16213e;border-top:1px solid #0f3460;display:flex;gap:8px;align-items:center}
+button{padding:6px 16px;border:none;border-radius:4px;cursor:pointer;font-size:13px;font-weight:500}
+.btn-run{background:#e94560;color:white}
+.btn-run:hover{background:#c81e45}
+.btn-copy,.btn-share{background:#0f3460;color:#a8b2d1}
+.status{margin-left:auto;font-size:12px;color:#666}
+</style>
+</head>
+<body>
+<div class="panel" id="editor-panel">
+<div class="header"><h1>htmlang</h1><span class="tag">playground</span></div>
+<div class="editor-wrap">
+<textarea id="editor" spellcheck="false"></textarea>
+</div>
+<div class="toolbar">
+<button class="btn-run" onclick="compile()">&#9654; Run (Ctrl+Enter)</button>
+<button class="btn-copy" onclick="copyOutput()">Copy HTML</button>
+<button class="btn-share" onclick="share()">Share</button>
+<span class="status" id="status">Loading…</span>
+</div>
+</div>
+<div class="divider" id="divider"></div>
+<div class="panel" id="preview-panel">
+<div class="header"><span class="tag">preview</span></div>
+<iframe id="preview"></iframe>
+</div>
+<script src="htmlang_wasm.js"></script>
+<script>
+var editor=document.getElementById('editor');
+var statusEl=document.getElementById('status');
+var lastOutput='';
+var ready=false;
+
+function compile(){
+  if(!ready)return;
+  var start=performance.now();
+  var html=wasm_bindgen.compile(editor.value);
+  var ms=(performance.now()-start).toFixed(1);
+  lastOutput=html;
+  document.getElementById('preview').srcdoc=html;
+  statusEl.textContent='Compiled in '+ms+'ms';
+}
+function copyOutput(){
+  if(lastOutput)navigator.clipboard.writeText(lastOutput).then(function(){statusEl.textContent='Copied to clipboard!'});
+}
+function share(){
+  var encoded=btoa(unescape(encodeURIComponent(editor.value)));
+  history.replaceState(null,'','#'+encoded);
+  navigator.clipboard.writeText(location.href).then(function(){statusEl.textContent='Share URL copied to clipboard!'});
+}
+function sourceFromHash(){
+  if(location.hash.length<=1)return null;
+  try{return decodeURIComponent(escape(atob(location.hash.slice(1))));}catch(e){return null;}
+}
+
+// Resizable divider
+var divider=document.getElementById('divider');
+var editorPanel=document.getElementById('editor-panel');
+var dragging=false;
+divider.addEventListener('mousedown',function(){dragging=true;document.body.style.cursor='col-resize';document.body.style.userSelect='none';});
+document.addEventListener('mousemove',function(e){if(!dragging)return;editorPanel.style.flex='none';editorPanel.style.width=(e.clientX/window.innerWidth)*100+'%';});
+document.addEventListener('mouseup',function(){if(dragging){dragging=false;document.body.style.cursor='';document.body.style.userSelect='';}});
+
+// Keyboard shortcuts
+editor.addEventListener('keydown',function(e){
+  if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();compile();}
+  if(e.key==='Tab'){e.preventDefault();var s=e.target;var start=s.selectionStart;s.value=s.value.substring(0,start)+'  '+s.value.substring(s.selectionEnd);s.selectionStart=s.selectionEnd=start+2;}
+});
+
+var shared=sourceFromHash();
+Promise.all([
+  wasm_bindgen('htmlang_wasm_bg.wasm'),
+  shared!==null?Promise.resolve(shared):fetch('demo.hl').then(function(r){return r.ok?r.text():'';})
+]).then(function(results){
+  editor.value=results[1];
+  ready=true;
+  compile();
+}).catch(function(e){
+  statusEl.textContent='Failed to load: '+e;
+});
+</script>
+</body>
+</html>
