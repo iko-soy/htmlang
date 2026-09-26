@@ -1664,7 +1664,9 @@ impl Evaluator {
                     Some(default) => {
                         let record = whole_record(default, &ctx.variables)
                             .map(|path| record_entries(&ctx.variables, &path));
+                        let before = ctx.diagnostics.len();
                         let (value, quoted) = fill_default(&fn_def, param, default, ctx);
+                        point_at_call(ctx, before, &fn_def, name, line_num, content);
                         (value, quoted, record)
                     }
                     None => {
@@ -1700,22 +1702,7 @@ impl Evaluator {
         let before = ctx.diagnostics.len();
         let mut body_nodes = self.eval_block(&fn_def.body, ctx);
         ctx.current_file = caller_file;
-        // A line of another file (the standard library, an included file)
-        // means nothing in this one: its problems are reported at the call
-        if fn_def.file != ctx.current_file {
-            let defined_in = fn_def.file.as_deref().unwrap_or("the file being compiled");
-            for d in &mut ctx.diagnostics[before..] {
-                d.message = format!(
-                    "{}\n  in @{} (line {} of {})",
-                    d.message, name, d.line, defined_in
-                );
-                d.line = line_num;
-                d.column = None;
-                d.subject = None;
-                d.suggestion = None;
-                d.source_line = Some(content.into());
-            }
-        }
+        point_at_call(ctx, before, &fn_def, name, line_num, content);
 
         // Restore variables and call stack
         ctx.restore_scope(saved);
@@ -1871,6 +1858,37 @@ fn resolve(
         name_at,
         source: source.to_string(),
     })))
+}
+
+/// A line of another file (the standard library, an included file) means
+/// nothing in this one: the problems reported since `before` while
+/// evaluating the function (its body, a default) are moved to the call.
+fn point_at_call(
+    ctx: &mut ParseContext,
+    before: usize,
+    function: &FnDef,
+    name: &str,
+    line: usize,
+    source: &str,
+) {
+    if function.file == ctx.current_file {
+        return;
+    }
+    let defined_in = function
+        .file
+        .as_deref()
+        .unwrap_or("the file being compiled");
+    for d in &mut ctx.diagnostics[before..] {
+        d.message = format!(
+            "{}\n  in @{} (line {} of {})",
+            d.message, name, d.line, defined_in
+        );
+        d.line = line;
+        d.column = None;
+        d.subject = None;
+        d.suggestion = None;
+        d.source_line = Some(source.into());
+    }
 }
 
 /// A call nested deeper than [`MAX_CALL_DEPTH`].
@@ -3370,6 +3388,18 @@ fn validate_tree(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for node in nodes {
+        // An element inside a line of text (`{@kbd ...}`, an inline call)
+        // is checked like one on a line of its own
+        if let Node::Text(segments) = node {
+            let inline: Vec<Node> = segments
+                .iter()
+                .filter_map(|segment| match segment {
+                    TextSegment::Inline(elem) => Some(Node::Element(elem.clone())),
+                    _ => None,
+                })
+                .collect();
+            validate_tree(&inline, parent_kind, diagnostics);
+        }
         if let Node::Element(elem) = node {
             let start = diagnostics.len();
             for attr in &elem.attrs {

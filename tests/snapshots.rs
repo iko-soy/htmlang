@@ -5089,6 +5089,22 @@ fn a_forwarded_attribute_is_checked_against_the_root_element() {
 }
 
 #[test]
+fn an_inline_call_is_checked_against_its_root_element() {
+    // Like `{@text [spacing 2]}`, which is checked where it is written
+    let diags = parse_diagnostics(
+        "@let @label\n  @text hi\n@paragraph\n  See {@label [spacing 4]} and {@text [spacing 2] x}\n",
+    );
+    let no_effect = coded(&diags, "no-effect");
+    assert_eq!(no_effect.len(), 2, "{:?}", diags);
+    assert!(no_effect.iter().all(|d| d.line == 4), "{:?}", no_effect);
+    assert!(
+        no_effect[0].message.contains("in the body of @label"),
+        "{}",
+        no_effect[0].message
+    );
+}
+
+#[test]
 fn a_function_is_called_inline_in_text() {
     let out = compile("@let @key\n  @kbd\n    @children\n@paragraph\n  Press {@key Ctrl+K} now.\n");
     assert!(out.contains("Press <kbd"), "{}", out);
@@ -5272,6 +5288,24 @@ fn a_problem_in_an_included_function_is_reported_at_the_call() {
     let undefined = coded(&result.diagnostics, "undefined-variable");
     assert_eq!(undefined.len(), 1, "{:?}", result.diagnostics);
     assert_eq!(undefined[0].line, 3);
+}
+
+#[test]
+fn a_problem_in_an_included_functions_default_is_reported_at_the_call() {
+    let dir = std::env::temp_dir().join("htmlang_p2_included_default");
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("lib.hl"), "@let @box [tone $nope]\n  @el $tone\n").unwrap();
+    let result = htmlang::parser::parse_with_base("@include lib.hl\n@el\n  @box\n", Some(&dir));
+    let undefined = coded(&result.diagnostics, "undefined-variable");
+    assert_eq!(undefined.len(), 1, "{:?}", result.diagnostics);
+    assert_eq!(undefined[0].line, 3);
+    assert!(
+        undefined[0].message.contains("in @box (line 1 of lib.hl)"),
+        "{}",
+        undefined[0].message
+    );
+    assert!(undefined[0].column.is_none() && undefined[0].subject.is_none());
 }
 
 #[test]

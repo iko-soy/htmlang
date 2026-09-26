@@ -1676,9 +1676,6 @@ impl Reader<'_> {
     }
 }
 
-/// Whether `name` can be a value's or bundle's name, as `@let name`: a
-/// name `$name` reaches (`t.greeting` too, for a record's field), or a
-/// custom property `--name`.
 /// Why a function can't be named `name`: it is the name of a built-in
 /// element, which the function would replace everywhere after it, or of a
 /// directive, which it could never replace.
@@ -1700,6 +1697,9 @@ fn shadowed(name: &str) -> Option<String> {
     }
 }
 
+/// Whether `name` can be a value's or bundle's name, as `@let name`: a
+/// name `$name` reaches (`t.greeting` too, for a record's field), or a
+/// custom property `--name`.
 fn is_definition_name(name: &str) -> bool {
     let n = crate::interp::name_len(name);
     if n == 0 || matches!(&name[..n], "true" | "false" | "not" | "and" | "or") {
