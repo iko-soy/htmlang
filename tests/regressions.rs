@@ -328,7 +328,11 @@ fn container_arguments_are_rendered_as_text() {
         assert!(out.contains("Hello"), "{:?} dropped its text: {}", src, out);
     }
     let out = compile("@paragraph Read {@link /more more}");
-    assert!(out.contains("<a href=\"/more\">more</a>"), "{}", out);
+    assert!(
+        out.contains("<a href=\"/more\" class=\"hl-b\">more</a>"),
+        "{}",
+        out
+    );
 }
 
 #[test]
@@ -1599,7 +1603,7 @@ fn inline_elements_were_printed_as_text_in_a_heading() {
     let out = compile("@h1 Hello {@text [color red] world}\n");
     assert!(!out.contains("{@"), "{}", out);
     assert!(
-        out.contains("Hello <span class=\"b\">world</span></h1>"),
+        out.contains("Hello <span class=\"hl-b\">world</span></h1>"),
         "{}",
         out
     );
@@ -1626,7 +1630,7 @@ fn a_fragment_s_lines_were_glued_to_the_lines_around_it() {
     let out = compile("@pre\n  s\n  @fragment\n    m\n    n\n  t\n");
     assert!(out.contains(">s\nm\nn\nt</pre>"), "{}", out);
     let out = compile("@let @two\n  @fragment\n    a\n    b\nx\n@two\n@two\ny\n");
-    assert!(out.ends_with("</style>x\na\nb\na\nb\ny"), "{}", out);
+    assert_eq!(out, "x\na\nb\na\nb\ny");
     // In a text element and a column nothing changes
     let out = compile("@h2 s\n  @fragment\n    m\n  t\n");
     assert!(out.contains(">s m t</h2>"), "{}", out);
@@ -1668,7 +1672,7 @@ fn width_fill_in_a_row_made_a_column_is_not_flex() {
     let out = compile("@row [sm:flex-direction column]\n  @el [width fill] a\n");
     assert!(
         out.contains(
-            "@media(min-width:640px){:where(.a)>.b{flex:0 1 auto;min-width:auto;width:100%;}"
+            "@media(min-width:640px){:where(.hl-a)>.hl-b{flex:0 1 auto;min-width:auto;width:100%;}"
         ),
         "{}",
         out
@@ -1718,7 +1722,7 @@ fn a_flex_longhand_keeps_width_fill_growing() {
     // the element doesn't write
     let out = compile("@row [md:flex-direction column]\n  @el [flex-shrink 0, width fill] a\n");
     assert!(
-        out.contains(":where(.a)>.b{flex-grow:0;flex-basis:auto;min-width:auto;width:100%;}"),
+        out.contains(":where(.hl-a)>.hl-b{flex-grow:0;flex-basis:auto;min-width:auto;width:100%;}"),
         "{}",
         out
     );
@@ -1729,7 +1733,11 @@ fn an_image_written_with_src_has_one_src() {
     // It used to write `src=""` for the missing argument, then `src="a.png"`
     let html = compile("@image [src=a.png, alt=x]\n");
     assert_eq!(html.matches("src=").count(), 1, "{}", html);
-    assert!(html.contains(r#"<img src="a.png" alt="x">"#), "{}", html);
+    assert!(
+        html.contains(r#"<img src="a.png" class="hl-a" alt="x">"#),
+        "{}",
+        html
+    );
 }
 
 #[test]
@@ -1762,4 +1770,76 @@ fn inline_works_with_the_src_attribute_too() {
     );
     assert_eq!(html.matches("<svg").count(), 2, "{}", html);
     assert!(!html.contains("<img"), "{}", html);
+}
+
+#[test]
+fn an_outline_keeps_the_style_it_was_given() {
+    // `outline 2 solid red` became `outline:2px solid solid red`, and an
+    // outline without a style got an invented `solid`
+    let html = compile("@input [type=text, aria-label=x, focus:outline 2 solid var(--brand)]\n");
+    assert!(
+        html.contains(":focus{outline:2px solid var(--brand);}"),
+        "{}",
+        html
+    );
+    assert!(!html.contains("solid solid"), "{}", html);
+    let html = compile("@el [outline 2 red]\n");
+    assert!(html.contains("outline:2px red;"), "{}", html);
+    assert!(!html.contains("solid"), "{}", html);
+}
+
+#[test]
+fn css_s_container_shorthand_is_written_as_it_is() {
+    // `container X` always became `container-type:inline-size`, dropping
+    // the name
+    let html = compile("@el [container card / inline-size]\n");
+    assert!(html.contains("container:card / inline-size;"), "{}", html);
+    assert!(!html.contains("container-type"), "{}", html);
+}
+
+#[test]
+fn a_class_of_one_s_own_doesn_t_pick_up_generated_rules() {
+    // `@el [class=a]` gave `class="j a"`, and the generated `.a` rule
+    // styled it too
+    let html = compile("@el [padding 1]\n@el [class=a, padding 2]\n");
+    assert!(html.contains(r#"class="hl-b a""#), "{}", html);
+    assert!(!html.contains(".a{"), "{}", html);
+}
+
+#[test]
+fn a_closed_dialog_and_a_hidden_element_stay_hidden() {
+    // htmlang's `display:flex` beat the browser's `display:none`, so a
+    // closed @dialog and `@el [hidden]` showed
+    let rule = "{display:none!important}";
+    for src in ["@page T\n@dialog Closed\n", "@dialog Closed\n"] {
+        let html = compile(src);
+        assert!(html.contains(r#"<dialog class="hl-a">"#), "{}", html);
+        let at = html.find(rule).unwrap_or_else(|| panic!("{}", html));
+        let selector = &html[..at];
+        assert!(
+            selector.ends_with(
+                r#":where([class^="hl-"],[class*=" hl-"]):where([hidden]:not([hidden="until-found"]),dialog:not([open]):not(:popover-open),[popover]:not(:popover-open):not(dialog[open]))"#
+            ),
+            "{}",
+            html
+        );
+        // In the reset layer, before htmlang's own
+        assert!(
+            html.find("@layer hl-reset{").unwrap() < at
+                && at < html.find("@layer htmlang{").unwrap(),
+            "{}",
+            html
+        );
+    }
+    let html = compile("@el [hidden] Hidden\n");
+    assert!(html.contains(r#"<div class="hl-a" hidden>"#), "{}", html);
+    assert!(html.contains(rule), "{}", html);
+}
+
+#[test]
+fn a_fragment_without_styles_has_no_empty_layer() {
+    // Every output had `<style>@layer htmlang{}</style>`
+    assert_eq!(compile("Hello\n"), "Hello");
+    let html = compile("@page T\nHello\n");
+    assert!(!html.contains("@layer htmlang{}"), "{}", html);
 }

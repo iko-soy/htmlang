@@ -16,6 +16,10 @@ const BREAKPOINTS: &[(&str, &str)] = &[
     ("2xl", "1536px"),
 ];
 
+/// The prefix of every generated class (`hl-a`, `hl-b`, ...), which keeps
+/// them out of the author's own class names.
+pub const CLASS_PREFIX: &str = "hl-";
+
 /// Generate short CSS class names: a..z, then aa..a9, ba..b9, ..., z9, then
 /// aaa, ... The first character is always a letter; later ones are drawn from
 /// [a-z0-9]. The mapping is a bijection, so distinct indices never collide.
@@ -168,7 +172,7 @@ impl StyleCollector {
             }
         }
         let idx = self.entries.len();
-        let name = short_class_name(idx);
+        let name = format!("{}{}", CLASS_PREFIX, short_class_name(idx));
         self.entries.push(StyleEntry {
             class_name: name.clone(),
             base,
@@ -190,6 +194,9 @@ impl StyleCollector {
     /// All generated rules, wrapped in `@layer htmlang`.
     fn to_css_formatted(&self, dev: bool) -> String {
         let mut css = String::new();
+        if self.entries.is_empty() {
+            return css;
+        }
         let inner_indent = if dev { "  " } else { "" };
         css.push_str(if dev {
             "@layer htmlang {\n"
@@ -764,15 +771,22 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
 
     // Focus-visible CSS for interactive elements (accessibility)
     let focus_visible_css = if ctx.has_interactive {
+        let focusable = ":where(a,button,input,select,textarea):focus-visible";
         if dev {
-            "a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }\n"
+            format!(
+                "{}{} {{ outline: 2px solid currentColor; outline-offset: 2px; }}\n",
+                OWN_ELEMENTS, focusable
+            )
         } else {
-            "a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid currentColor;outline-offset:2px}"
+            format!(
+                "{}{}{{outline:2px solid currentColor;outline-offset:2px}}",
+                OWN_ELEMENTS, focusable
+            )
         }
     } else {
-        ""
+        String::new()
     };
-    let reset_css = reset_css(dev, focus_visible_css);
+    let reset_css = reset_css(dev, true, &focus_visible_css);
 
     format!(
         "<!DOCTYPE html>{nl}<html{html_attrs}>{nl}<head>{nl}<meta charset=\"utf-8\">{nl}\
@@ -853,16 +867,53 @@ fn build_element_css(doc: &Document, styles: &StyleCollector, dev: bool) -> Stri
     element_css
 }
 
+/// htmlang's own elements: those with a generated class, or the class of a
+/// function's scoped `@style`. The reset's rules for elements are kept to
+/// them, so `@raw` and `@markdown` content, and the page a fragment is put
+/// into, keep their own.
+const OWN_ELEMENTS: &str = ":where([class^=\"hl-\"],[class*=\" hl-\"])";
+
 /// Built-in reset rules, in a layer before `htmlang`: unlayered CSS beats
-/// every layer, so an unlayered `a{color:inherit}` would override
-/// `@link [color red]`.
-fn reset_css(dev: bool, focus_visible_css: &str) -> String {
-    let base = if dev {
-        "*, *::before, *::after { box-sizing: border-box; }\nbody { margin: 0; font-family: system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; min-height: 100dvh; }\nimg { display: block; }\na { text-decoration: none; color: inherit; }\n"
+/// every layer, so an unlayered rule here would override the generated
+/// ones. A page resets `box-sizing` everywhere and makes `<body>` a column
+/// that fills the window; a fragment, which goes into a page it doesn't
+/// own, touches only htmlang's own elements. In both, an element htmlang
+/// lays out stays hidden while it is `hidden`, a closed `<dialog>` or a
+/// popover that isn't showing: its generated `display` would otherwise
+/// beat the browser's `display: none`.
+fn reset_css(dev: bool, page: bool, focus_visible_css: &str) -> String {
+    let own = OWN_ELEMENTS;
+    let mut rules = Vec::new();
+    if page {
+        rules.push(if dev {
+            "*, *::before, *::after { box-sizing: border-box; }".to_string()
+        } else {
+            "*,*::before,*::after{box-sizing:border-box}".to_string()
+        });
+        rules.push(if dev {
+            "body { margin: 0; font-family: system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; min-height: 100dvh; }".to_string()
+        } else {
+            "body{margin:0;font-family:system-ui,-apple-system,sans-serif;display:flex;flex-direction:column;min-height:100dvh}".to_string()
+        });
     } else {
-        "*,*::before,*::after{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,sans-serif;display:flex;flex-direction:column;min-height:100dvh}img{display:block}a{text-decoration:none;color:inherit}"
-    };
-    let rules = format!("{}{}", base, focus_visible_css);
+        rules.push(if dev {
+            format!("{own}, {own}::before, {own}::after {{ box-sizing: border-box; }}")
+        } else {
+            format!("{own},{own}::before,{own}::after{{box-sizing:border-box}}")
+        });
+    }
+    let hidden = "[hidden]:not([hidden=\"until-found\"]),dialog:not([open]):not(:popover-open),\
+                  [popover]:not(:popover-open):not(dialog[open])";
+    rules.push(if dev {
+        format!("{own}:where({hidden}) {{ display: none !important; }}")
+    } else {
+        format!("{own}:where({hidden}){{display:none!important}}")
+    });
+    let mut rules = rules.join(if dev { "\n" } else { "" });
+    if dev {
+        rules.push('\n');
+    }
+    rules.push_str(focus_visible_css);
     if dev {
         format!(
             "@layer hl-reset, htmlang;\n@layer hl-reset {{\n{}}}\n",
@@ -888,7 +939,11 @@ fn generate_partial_inner(doc: &Document, dev: bool) -> String {
 
     generate_children(&doc.nodes, None, &mut body, &mut styles, &mut ctx);
 
-    let element_css = build_element_css(doc, &styles, dev);
+    let mut element_css = build_element_css(doc, &styles, dev);
+    // htmlang's own elements get the reset's rules for elements
+    if !styles.entries.is_empty() {
+        element_css.insert_str(0, &reset_css(dev, false, ""));
+    }
 
     if element_css.is_empty() {
         body
@@ -2047,36 +2102,12 @@ fn attrs_to_css(attrs: &[Attribute], state_prefix: &str, site: &Site) -> String 
         }
 
         match effective_key {
-            // Layout
+            // htmlang's own words: they lay out children or place the
+            // element in its parent, and mean more than one CSS property
             "spacing" if !lays_out_children => {}
-            "spacing" | "gap" => {
+            "spacing" => {
                 if let Some(v) = val {
                     push_css(&mut css, "gap", &css_px(v));
-                }
-            }
-            "padding" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "padding", &css_px_multi(v));
-                }
-            }
-            "padding-top" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "padding-top", &css_px(v));
-                }
-            }
-            "padding-bottom" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "padding-bottom", &css_px(v));
-                }
-            }
-            "padding-left" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "padding-left", &css_px(v));
-                }
-            }
-            "padding-right" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "padding-right", &css_px(v));
                 }
             }
 
@@ -2105,31 +2136,6 @@ fn attrs_to_css(attrs: &[Attribute], state_prefix: &str, site: &Site) -> String 
                     sizes.push(&mut css, property, value);
                 }
             }
-            "width" | "height" => {
-                if let Some(v) = val {
-                    push_css(&mut css, effective_key, &css_px(v));
-                }
-            }
-            "min-width" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "min-width", &css_px(v));
-                }
-            }
-            "max-width" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "max-width", &css_px(v));
-                }
-            }
-            "min-height" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "min-height", &css_px(v));
-                }
-            }
-            "max-height" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "max-height", &css_px(v));
-                }
-            }
 
             // Alignment: auto margins, which work along either direction.
             // They are written last, so a `margin` on the same element
@@ -2147,271 +2153,37 @@ fn attrs_to_css(attrs: &[Attribute], state_prefix: &str, site: &Site) -> String 
             "align-top" => push_css(&mut aligned, "margin-bottom", "auto"),
             "align-bottom" => push_css(&mut aligned, "margin-top", "auto"),
 
-            // Typography
-            "letter-spacing" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "letter-spacing", &css_px(v));
-                }
-            }
-
-            // Overflow & positioning
-            "top" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "top", &css_px(v));
-                }
-            }
-            "right" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "right", &css_px(v));
-                }
-            }
-            "bottom" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "bottom", &css_px(v));
-                }
-            }
-            "left" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "left", &css_px(v));
-                }
-            }
-
-            // Effects
-
-            // Flow
             "wrap" if lays_out_children => push_css(&mut css, "flex-wrap", "wrap"),
             "wrap" => {}
 
             // Grid
             "grid-cols" | "grid-rows" if !lays_out_children => {}
-            "grid-cols" => {
+            "grid-cols" | "grid-rows" => {
                 if let Some(v) = val {
-                    if let Ok(n) = v.parse::<u32>() {
-                        push_css(
-                            &mut css,
-                            "grid-template-columns",
-                            &format!("repeat({},1fr)", n),
-                        );
+                    let property = if effective_key == "grid-cols" {
+                        "grid-template-columns"
                     } else {
-                        push_css(&mut css, "grid-template-columns", v);
+                        "grid-template-rows"
+                    };
+                    match v.parse::<u32>() {
+                        Ok(n) => push_css(&mut css, property, &format!("repeat({},1fr)", n)),
+                        Err(_) => push_css(&mut css, property, v),
                     }
                 }
             }
-            "grid-rows" => {
+            "col-span" | "row-span" => {
                 if let Some(v) = val {
-                    if let Ok(n) = v.parse::<u32>() {
-                        push_css(
-                            &mut css,
-                            "grid-template-rows",
-                            &format!("repeat({},1fr)", n),
-                        );
+                    let property = if effective_key == "col-span" {
+                        "grid-column"
                     } else {
-                        push_css(&mut css, "grid-template-rows", v);
-                    }
-                }
-            }
-            "col-span" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "grid-column", &format!("span {}", v));
-                }
-            }
-            "row-span" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "grid-row", &format!("span {}", v));
+                        "grid-row"
+                    };
+                    push_css(&mut css, property, &format!("span {}", v));
                 }
             }
 
-            // Outline (like border but doesn't affect layout)
-            "outline" => {
-                if let Some(v) = val {
-                    let parts: Vec<&str> = v.splitn(2, ' ').collect();
-                    if parts.len() == 2 {
-                        push_css(
-                            &mut css,
-                            "outline",
-                            &format!("{} solid {}", css_px(parts[0]), parts[1]),
-                        );
-                    } else {
-                        push_css(
-                            &mut css,
-                            "outline",
-                            &format!("{} solid currentColor", css_px(parts[0])),
-                        );
-                    }
-                }
-            }
-
-            // Logical properties (i18n-aware)
-            "padding-inline" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "padding-inline", &css_px_multi(v));
-                }
-            }
-            "padding-block" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "padding-block", &css_px_multi(v));
-                }
-            }
-            "margin-inline" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "margin-inline", &css_px_multi(v));
-                }
-            }
-            "margin-block" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "margin-block", &css_px_multi(v));
-                }
-            }
-
-            // Logical property start/end variants
-            "padding-inline-start"
-            | "padding-inline-end"
-            | "padding-block-start"
-            | "padding-block-end"
-            | "margin-inline-start"
-            | "margin-inline-end"
-            | "margin-block-start"
-            | "margin-block-end" => {
-                if let Some(v) = val {
-                    push_css(&mut css, effective_key, &css_px(v));
-                }
-            }
-
-            // Logical inset
-            "inset-inline" | "inset-block" => {
-                if let Some(v) = val {
-                    push_css(&mut css, effective_key, &css_px_multi(v));
-                }
-            }
-            "inset-inline-start" | "inset-inline-end" | "inset-block-start" | "inset-block-end" => {
-                if let Some(v) = val {
-                    push_css(&mut css, effective_key, &css_px(v));
-                }
-            }
-
-            // Logical border
-            "border-inline"
-            | "border-block"
-            | "border-inline-start"
-            | "border-inline-end"
-            | "border-block-start"
-            | "border-block-end" => {
-                if let Some(v) = val {
-                    push_css(&mut css, effective_key, v);
-                }
-            }
-
-            // Logical border-radius
-            "border-start-start-radius"
-            | "border-start-end-radius"
-            | "border-end-start-radius"
-            | "border-end-end-radius" => {
-                if let Some(v) = val {
-                    push_css(&mut css, effective_key, &css_px(v));
-                }
-            }
-
-            // Logical scroll margins & padding
-            "scroll-margin-inline"
-            | "scroll-margin-block"
-            | "scroll-padding-inline"
-            | "scroll-padding-block" => {
-                if let Some(v) = val {
-                    push_css(&mut css, effective_key, &css_px_multi(v));
-                }
-            }
-
-            // Logical sizing
-            "inline-size" | "block-size" | "min-inline-size" | "max-inline-size"
-            | "min-block-size" | "max-block-size" => {
-                if let Some(v) = val {
-                    push_css(&mut css, effective_key, &css_px(v));
-                }
-            }
-
-            // Margin
-            "margin" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "margin", &css_px_multi(v));
-                }
-            }
-            // Inset (shorthand for top/right/bottom/left)
-            "inset" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "inset", &css_px(v));
-                }
-            }
-
-            // Table
-            "border-spacing" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "border-spacing", &css_px(v));
-                }
-            }
-
-            // Text decoration
-            "text-decoration-thickness" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "text-decoration-thickness", &css_px(v));
-                }
-            }
-            "text-underline-offset" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "text-underline-offset", &css_px(v));
-                }
-            }
-
-            // Multi-column
-            "column-width" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "column-width", &css_px(v));
-                }
-            }
-
-            // New CSS properties
-            "column-gap" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "column-gap", &css_px(v));
-                }
-            }
-            "text-indent" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "text-indent", &css_px(v));
-                }
-            }
-            "flex-basis" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "flex-basis", &css_px(v));
-                }
-            }
-            "scroll-margin" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "scroll-margin", &css_px(v));
-                }
-            }
-            "scroll-margin-top"
-            | "scroll-margin-bottom"
-            | "scroll-margin-left"
-            | "scroll-margin-right" => {
-                if let Some(v) = val {
-                    push_css(&mut css, effective_key, &css_px(v));
-                }
-            }
-            "scroll-padding" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "scroll-padding", &css_px(v));
-                }
-            }
-            "scroll-padding-top"
-            | "scroll-padding-bottom"
-            | "scroll-padding-left"
-            | "scroll-padding-right" => {
-                if let Some(v) = val {
-                    push_css(&mut css, effective_key, &css_px(v));
-                }
-            }
-
-            // --- CSS Shorthands ---
+            // CSS's `line-clamp` has no support yet without its
+            // `-webkit-` fallback, which needs a box to clamp
             "line-clamp" => {
                 if let Some(v) = val {
                     push_css(&mut css, "display", "-webkit-box");
@@ -2421,24 +2193,14 @@ fn attrs_to_css(attrs: &[Attribute], state_prefix: &str, site: &Site) -> String 
                 }
             }
 
-            // Any other standard CSS property is copied through, with `px`
-            // added to bare numbers where the property takes a length.
-            key if crate::vocab::is_css_property(key) => {
-                if let Some(v) = val {
-                    if crate::vocab::is_length_property(key) {
-                        push_css(&mut css, key, &css_px_multi(v));
-                    } else {
-                        push_css(&mut css, key, v);
-                    }
-                }
-            }
-
-            // A name htmlang doesn't know but CSS could have (a custom
-            // property, a vendor-prefixed or a new property) is written as
-            // it is; the parser warned about an unknown one
+            // Every other name is a CSS property (standard, custom,
+            // vendor-prefixed, or one htmlang doesn't know, which the
+            // parser warned about), written under its own name with the
+            // value as written, except for `px` after a bare number where
+            // the property takes a length
             key if crate::vocab::is_property_name(key) => {
                 if let Some(v) = val {
-                    push_css(&mut css, key, v);
+                    push_css(&mut css, key, &with_px(key, v));
                 }
             }
 
@@ -2457,7 +2219,16 @@ fn push_css(css: &mut String, prop: &str, value: &str) {
     css.push(';');
 }
 
-/// Known CSS units — if a value ends with one, skip appending `px`.
+/// A CSS property's value with `px` after its bare numbers where the
+/// property takes a length (see [`crate::vocab::px_rule`]).
+fn with_px(property: &str, value: &str) -> String {
+    match crate::vocab::px_rule(property) {
+        crate::vocab::Px::None => value.to_string(),
+        crate::vocab::Px::Whole => css_px(value),
+        crate::vocab::Px::EachWord => css_px_multi(value),
+    }
+}
+
 /// Format a length value: a bare number gets `px` appended; anything else
 /// (values with units, keywords like `auto`, functions like `calc(...)`) is
 /// passed through unchanged.

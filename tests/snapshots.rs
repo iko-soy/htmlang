@@ -839,14 +839,18 @@ fn css_aspect_ratio() {
 
 #[test]
 fn css_outline() {
+    // CSS's own shorthand: nothing is added to it
+    let output = compile("@page T\n@el [outline 2 solid red]");
+    assert!(output.contains("outline:2px solid red;"), "{}", output);
     let output = compile("@page T\n@el [outline 2 red]");
-    assert!(output.contains("outline:2px solid red"));
+    assert!(output.contains("outline:2px red;"), "{}", output);
 }
 
 #[test]
 fn css_outline_no_color() {
     let output = compile("@page T\n@el [outline 3]");
-    assert!(output.contains("outline:3px solid currentColor"));
+    assert!(output.contains("outline:3px;"), "{}", output);
+    assert!(!output.contains("currentColor;"), "{}", output);
 }
 
 #[test]
@@ -965,6 +969,22 @@ fn css_contain_needs_a_value() {
         "{:?}",
         diags
     );
+}
+
+#[test]
+fn css_content_visibility_needs_a_value() {
+    // A bare name is a style without a value, not a default: nothing is
+    // written for it
+    let (html, diags) = compile_anyway("@el [content-visibility, padding 2]\n  test");
+    assert!(
+        diags.iter().any(|d| d.code == "missing-value"
+            && d.severity == htmlang::parser::Severity::Error
+            && d.message.contains("'content-visibility' needs a value")),
+        "{:?}",
+        diags
+    );
+    assert!(!html.contains("content-visibility"), "{}", html);
+    assert!(!html.contains(" content-visibility"), "{}", html);
 }
 
 #[test]
@@ -3519,12 +3539,12 @@ fn function_with_style_is_scoped() {
         "@let @card [title]\n  @style\n    & { padding: 4px; }\n    .t { color: red; }\n  @el [class=box]\n    @text [class=t] $title\n@card [title Hello]\n",
     );
     assert!(
-        html.contains("<div class=\"a box hl-card\"><span class=\"t\">Hello"),
+        html.contains("<div class=\"hl-a box hl-fn-card\"><span class=\"t\">Hello"),
         "{}",
         html
     );
     assert!(
-        html.contains(".hl-card {& { padding: 4px; }.t { color: red; }}"),
+        html.contains(".hl-fn-card {& { padding: 4px; }.t { color: red; }}"),
         "{}",
         html
     );
@@ -3877,8 +3897,8 @@ fn test_short_class_names() {
         "should use short class names, not _0"
     );
     assert!(
-        html.contains("class=\"a\"") || html.contains("class=\"b\""),
-        "should use short alphabetic class names"
+        html.contains("class=\"hl-a\"") && html.contains("class=\"hl-b\""),
+        "should use short alphabetic class names after the `hl-` prefix"
     );
 }
 
@@ -5205,7 +5225,11 @@ fn a_function_is_a_link_of_a_chain() {
     let out = compile(
         "@let @card [title]\n  @article\n    @h3 $title\n    @children\n@card [title T] > @link /x More\n",
     );
-    assert!(out.contains("<a href=\"/x\">More</a></article>"), "{}", out);
+    assert!(
+        out.contains("<a href=\"/x\" class=\"hl-c\">More</a></article>"),
+        "{}",
+        out
+    );
 }
 
 #[test]
@@ -5646,7 +5670,11 @@ fn one_if_chooses_a_group_of_attributes() {
         html
     );
     assert_eq!(html.matches("aria-current=\"page\"").count(), 1, "{}", html);
-    assert!(html.contains("<a href=\"/blog\">blog</a>"), "{}", html);
+    assert!(
+        html.contains("<a href=\"/blog\" class=\"hl-b\">blog</a>"),
+        "{}",
+        html
+    );
 }
 
 #[test]
@@ -6164,7 +6192,7 @@ fn a_warning_in_a_loop_or_a_function_is_reported_once() {
 fn hidden_is_a_boolean_attribute() {
     let result = htmlang::parser::parse("@el [hidden] x\n");
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
-    assert!(htmlang::codegen::generate(&result.document).contains("<div class=\"a\" hidden>"));
+    assert!(htmlang::codegen::generate(&result.document).contains("<div class=\"hl-a\" hidden>"));
 }
 
 #[test]
@@ -6254,12 +6282,12 @@ fn a_layout_element_in_text_is_an_inline_flex_span() {
     let out = compile("@paragraph\n  Price: {@el [padding 2] 9}\n");
     assert!(!out.contains("<div"), "{}", out);
     assert!(
-        out.contains("Price: <span class=\"b\"><span>9</span></span></p>"),
+        out.contains("Price: <span class=\"hl-b\"><span>9</span></span></p>"),
         "{}",
         out
     );
     assert!(
-        out.contains(".b{display:inline-flex;flex-direction:column;padding:2px;}"),
+        out.contains(".hl-b{display:inline-flex;flex-direction:column;padding:2px;}"),
         "{}",
         out
     );
@@ -6278,7 +6306,7 @@ fn a_layout_element_in_text_is_an_inline_flex_span() {
     // Its own children are laid out in it as usual
     let out = compile("@paragraph\n  {@el [spacing 2] {@text x}}\n");
     assert!(
-        out.contains("<span class=\"b\"><span><span>x</span></span></span>"),
+        out.contains("<span class=\"hl-b\"><span><span>x</span></span></span>"),
         "{}",
         out
     );
@@ -6286,12 +6314,12 @@ fn a_layout_element_in_text_is_an_inline_flex_span() {
     let out = compile("@paragraph\n  @el [padding 2]\n    @el x\n    @row y\n");
     assert!(!out.contains("<div"), "{}", out);
     assert!(
-        out.contains("<span class=\"c\"><span>x</span></span>"),
+        out.contains("<span class=\"hl-c\"><span>x</span></span>"),
         "{}",
         out
     );
     assert!(
-        out.contains(".c{display:flex;flex-direction:column;}"),
+        out.contains(".hl-c{display:flex;flex-direction:column;}"),
         "{}",
         out
     );
@@ -6437,19 +6465,19 @@ fn snapshot_text_everywhere() {
 fn every_element_s_argument_is_read_like_text() {
     let out = compile("@h1 Hello {@text [color red] world}\n");
     assert!(
-        out.contains("<h1 class=\"a\">Hello <span class=\"b\">world</span></h1>"),
+        out.contains("<h1 class=\"hl-a\">Hello <span class=\"hl-b\">world</span></h1>"),
         "{}",
         out
     );
     let out = compile("@ul\n  @li Read {@link /x more}\n");
     assert!(
-        out.contains("<span>Read <a href=\"/x\">more</a></span></li>"),
+        out.contains("<span>Read <a href=\"/x\" class=\"hl-c\">more</a></span></li>"),
         "{}",
         out
     );
     let out = compile("@table > @tr > @td {@kbd Ctrl}\n");
     assert!(
-        out.contains("<td><kbd class=\"a\">Ctrl</kbd></td>"),
+        out.contains("<td><kbd class=\"hl-a\">Ctrl</kbd></td>"),
         "{}",
         out
     );
@@ -6494,7 +6522,7 @@ fn code_and_textarea_show_their_text_as_written() {
     // Inline, on the line and in the lines under it
     let out = compile("@paragraph\n  Write {@code {@link /x y}} for a link.\n");
     assert!(
-        out.contains("Write <code class=\"b\">{@link /x y}</code> for a link.</p>"),
+        out.contains("Write <code class=\"hl-b\">{@link /x y}</code> for a link.</p>"),
         "{}",
         out
     );
@@ -6548,9 +6576,9 @@ fn the_argument_is_the_first_line_of_the_element_s_layout() {
 #[test]
 fn lines_of_text_at_the_top_of_the_page_are_separate_lines() {
     let out = compile("Read\nmore\n");
-    assert!(out.ends_with("</style>Read\nmore"), "{}", out);
+    assert_eq!(out, "Read\nmore");
     let out = compile("Read\n@text x\nmore\n");
-    assert!(out.ends_with("</style>Read<span>x</span>more"), "{}", out);
+    assert_eq!(out, "Read<span>x</span>more");
 }
 
 #[test]
@@ -6575,7 +6603,7 @@ fn text_level_elements_are_text_with_no_css_of_their_own() {
     // Styles still work, and give it a class
     let out = compile("@em [color red] x\n");
     assert!(out.contains("{color:red;}"), "{}", out);
-    assert!(out.contains("<em class=\"a\">x</em>"), "{}", out);
+    assert!(out.contains("<em class=\"hl-a\">x</em>"), "{}", out);
     // Text has no gap: `spacing` is an error
     let diags = parse_diagnostics("@strong [spacing 4] x\n");
     assert!(
@@ -6627,7 +6655,7 @@ fn new_flow_containers_are_columns() {
         out
     );
     assert!(
-        out.contains("<hgroup class=\"b\"><h1 class=\"c\">A</h1><span>B</span></hgroup>"),
+        out.contains("<hgroup class=\"hl-b\"><h1 class=\"hl-c\">A</h1><span>B</span></hgroup>"),
         "{}",
         out
     );
@@ -6753,21 +6781,29 @@ fn rule<'a>(css: &'a str, selector: &str) -> &'a str {
 fn flex_direction_decides_what_fill_means_for_the_children() {
     // A column made a row: `width fill` takes the remaining width
     let out = compile("@nav [flex-direction row]\n  @el [width fill] a\n");
-    assert!(rule(&out, ".b").contains("flex:1;min-width:0;"), "{}", out);
-    assert!(!rule(&out, ".b").contains("width:100%"), "{}", out);
+    assert!(
+        rule(&out, ".hl-b").contains("flex:1;min-width:0;"),
+        "{}",
+        out
+    );
+    assert!(!rule(&out, ".hl-b").contains("width:100%"), "{}", out);
     // A row made a column: `width fill` is the full width, not flex
     let out = compile("@row [flex-direction column]\n  @el [width fill] a\n");
-    assert!(rule(&out, ".b").contains("width:100%;"), "{}", out);
-    assert!(!rule(&out, ".b").contains("flex:1"), "{}", out);
+    assert!(rule(&out, ".hl-b").contains("width:100%;"), "{}", out);
+    assert!(!rule(&out, ".hl-b").contains("flex:1"), "{}", out);
     // `height fill` in a column made a row is the full height
     let out = compile("@el [flex-direction row-reverse]\n  @el [height fill] a\n");
-    assert!(rule(&out, ".b").contains("height:100%;"), "{}", out);
+    assert!(rule(&out, ".hl-b").contains("height:100%;"), "{}", out);
     // `flex-flow` sets the direction too
     let out = compile("@el [flex-flow row wrap]\n  @el [width fill] a\n");
-    assert!(rule(&out, ".b").contains("flex:1;min-width:0;"), "{}", out);
+    assert!(
+        rule(&out, ".hl-b").contains("flex:1;min-width:0;"),
+        "{}",
+        out
+    );
     // A direction only the browser knows keeps the element's own
     let out = compile("@el [flex-direction var(--dir)]\n  @el [width fill] a\n");
-    assert!(rule(&out, ".b").contains("width:100%;"), "{}", out);
+    assert!(rule(&out, ".hl-b").contains("width:100%;"), "{}", out);
 }
 
 #[test]
@@ -6776,12 +6812,12 @@ fn a_prefixed_direction_moves_the_children_s_words_with_it() {
         "@header [spacing 16, md:flex-direction row, md:align-items center]\n  @text [font-weight 800] Launchpad\n  @el [width fill]\n",
     );
     // Full width while the header is a column...
-    assert!(rule(&out, ".c").contains("width:100%;"), "{}", out);
+    assert!(rule(&out, ".hl-c").contains("width:100%;"), "{}", out);
     // ...and the remaining width from md up, in the header's own block,
     // keyed on its class
     assert!(
         out.contains(
-            "@media(min-width:768px){:where(.a)>.c{width:auto;flex:1;min-width:0;}.a{flex-direction:row;align-items:center;}}"
+            "@media(min-width:768px){:where(.hl-a)>.hl-c{width:auto;flex:1;min-width:0;}.hl-a{flex-direction:row;align-items:center;}}"
         ),
         "{}",
         out
@@ -6791,12 +6827,16 @@ fn a_prefixed_direction_moves_the_children_s_words_with_it() {
         "@el [cq-md:flex-direction row, landscape:flex-direction row]\n  @el [width fill] a\n",
     );
     assert!(
-        out.contains("@container(min-width:768px){:where(.a)>.b{width:auto;flex:1;min-width:0;}"),
+        out.contains(
+            "@container(min-width:768px){:where(.hl-a)>.hl-b{width:auto;flex:1;min-width:0;}"
+        ),
         "{}",
         out
     );
     assert!(
-        out.contains("@media(orientation:landscape){:where(.a)>.b{width:auto;flex:1;min-width:0;}"),
+        out.contains(
+            "@media(orientation:landscape){:where(.hl-a)>.hl-b{width:auto;flex:1;min-width:0;}"
+        ),
         "{}",
         out
     );
@@ -6808,7 +6848,7 @@ fn a_direction_under_a_breakpoint_holds_at_the_wider_ones() {
     // the full width
     let out = compile("@row [sm:flex-direction column]\n  @el [width 200, lg:width fill] a\n");
     assert!(
-        out.contains("@media(min-width:1024px){.b{width:100%;}}"),
+        out.contains("@media(min-width:1024px){.hl-b{width:100%;}}"),
         "{}",
         out
     );
@@ -6817,13 +6857,15 @@ fn a_direction_under_a_breakpoint_holds_at_the_wider_ones() {
         compile("@row [sm:flex-direction column, lg:flex-direction row]\n  @el [width fill] a\n");
     assert!(
         out.contains(
-            "@media(min-width:640px){:where(.a)>.b{flex:0 1 auto;min-width:auto;width:100%;}"
+            "@media(min-width:640px){:where(.hl-a)>.hl-b{flex:0 1 auto;min-width:auto;width:100%;}"
         ),
         "{}",
         out
     );
     assert!(
-        out.contains("@media(min-width:1024px){:where(.a)>.b{width:auto;flex:1;min-width:0;}"),
+        out.contains(
+            "@media(min-width:1024px){:where(.hl-a)>.hl-b{width:auto;flex:1;min-width:0;}"
+        ),
         "{}",
         out
     );
@@ -6834,11 +6876,11 @@ fn a_direction_under_a_state_prefix_leaves_the_children_s_words() {
     // `hover:` isn't a block of its own: the children compile against the
     // direction without a prefix
     let out = compile("@el [hover:flex-direction row]\n  @el [width fill] a\n");
-    assert!(rule(&out, ".b").contains("width:100%;"), "{}", out);
-    assert!(!out.contains(":where("), "{}", out);
+    assert!(rule(&out, ".hl-b").contains("width:100%;"), "{}", out);
+    assert!(!out.contains(":where(.hl-"), "{}", out);
     // A grid has no direction, whatever flex-direction says
     let out = compile("@grid [md:flex-direction row]\n  @el [width fill] a\n");
-    assert!(!out.contains(":where("), "{}", out);
+    assert!(!out.contains(":where(.hl-"), "{}", out);
 }
 
 #[test]
@@ -6866,7 +6908,8 @@ fn center_and_align_are_auto_margins_in_any_parent() {
 fn the_centred_column_needs_no_css_width() {
     let out = compile("@section\n  @el [width fill, max-width 800, center-x] a\n");
     assert!(
-        rule(&out, ".b").contains("width:100%;max-width:800px;margin-left:auto;margin-right:auto;"),
+        rule(&out, ".hl-b")
+            .contains("width:100%;max-width:800px;margin-left:auto;margin-right:auto;"),
         "{}",
         out
     );
@@ -6878,7 +6921,7 @@ fn shrink_fits_the_content_across_the_direction() {
     for parent in ["@el", "@grid", "@row [flex-direction column]"] {
         let out = compile(&format!("{}\n  @el [width shrink] a\n", parent));
         assert!(
-            rule(&out, ".b").contains("width:fit-content;"),
+            rule(&out, ".hl-b").contains("width:fit-content;"),
             "{}: {}",
             parent,
             out
@@ -6886,12 +6929,16 @@ fn shrink_fits_the_content_across_the_direction() {
     }
     // ...along a row it keeps the content's width
     let out = compile("@row\n  @el [width shrink] a\n");
-    assert!(rule(&out, ".b").contains("flex-shrink:0;"), "{}", out);
+    assert!(rule(&out, ".hl-b").contains("flex-shrink:0;"), "{}", out);
     // The same for the height, the other way round
     let out = compile("@row\n  @el [height shrink] a\n");
-    assert!(rule(&out, ".b").contains("height:fit-content;"), "{}", out);
+    assert!(
+        rule(&out, ".hl-b").contains("height:fit-content;"),
+        "{}",
+        out
+    );
     let out = compile("@el\n  @el [height shrink] a\n");
-    assert!(rule(&out, ".b").contains("flex-shrink:0;"), "{}", out);
+    assert!(rule(&out, ".hl-b").contains("flex-shrink:0;"), "{}", out);
 }
 
 #[test]
@@ -6900,8 +6947,8 @@ fn a_layout_word_leaves_what_you_write_yourself() {
     for attrs in ["min-width 200, width fill", "width fill, min-width 200"] {
         let out = compile(&format!("@row\n  @el [{}] a\n", attrs));
         assert!(
-            rule(&out, ".b").contains("flex:1;min-width:200px;")
-                || rule(&out, ".b").contains("min-width:200px;flex:1;"),
+            rule(&out, ".hl-b").contains("flex:1;min-width:200px;")
+                || rule(&out, ".hl-b").contains("min-width:200px;flex:1;"),
             "{}: {}",
             attrs,
             out
@@ -6910,18 +6957,22 @@ fn a_layout_word_leaves_what_you_write_yourself() {
     }
     // Also where the parent's direction changes
     let out = compile("@el [md:flex-direction row]\n  @el [width fill, min-width 200] a\n");
-    assert!(out.contains(":where(.a)>.b{width:auto;flex:1;}"), "{}", out);
+    assert!(
+        out.contains(":where(.hl-a)>.hl-b{width:auto;flex:1;}"),
+        "{}",
+        out
+    );
     // Only the last `width` counts
     let out = compile("@row\n  @el [width fill, width 300] a\n");
-    assert!(!rule(&out, ".b").contains("flex:1"), "{}", out);
+    assert!(!rule(&out, ".hl-b").contains("flex:1"), "{}", out);
 }
 
 #[test]
 fn children_styles_follow_a_prefixed_direction() {
     let out = compile("@row [children:width fill, md:flex-direction column]\n  @el A\n");
-    assert!(out.contains(".a > *{flex:1;min-width:0;}"), "{}", out);
+    assert!(out.contains(".hl-a > *{flex:1;min-width:0;}"), "{}", out);
     assert!(
-        out.contains("@media(min-width:768px){.a>*{flex:0 1 auto;min-width:auto;width:100%;}"),
+        out.contains("@media(min-width:768px){.hl-a>*{flex:0 1 auto;min-width:auto;width:100%;}"),
         "{}",
         out
     );
@@ -6933,19 +6984,19 @@ fn elements_with_the_same_css_but_other_keyed_rules_get_two_classes() {
     // the first becomes flex where the parent turns into a row
     let out = compile("@el [md:flex-direction row]\n  @el [width fill] a\n  @el [width 100%] b\n");
     assert!(
-        out.contains("<div class=\"b\"><span>a</span></div><div class=\"c\">"),
+        out.contains("<div class=\"hl-b\"><span>a</span></div><div class=\"hl-c\">"),
         "{}",
         out
     );
-    assert!(out.contains(":where(.a)>.b{"), "{}", out);
-    assert!(!out.contains(":where(.a)>.c{"), "{}", out);
+    assert!(out.contains(":where(.hl-a)>.hl-b{"), "{}", out);
+    assert!(!out.contains(":where(.hl-a)>.hl-c{"), "{}", out);
 }
 
 #[test]
 fn an_element_inside_text_is_not_a_child_of_the_row_around_it() {
     // The inline @el's parent is the text, not the row
     let out = compile("@el [md:flex-direction row]\n  @paragraph\n    a {@el [width fill] b}\n");
-    assert!(!out.contains(":where("), "{}", out);
+    assert!(!out.contains(":where(.hl-"), "{}", out);
 }
 
 // ---------------------------------------------------------------------------
@@ -6963,7 +7014,7 @@ fn compile_anyway(input: &str) -> (String, Vec<htmlang::parser::Diagnostic>) {
 fn the_first_token_fills_the_leading_attribute_and_the_rest_is_content() {
     let html = compile("@form /subscribe Sign up\n");
     assert!(
-        html.contains(r#"<form action="/subscribe" class="a"><span>Sign up</span></form>"#),
+        html.contains(r#"<form action="/subscribe" class="hl-a"><span>Sign up</span></form>"#),
         "{}",
         html
     );
@@ -6981,7 +7032,7 @@ fn the_first_token_fills_the_leading_attribute_and_the_rest_is_content() {
     // The rest is text like any other: inline elements, escapes, $names
     let html = compile("@let who you\n@link /a Read {@b this}, \\$5 for $who\n");
     assert!(
-        html.contains(r#"<a href="/a">Read <b>this</b>, $5 for you</a>"#),
+        html.contains(r#"<a href="/a" class="hl-a">Read <b>this</b>, $5 for you</a>"#),
         "{}",
         html
     );
@@ -6991,25 +7042,41 @@ fn the_first_token_fills_the_leading_attribute_and_the_rest_is_content() {
 fn the_leading_token_is_split_before_anything_is_filled_in() {
     // A variable holding a space stays one token
     let html = compile("@let u /a b\n@link $u Text\n@link ${u} Other\n");
-    assert!(html.contains(r#"<a href="/a b">Text</a>"#), "{}", html);
-    assert!(html.contains(r#"<a href="/a b">Other</a>"#), "{}", html);
-    // `${...}` with spaces in it, and quoted text, are one token
-    let html = compile("@let n 2\n@link /page/${$n + 1} Next page\n@link \"/my page\" Mine\n");
     assert!(
-        html.contains(r#"<a href="/page/3">Next page</a>"#),
+        html.contains(r#"<a href="/a b" class="hl-a">Text</a>"#),
         "{}",
         html
     );
-    assert!(html.contains(r#"<a href="/my page">Mine</a>"#), "{}", html);
+    assert!(
+        html.contains(r#"<a href="/a b" class="hl-a">Other</a>"#),
+        "{}",
+        html
+    );
+    // `${...}` with spaces in it, and quoted text, are one token
+    let html = compile("@let n 2\n@link /page/${$n + 1} Next page\n@link \"/my page\" Mine\n");
+    assert!(
+        html.contains(r#"<a href="/page/3" class="hl-a">Next page</a>"#),
+        "{}",
+        html
+    );
+    assert!(
+        html.contains(r#"<a href="/my page" class="hl-a">Mine</a>"#),
+        "{}",
+        html
+    );
     let html = compile("@image [alt=x] \"a photo.png\"\n");
     assert!(
-        html.contains(r#"<img src="a photo.png" alt="x">"#),
+        html.contains(r#"<img src="a photo.png" class="hl-a" alt="x">"#),
         "{}",
         html
     );
     // A quoted variable gives its text
     let html = compile("@let to \"/a b\"\n@link $to Go\n");
-    assert!(html.contains(r#"<a href="/a b">Go</a>"#), "{}", html);
+    assert!(
+        html.contains(r#"<a href="/a b" class="hl-a">Go</a>"#),
+        "{}",
+        html
+    );
 }
 
 #[test]
@@ -7027,7 +7094,11 @@ fn a_leading_argument_and_its_attribute_together_are_an_error() {
     assert_eq!(error.subject.as_deref(), Some("About"));
     assert_eq!(error.column, Some(16));
     // The attribute is kept, once, and the text is the content
-    assert!(html.contains(r#"<a href="/a">About</a>"#), "{}", html);
+    assert!(
+        html.contains(r#"<a class="hl-a" href="/a">About</a>"#),
+        "{}",
+        html
+    );
 
     for (src, word) in [
         ("@image [src=a.png, alt=x] b.png\n", "'b.png' as its src"),
@@ -7054,7 +7125,11 @@ fn a_leading_argument_and_its_attribute_together_are_an_error() {
         );
     }
     let (html, _) = compile_anyway("@image [src=a.png, alt=x] b.png\n");
-    assert!(html.contains(r#"<img src="a.png" alt="x">"#), "{}", html);
+    assert!(
+        html.contains(r#"<img class="hl-a" src="a.png" alt="x">"#),
+        "{}",
+        html
+    );
 }
 
 #[test]
@@ -7062,18 +7137,19 @@ fn the_attribute_form_is_the_leading_argument() {
     // One src, first, whichever way it is written
     let html = compile("@image [alt=x, src=a.png]\n@image [alt=x] a.png\n");
     assert_eq!(
-        html.matches(r#"<img src="a.png" alt="x">"#).count(),
+        html.matches(r#"<img src="a.png" class="hl-a" alt="x">"#)
+            .count(),
         2,
         "{}",
         html
     );
     // No argument and no attribute: no empty src
     let html = compile("@image [alt=x]\n");
-    assert!(html.contains(r#"<img alt="x">"#), "{}", html);
+    assert!(html.contains(r#"<img class="hl-a" alt="x">"#), "{}", html);
     // The text of a link without an argument is on the lines under it
     let html = compile("@link [class=c, href=/b]\n  Text on its own line\n");
     assert!(
-        html.contains(r#"<a href="/b" class="c">Text on its own line</a>"#),
+        html.contains(r#"<a href="/b" class="hl-a c">Text on its own line</a>"#),
         "{}",
         html
     );
@@ -7092,7 +7168,7 @@ fn words_after_the_argument_of_an_element_without_content_are_an_error() {
     assert!(found[0].message.contains("alt="), "{}", found[0].message);
     assert_eq!(found[0].column, Some(27));
     assert!(
-        html.contains(r#"<img src="logo.png" alt="Logo">"#),
+        html.contains(r#"<img src="logo.png" class="hl-a" alt="Logo">"#),
         "{}",
         html
     );
@@ -7258,7 +7334,7 @@ fn the_lines_under_code_are_a_verbatim_sample() {
     let out = compile("@let v 2\n@pre > @code\n  @b $v \\$v {@i x}\n    -- <tag> & \\\\\n");
     assert!(
         out.contains(
-            "><code class=\"b\">@b $v \\$v {@i x}\n  -- &lt;tag&gt; &amp; \\\\</code></pre>"
+            "><code class=\"hl-b\">@b $v \\$v {@i x}\n  -- &lt;tag&gt; &amp; \\\\</code></pre>"
         ),
         "{}",
         out
@@ -7269,7 +7345,7 @@ fn the_lines_under_code_are_a_verbatim_sample() {
     // A function that wraps @children in @pre shows the caller's sample
     let out = compile("@let @sample\n  @pre\n    @children\n@sample\n  @code\n    a <b>\n");
     assert!(
-        out.contains("<pre class=\"a\"><code class=\"b\">a &lt;b&gt;</code></pre>"),
+        out.contains("<pre class=\"hl-a\"><code class=\"hl-b\">a &lt;b&gt;</code></pre>"),
         "{}",
         out
     );
@@ -7287,7 +7363,7 @@ fn readable_output_adds_no_whitespace_inside_pre_and_textarea() {
     .document;
     let out = htmlang::codegen::generate_dev(&doc);
     assert!(
-        out.contains("><code class=\"c\">a\n  b</code></pre>\n"),
+        out.contains("><code class=\"hl-c\">a\n  b</code></pre>\n"),
         "{}",
         out
     );
@@ -7309,15 +7385,19 @@ fn page_styles_go_on_body_and_html_attributes_on_html() {
         "{}",
         out
     );
-    assert!(out.contains("<body class=\"a\">"), "{}", out);
-    assert!(out.contains(".a{background:#111;padding:8px;}"), "{}", out);
+    assert!(out.contains("<body class=\"hl-a\">"), "{}", out);
+    assert!(
+        out.contains(".hl-a{background:#111;padding:8px;}"),
+        "{}",
+        out
+    );
     // The reset makes <body> the column, so its class doesn't repeat it
     assert!(
         out.contains("body{margin:0;font-family:system-ui,-apple-system,sans-serif;display:flex;flex-direction:column;min-height:100dvh}"),
         "{}",
         out
     );
-    assert!(!out.contains(".a{display:flex"), "{}", out);
+    assert!(!out.contains(".hl-a{display:flex"), "{}", out);
 }
 
 #[test]
@@ -7347,8 +7427,8 @@ fn the_top_of_a_page_is_a_column() {
 #[test]
 fn a_page_s_direction_moves_its_children_s_fill() {
     let out = compile("@page [flex-direction row] T\n@el [width fill] a\n@el b");
-    assert!(out.contains("<body class=\"a\">"), "{}", out);
-    assert!(out.contains(".a{flex-direction:row;}"), "{}", out);
+    assert!(out.contains("<body class=\"hl-a\">"), "{}", out);
+    assert!(out.contains(".hl-a{flex-direction:row;}"), "{}", out);
     assert!(out.contains("flex:1;min-width:0;"), "{}", out);
 }
 
@@ -7407,8 +7487,8 @@ fn a_page_s_attributes_can_come_from_a_layout_s_parameters() {
         "@let @layout [title, bg #fff]\n  @page [lang=en, background $bg] $title\n  @children\n@layout [title Home, bg #fafafa]\n  @text a\n",
     );
     assert!(out.contains("<title>Home</title>"), "{}", out);
-    assert!(out.contains("<body class=\"a\">"), "{}", out);
-    assert!(out.contains(".a{background:#fafafa;}"), "{}", out);
+    assert!(out.contains("<body class=\"hl-a\">"), "{}", out);
+    assert!(out.contains(".hl-a{background:#fafafa;}"), "{}", out);
 }
 
 #[test]
@@ -7532,4 +7612,134 @@ fn an_included_library_s_unused_definitions_are_not_reported() {
         "{:?}",
         result.diagnostics
     );
+}
+
+#[test]
+fn snapshot_one_css_path() {
+    snapshot_test("one_css_path");
+}
+
+#[test]
+fn every_css_property_is_written_under_its_own_name() {
+    // The value as written, with pixels where the property takes a length;
+    // nothing is added or rewritten
+    let out = compile(
+        "@el [outline 1 dashed red, container card / inline-size, contain content, \
+         width calc(100% - 2 * 8px), letter-spacing 2, flex-basis 200, gap 8]\n  x\n",
+    );
+    for declaration in [
+        "outline:1px dashed red;",
+        "container:card / inline-size;",
+        "contain:content;",
+        "width:calc(100% - 2 * 8px);",
+        "letter-spacing:2px;",
+        "flex-basis:200px;",
+        "gap:8px;",
+    ] {
+        assert!(out.contains(declaration), "{}: {}", declaration, out);
+    }
+    // htmlang's own words still write what they mean
+    let out = compile("@grid [grid-cols 3, spacing 4]\n  @el [col-span 2, line-clamp 2] x\n");
+    assert!(
+        out.contains("grid-template-columns:repeat(3,1fr);") && out.contains("gap:4px;"),
+        "{}",
+        out
+    );
+    assert!(out.contains("grid-column:span 2;"), "{}", out);
+    assert!(
+        out.contains("display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;"),
+        "{}",
+        out
+    );
+}
+
+#[test]
+fn generated_classes_start_with_hl() {
+    let out = compile("@el [padding 1]\n  @el [padding 2] x\n");
+    assert!(out.contains(".hl-a{") && out.contains(".hl-b{"), "{}", out);
+    assert!(
+        out.contains(r#"<div class="hl-a"><div class="hl-b">"#),
+        "{}",
+        out
+    );
+    // A class of one's own with the prefix gets a warning and is kept
+    let (html, d) = compile_anyway("@el [class=card hl-a, padding 1] x\n");
+    let found = coded(&d, "invalid-value");
+    assert_eq!(found.len(), 1, "{:?}", d);
+    assert_eq!(found[0].severity, htmlang::parser::Severity::Warning);
+    assert_eq!(found[0].subject.as_deref(), Some("hl-a"));
+    assert!(found[0].message.contains("`hl-`"), "{}", found[0].message);
+    assert!(html.contains(r#"class="hl-a card hl-a""#), "{}", html);
+    // Other classes don't
+    assert!(
+        coded(
+            &parse_diagnostics("@el [class=html-x hl]\n"),
+            "invalid-value"
+        )
+        .is_empty()
+    );
+}
+
+#[test]
+fn a_scoped_style_s_class_never_meets_a_generated_one() {
+    // A function called `c` and the third generated class
+    let out = compile(
+        "@let @c\n  @style\n    & { color: red; }\n  @el [padding 3] c\n\
+         @el [padding 1] a\n@el [padding 2] b\n@c\n",
+    );
+    assert!(out.contains(".hl-fn-c {"), "{}", out);
+    assert!(out.contains(r#"<div class="hl-c hl-fn-c">"#), "{}", out);
+}
+
+#[test]
+fn element_defaults_stay_on_htmlang_s_elements() {
+    let src = "@h2 Title\n@ul\n  @li Item\n@link /a A\n@image [alt=x] a.png\n\
+               @markdown\n  ## Heading\n\n  - keeps its bullet and [its underline](/x)\n";
+    for page in [true, false] {
+        let out = compile(&format!("{}{}", if page { "@page T\n" } else { "" }, src));
+        // Each default is in the element's own class
+        assert!(out.contains(r#"<h2 class="hl-a">"#), "{}", out);
+        assert!(
+            out.contains("text-decoration:none;color:inherit;"),
+            "{}",
+            out
+        );
+        assert!(out.contains(r#"<img src="a.png" class="#), "{}", out);
+        // and no rule names an element, so the Markdown keeps the
+        // browser's defaults
+        for element in ["h2", "ul", "li", "p", "a", "img"] {
+            for before in ['{', '}', ','] {
+                for after in ['{', ','] {
+                    let selector = format!("{}{}{}", before, element, after);
+                    assert!(!out.contains(&selector), "{}: {}", selector, out);
+                }
+            }
+        }
+        assert!(out.contains("<h2>Heading</h2>\n<ul>\n<li>"), "{}", out);
+        assert!(out.contains(r#"<a href="/x">its underline</a>"#), "{}", out);
+        // A page resets its own body and box-sizing; a fragment only
+        // htmlang's elements
+        assert_eq!(out.contains("body{"), page, "{}", out);
+        assert_eq!(out.contains("*,*::before,*::after{"), page, "{}", out);
+        assert!(
+            page || out.starts_with(
+                r#"<style>@layer hl-reset,htmlang;@layer hl-reset{:where([class^="hl-"],[class*=" hl-"]),"#
+            ),
+            "{}",
+            out
+        );
+    }
+}
+
+#[test]
+fn the_focus_outline_is_kept_to_htmlang_s_elements() {
+    let out = compile("@page T\n@link /a A\n@markdown\n  [b](/b)\n");
+    assert!(
+        out.contains(
+            r#":where([class^="hl-"],[class*=" hl-"]):where(a,button,input,select,textarea):focus-visible{outline:2px solid currentColor;outline-offset:2px}"#
+        ),
+        "{}",
+        out
+    );
+    assert!(!out.contains("a:focus-visible"), "{}", out);
 }

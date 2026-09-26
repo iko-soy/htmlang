@@ -214,6 +214,51 @@ pub fn is_length_property(name: &str) -> bool {
             || SUFFIXES.iter().any(|s| name.ends_with(s)))
 }
 
+/// Where a known CSS property's value gets `px` after a bare number.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Px {
+    /// Nowhere: the value is written as it is
+    None,
+    /// Only when the whole value is one number (`width 200`)
+    Whole,
+    /// After every word that is a bare number (`padding 8 16`)
+    EachWord,
+}
+
+/// The `px` rule of a CSS property: which bare numbers in its value are
+/// pixels. A name that isn't a standard CSS property (a custom property,
+/// a vendor-prefixed or an unknown one) is written as it is.
+pub fn px_rule(name: &str) -> Px {
+    // Properties whose value gets `px` only when it is one number
+    #[rustfmt::skip]
+    const WHOLE: &[&str] = &[
+        "block-size", "border-end-end-radius", "border-end-start-radius", "border-spacing",
+        "border-start-end-radius", "border-start-start-radius", "bottom", "column-gap",
+        "column-width", "flex-basis", "gap", "height", "inline-size", "inset",
+        "inset-block-end", "inset-block-start", "inset-inline-end", "inset-inline-start",
+        "left", "letter-spacing", "margin-block-end", "margin-block-start",
+        "margin-inline-end", "margin-inline-start", "max-block-size", "max-height",
+        "max-inline-size", "max-width", "min-block-size", "min-height", "min-inline-size",
+        "min-width", "padding-block-end", "padding-block-start", "padding-bottom",
+        "padding-inline-end", "padding-inline-start", "padding-left", "padding-right",
+        "padding-top", "right", "scroll-margin", "scroll-margin-bottom", "scroll-margin-left",
+        "scroll-margin-right", "scroll-margin-top", "scroll-padding", "scroll-padding-bottom",
+        "scroll-padding-left", "scroll-padding-right", "scroll-padding-top",
+        "text-decoration-thickness", "text-indent", "text-underline-offset", "top", "width",
+    ];
+    // Logical border shorthands, written as they are
+    const AS_WRITTEN: &[&str] = &["border-block", "border-inline"];
+    if !is_css_property(name) || AS_WRITTEN.contains(&name) {
+        Px::None
+    } else if WHOLE.contains(&name) {
+        Px::Whole
+    } else if is_length_property(name) {
+        Px::EachWord
+    } else {
+        Px::None
+    }
+}
+
 /// State prefixes and the selector each adds: `hover:color red` styles
 /// `.x:hover`, `children:flex-shrink 0` styles `.x > *`.
 pub const PSEUDO_PREFIXES: &[(&str, &str)] = &[
@@ -379,6 +424,24 @@ pub fn all_attributes() -> Vec<&'static str> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_px_rule_is_the_property_s() {
+        use super::{Px, px_rule};
+        assert_eq!(px_rule("width"), Px::Whole);
+        assert_eq!(px_rule("gap"), Px::Whole);
+        assert_eq!(px_rule("padding"), Px::EachWord);
+        assert_eq!(px_rule("outline"), Px::EachWord);
+        assert_eq!(px_rule("border"), Px::EachWord);
+        assert_eq!(px_rule("opacity"), Px::None);
+        assert_eq!(px_rule("line-height"), Px::None);
+        assert_eq!(px_rule("border-inline"), Px::None);
+        // Only standard properties: a custom, vendor or unknown one is
+        // written as it is
+        assert_eq!(px_rule("--gap"), Px::None);
+        assert_eq!(px_rule("-webkit-margin-start"), Px::None);
+        assert_eq!(px_rule("corner-radius"), Px::None);
+    }
+
     #[test]
     fn base_attribute_strips_every_prefix() {
         assert_eq!(super::base_attribute("hover:md:background"), "background");

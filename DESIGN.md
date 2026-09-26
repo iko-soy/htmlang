@@ -454,8 +454,13 @@ keywords and CSS functions pass through as written (`width 50%`,
 `max-width min(100%, 800px)`), and so do numbers that aren't lengths
 (`opacity 0.5`, `z-index 2`, `line-height 1.5`, `flex 1`).
 
-`line-clamp N` also adds the `-webkit-box` declarations that browsers still
-need to cut text off after N lines.
+Nothing else is added to a value, and a shorthand means what it means in
+CSS: `outline 2 solid red` is `2px solid red`, while `outline 2 red` names
+no line style, so CSS draws no outline. `container card / inline-size`
+and `contain content` are CSS's own shorthands too, and a bare `contain` is
+an error, like any style without a value. `line-clamp N` alone also adds
+the `-webkit-box` declarations that browsers still need to cut text off
+after N lines.
 
 A property htmlang doesn't know is written to the CSS as it is, so new CSS
 (`corner-shape squircle`) works before htmlang lists it; the compiler warns
@@ -611,7 +616,8 @@ An element without a closing tag (`@input`, `@hr`, `@br`, `@image`,
 `@source`, ...) takes no content.
 
 Browser default margins on headings, paragraphs, lists and figures are reset
-to 0, so `spacing` controls the gaps. Lists (`@ul`, `@ol`, `@menu`) and list
+to 0 (in the element's own class, so Markdown and raw HTML keep theirs; see
+[CSS](#css)), so `spacing` controls the gaps. Lists (`@ul`, `@ol`, `@menu`) and list
 items are columns like other containers, so `spacing` on a list is the gap between its items, and
 a list shows no markers. To bring them back, write
 `[list-style disc, padding-inline-start 20, children:display list-item]` on
@@ -1238,10 +1244,31 @@ for a single rule, on its line:
 @el [animation fade-in 0.3s ease, class=note] Fades in
 ```
 
-Each element gets a short generated class for its styles, and elements with
-the same styles share one. The generated rules live in `@layer htmlang`. A
-small reset (`box-sizing`, body margin, `<body>` as a column that fills
-the window, block images, unstyled links, a focus outline) lives in
-`@layer hl-reset` before it. CSS outside any layer
-takes precedence over both, so rules in `@style` or `@raw` override the
-generated ones.
+Each element with styles gets a short generated class, `hl-a`, `hl-b`, ...,
+and elements with the same styles share one. The `hl-` prefix is htmlang's:
+a class of your own that starts with it gets a warning, since the generated
+rules would apply to it too. Every style goes into the class under its own
+name, with its value as written (plus pixels, see
+[CSS properties](#css-properties)); only the layout words, and
+`line-clamp`'s fallback, write more than one declaration.
+
+An element's defaults are part of its own class: the margins browsers give
+headings, paragraphs, lists, figures and blockquotes are 0, lists have no
+markers, `@fieldset` has a thin border and padding, `@code`, `@kbd` and
+`@pre` are monospace, `@link` has no underline and takes its parent's text
+colour, and `@image` is a block. They apply only to htmlang's own elements,
+so HTML that comes from `@markdown` or `@raw` keeps the browser's defaults:
+a Markdown list keeps its bullets and a Markdown link its underline.
+
+The generated rules live in `@layer htmlang`, after a small reset in
+`@layer hl-reset`. A page's reset sets `box-sizing: border-box` everywhere
+and makes `<body>` a column that fills the window. A fragment (a file
+without `@page`, or `--partial` output) goes into a page it doesn't own, so
+its reset touches only htmlang's own elements (those with an `hl-` class),
+which get `box-sizing: border-box`, and nothing else. In both, an element
+htmlang lays out stays hidden while it has `hidden`, while an `@dialog` is
+closed, and while a popover isn't showing, even though its generated
+`display` would otherwise beat the browser's `display: none`. A page with
+links, buttons or form fields also gives htmlang's ones a focus outline.
+CSS outside any layer takes precedence over both layers, so rules in
+`@style` or `@raw` override the generated ones.

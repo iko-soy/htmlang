@@ -1768,7 +1768,8 @@ impl Evaluator {
         let line_num = node.span.line;
         let body = &node.children;
         // An @style block at the top of the body is scoped to the
-        // function: its rules apply inside a `.hl-NAME` wrapper.
+        // function: its rules apply inside a `.hl-fn-NAME` wrapper (a
+        // generated class never has a second `-`, so the two can't meet).
         let (style, body): (Vec<&syntax::Node>, Vec<&syntax::Node>) =
             body.iter().partition(|node| node.is_directive("style"));
         if !style.is_empty() {
@@ -1782,7 +1783,8 @@ impl Evaluator {
             // Nested under the scope class, so any CSS works (multi-line
             // rules, at-rules)
             if !css.trim().is_empty() {
-                ctx.custom_css.push(format!(".hl-{} {{\n{}}}", name, css));
+                ctx.custom_css
+                    .push(format!(".hl-fn-{} {{\n{}}}", name, css));
             }
         }
 
@@ -2053,7 +2055,7 @@ impl Evaluator {
 
         // Attributes that aren't parameters style the function's root
         // element, and a scoped @style's class goes on it too.
-        let scope_class = fn_def.scoped.then(|| format!("hl-{}", name));
+        let scope_class = fn_def.scoped.then(|| format!("hl-fn-{}", name));
         if !forwarded.is_empty() || scope_class.is_some() {
             let mut roots = result_nodes.iter_mut().filter_map(|n| match n {
                 Node::Element(e) => Some(e),
@@ -4360,6 +4362,9 @@ fn parse_attrs(
         if validate && misspelled_parameter(&attr, text_keys, line, column(0), ctx) {
             continue;
         }
+        if validate && attr.html && attr.key == "class" {
+            reserved_class(&attr, line, column(0), ctx);
+        }
 
         // A style or a flag: its name is checked, and what can't be
         // written into the page is an error and left out
@@ -4372,6 +4377,31 @@ fn parse_attrs(
     }
 
     attrs
+}
+
+/// `class=hl-x`: the `hl-` prefix is htmlang's, for its generated classes,
+/// whose rules would then apply to the element too. It goes into the page
+/// as written, so this is a warning.
+fn reserved_class(attr: &Attribute, line: usize, column: Option<usize>, ctx: &mut ParseContext) {
+    let classes = attr.value.as_deref().unwrap_or_default();
+    for class in classes.split_whitespace() {
+        if class.starts_with(crate::codegen::CLASS_PREFIX) {
+            let diagnostic = Diagnostic::warning(
+                code::INVALID_VALUE,
+                line,
+                format!(
+                    "class '{}' starts with `{}`, which htmlang keeps for the classes it \
+                     generates, so their styles could apply to this element: give it \
+                     another name",
+                    class,
+                    crate::codegen::CLASS_PREFIX
+                ),
+            )
+            .subject(class);
+            let diagnostic = at_attribute(diagnostic, column, ctx);
+            ctx.diagnostics.push(diagnostic);
+        }
+    }
 }
 
 /// `[$name]` where `$name` isn't an attribute bundle.

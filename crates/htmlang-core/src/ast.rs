@@ -139,10 +139,15 @@ impl ElementKind {
     }
 
     /// The CSS every such element starts with, besides its layout's
-    /// `display` (browser margins reset, the list markers of a column).
+    /// `display` (browser margins reset, the list markers of a column, a
+    /// link's colour). It goes into the element's own generated class,
+    /// never onto a global element selector, so HTML from `@markdown` and
+    /// `@raw` keeps the browser's defaults.
     pub fn css(&self) -> &'static str {
         match self {
             ElementKind::Paragraph => "margin:0;",
+            ElementKind::Link => "text-decoration:none;color:inherit;",
+            ElementKind::Image => "display:block;",
             ElementKind::Tag(spec) => spec.css,
             _ => "",
         }

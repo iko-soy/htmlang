@@ -65,7 +65,13 @@ unless you write some, and nothing is added that you didn't ask for.
 - **Names are checked, values are CSS's.** A misspelled element, prefix,
   parameter or slot is an error. A CSS property htmlang doesn't know is
   passed through with a "did you mean" warning, and values go to the CSS as
-  written. Nothing you write is left out of the page without an error.
+  written (`outline 2 solid red` is `outline: 2px solid red`, nothing
+  added). Nothing you write is left out of the page without an error.
+- **The generated CSS stays on htmlang's elements.** Its classes are
+  `hl-a`, `hl-b`, ..., in `@layer htmlang`, so your own CSS wins. An
+  element's defaults (no heading margins, no list markers, links in the
+  text colour) are part of its own class, so `@markdown` and `@raw` HTML,
+  and a page that embeds `--partial` output, keep theirs.
 - **HTML stays HTML.** An element that isn't about layout or text has its
   HTML name (`@nav`, `@ul`, `@form`, `@details`, `@strong`, `@em`, `@br`,
   `@caption`), from a fixed list, so a typo is an error rather than a new

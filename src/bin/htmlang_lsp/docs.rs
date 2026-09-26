@@ -35,8 +35,8 @@ pub(crate) const ELEMENTS: &[Doc] = &[
         "A paragraph of flowing text (`<p>`), which holds inline `{@...}` elements like any text.",
         "@paragraph\n  Read the {@link /docs docs}.",
     ),
-    doc("link", "Link (`<a>`): the first word after its attributes is its `href`, and the rest is its content.", "@link /about About us"),
-    doc("image", "Image (`<img>`): the one word after its attributes is its `src` (quote one with a space in it).", "@image [alt=Logo, width 120] logo.png"),
+    doc("link", "Link (`<a>`): the first word after its attributes is its `href`, and the rest is its content. It has no underline and takes its parent's text colour until you style it.", "@link /about About us"),
+    doc("image", "Image (`<img>`, a block): the one word after its attributes is its `src` (quote one with a space in it).", "@image [alt=Logo, width 120] logo.png"),
     doc(
         "script",
         "Script (`<script>`): the word after its attributes is its `src`; or its JavaScript as \
@@ -135,7 +135,8 @@ pub(crate) const DIRECTIVES: &[Doc] = &[
     doc("data", "Loads data into a variable: a JSON file or inline JSON (objects are records, arrays lists), a glob of files (a list of records), or `env:NAME` (text).", "@data $site site.json\n@data $links [{\"label\": \"Home\", \"url\": \"/\"}]"),
 ];
 
-/// htmlang's own attributes, plus CSS properties htmlang treats specially.
+/// htmlang's own attributes, plus CSS properties whose hover says more
+/// than CSS's name does (every one of them compiles as CSS says).
 #[rustfmt::skip]
 pub(crate) const ATTRIBUTES: &[Doc] = &[
     doc("spacing", "Gap between children, on a row, column or grid.", "spacing 20"),
@@ -156,6 +157,8 @@ pub(crate) const ATTRIBUTES: &[Doc] = &[
     doc("col-span", "Columns a grid child spans.", "col-span 2"),
     doc("row-span", "Rows a grid child spans.", "row-span 2"),
     doc("line-height", "Line height; a bare number is a multiplier of the font size.", "line-height 1.5"),
+    doc("line-clamp", "Cuts text off after N lines, with the `-webkit-box` declarations browsers still need.", "line-clamp 3"),
+    doc("outline", "CSS's outline shorthand, as CSS reads it: a width, a style and a colour. Without a style (`solid`) CSS draws none.", "focus:outline 2 solid var(--brand)"),
     doc("inline", "On `@image`: embed the file (SVG markup, or other images as base64) in the page.", "inline"),
 ];
 
@@ -447,6 +450,14 @@ mod tests {
         assert!(says("@code", "indented block under it, verbatim"));
         assert!(!says("@kbd", "shown as written"));
         assert!(says("@kbd", "Text after it is its content"));
+    }
+
+    #[test]
+    fn the_hover_of_a_css_shorthand_says_what_css_reads() {
+        let says = |name: &str, text: &str| hover(name).is_some_and(|h| h.contains(text));
+        assert!(says("outline", "CSS draws none"));
+        assert!(says("line-clamp", "-webkit-box"));
+        assert!(says("@link", "no underline"));
     }
 
     #[test]
