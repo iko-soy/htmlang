@@ -5900,11 +5900,11 @@ fn the_after_snippet_of_names_not_values() {
     let d = parse_diagnostics("@el [max-width none, z-index auto]\n  x\n");
     assert!(d.is_empty(), "{:?}", d);
 
-    let result = htmlang::parser::parse("@el [corner-shape squircle]\n  x\n");
+    let result = htmlang::parser::parse("@el [text-grow per-line]\n  x\n");
     let unknown = coded(&result.diagnostics, "unknown-attribute");
     assert_eq!(unknown.len(), 1, "{:?}", result.diagnostics);
     assert_eq!(unknown[0].severity, htmlang::parser::Severity::Warning);
-    assert!(htmlang::codegen::generate(&result.document).contains("corner-shape:squircle"));
+    assert!(htmlang::codegen::generate(&result.document).contains("text-grow:per-line"));
 
     let d = parse_diagnostics("@let name Ada\n@text Hello $nmae\n");
     let undefined = coded(&d, "undefined-variable");
@@ -6198,7 +6198,7 @@ fn hidden_is_a_boolean_attribute() {
 #[test]
 fn a_misspelled_parameter_is_an_error() {
     let d = parse_diagnostics(
-        "@let @card [title, tone red, featured false]\n  @el [background $tone] $title\n@card [title A, tnoe blue, featred, corner-shape x]\n",
+        "@let @card [title, tone red, featured false]\n  @el [background $tone] $title\n@card [title A, tnoe blue, featred, text-grow x]\n",
     );
     let unknown = coded(&d, "unknown-attribute");
     let errors: Vec<_> = unknown
@@ -7806,4 +7806,119 @@ fn spacing_and_grid_cols_follow_the_px_rule() {
         "{}",
         out
     );
+}
+
+#[test]
+fn snapshot_custom_properties() {
+    snapshot_test("custom_properties");
+}
+
+#[test]
+fn a_custom_property_is_a_style_on_any_element_under_any_prefix() {
+    let result = htmlang::parser::parse(
+        "@el [--a 1, hover:--b 2, md:--c 3, dark:--d 4, children:--e 5, nth:2n:--f 6, has(.x):--g 7, print:--h 8, cq-md:--i 9]\n  x\n@image [alt=x, --w 20px] a.png\n@paragraph {@em [--j 1] y}\n",
+    );
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    let html = htmlang::codegen::generate(&result.document);
+    for declaration in [
+        "--a:1;",
+        "--b:2;",
+        "--c:3;",
+        "--d:4;",
+        "--e:5;",
+        "--f:6;",
+        "--g:7;",
+        "--h:8;",
+        "--i:9;",
+        "--w:20px;",
+        "--j:1;",
+    ] {
+        assert!(html.contains(declaration), "{declaration}: {html}");
+    }
+    assert!(html.contains(":hover{--b:2;}"), "{}", html);
+    assert!(
+        html.contains("@media(prefers-color-scheme:dark){.hl-a{--d:4;}}"),
+        "{}",
+        html
+    );
+}
+
+#[test]
+fn a_custom_property_s_value_is_written_as_it_is() {
+    // No px: a custom property has no type to go by
+    let html = compile(
+        "@let --x 8\n@let --stack Inter\\, sans-serif\n@el [--hue 200, --cols 3, --z 10, --ratio 1.5, --shadow 0 2 4 black] x\n",
+    );
+    assert!(
+        html.contains(":root{--x:8;--stack:Inter, sans-serif;}"),
+        "{}",
+        html
+    );
+    assert!(
+        html.contains("--hue:200;--cols:3;--z:10;--ratio:1.5;--shadow:0 2 4 black;"),
+        "{}",
+        html
+    );
+}
+
+#[test]
+fn a_custom_property_on_a_line_of_a_list_is_a_declaration() {
+    let result = htmlang::parser::parse(
+        "@el [\n  padding 4,\n  --surface white,\n  -- a comment\n  --\n  color red\n]\n  x\n",
+    );
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    let html = htmlang::codegen::generate(&result.document);
+    assert!(
+        html.contains("padding:4px;--surface:white;color:red;"),
+        "{}",
+        html
+    );
+}
+
+#[test]
+fn svg_properties_are_css_properties() {
+    let d = parse_diagnostics(
+        "@el [fill red, fill-opacity 0.5, stroke blue, stroke-width 2, stroke-dasharray 4 2, stroke-linecap round, stroke-linejoin round, stroke-opacity 1, paint-order stroke, vector-effect non-scaling-stroke, stop-color red, marker-end none, corner-shape squircle]\n  x\n",
+    );
+    assert!(d.is_empty(), "{:?}", d);
+    // A number in stroke-width is a number (user units): no px
+    let html = compile("@el [stroke-width 2, baseline-shift 3]\n  x\n");
+    assert!(
+        html.contains("stroke-width:2;baseline-shift:3px;"),
+        "{}",
+        html
+    );
+}
+
+#[test]
+fn a_style_an_inline_svg_can_t_take_is_an_error() {
+    let dir = std::env::temp_dir().join("htmlang_test_inline_svg_styles");
+    let _ = fs::create_dir_all(&dir);
+    fs::write(dir.join("i.svg"), "<svg viewBox=\"0 0 1 1\"></svg>").unwrap();
+    let result = htmlang::parser::parse_with_base(
+        "@image [inline, width 24, color red, class=icon, aria-label=Logo, role=img] i.svg\n@image [inline, --w 2px, hover:color blue, alt=x] i.svg\n",
+        Some(&dir),
+    );
+    let html = htmlang::codegen::generate(&result.document);
+    assert!(
+        html.contains(
+            "<svg viewBox=\"0 0 1 1\" width=\"24\" fill=\"red\" class=\"icon\" aria-label=\"Logo\" role=\"img\">"
+        ),
+        "{}",
+        html
+    );
+    let errors = coded(&result.diagnostics, "unexpected-argument");
+    assert_eq!(errors.len(), 1, "{:?}", result.diagnostics);
+    assert_eq!(errors[0].line, 2);
+    assert!(
+        errors[0].message.contains("'--w', 'hover:color', 'alt'"),
+        "{}",
+        errors[0].message
+    );
+    assert!(
+        errors[0].message.contains("aria-label="),
+        "{}",
+        errors[0].message
+    );
+    let _ = fs::remove_dir_all(&dir);
 }

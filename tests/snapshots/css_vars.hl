@@ -1,7 +1,7 @@
 @page CSS Variables
 @let --primary #3b82f6
-@let --spacing 20
-@let --radius 8
+@let --spacing 20px
+@let --radius 8px
 
 @el [spacing $--spacing]
   @el [background var(--primary), border-radius $--radius, padding $--spacing]

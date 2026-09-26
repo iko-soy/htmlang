@@ -61,6 +61,11 @@ unless you write some, and nothing is added that you didn't ask for.
   number is pixels (`box-shadow 0 2 4 black` is `0 2px 4px black`); numbers
   in any other property (`flex 1`, `z-index 2`) and in custom properties
   stay numbers.
+  A custom property is a style like any other: `@let --surface white`
+  declares it for the whole page, and `[--gap 16px, md:--gap 24px]` sets
+  it on an element and everything inside it, so dark mode redefines a
+  token once (`@page [dark:--surface #0b1220]`) instead of every colour
+  that uses it.
   Prefixes make a style conditional: `hover:`, `md:`, `dark:`, `first:`.
   A comma separates attributes, so a comma inside a value is written `\,`
   (`transition opacity 0.3s\, transform 0.3s`), and quoted text keeps its

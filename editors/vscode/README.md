@@ -11,7 +11,10 @@ Syntax highlighting, snippets, and language server support for
   `@link`, `@image`, `@script` and the other elements that take one, quoted text, escapes (`\,`, `\$`, `\]`), `{@inline}` elements
   (shown as text in `@code` and `@textarea`), the one-line body of `@raw`,
   `@style` and `@head` as raw text,
-  `@each $item in` headers and ranges (`1..5`), colors, numbers and `-- comments`.
+  `@each $item in` headers and ranges (`1..5`), custom and vendor-prefixed
+  property names (`--gap`, `md:--gap`, `-webkit-text-stroke`), colors,
+  numbers and `-- comments` (`--` followed by a space, also between the lines
+  of an attribute list).
 - **Diagnostics**: the compiler's own, each with its code: parse errors,
   unknown elements, prefixes and CSS properties with "did you mean"
   suggestions, anything that would be left out of the page, undefined and
@@ -22,7 +25,8 @@ Syntax highlighting, snippets, and language server support for
   `wrap` and `grid-cols` only on a row, column or grid), CSS properties,
   HTML attributes (not the one an element's leading argument already
   gives, as `href=` in `@link [] /about About`; on `@page`, `lang=`,
-  `dir=`, `class=` and `favicon` first), prefixes, `if()` (and
+  `dir=`, `class=` and `favicon` first), the custom properties the file
+  names (`--surface`, and `dark:--surface` after a prefix), prefixes, `if()` (and
   attributes inside its branches),
   the variables visible where you type (definitions above in the block and
   the blocks around it, `@each` variables and a function's parameters),

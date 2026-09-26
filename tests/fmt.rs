@@ -45,7 +45,7 @@ fn formatting_is_idempotent_and_keeps_the_output() {
         );
         let comments = |s: &str| {
             s.lines()
-                .filter(|l| l.trim_start().starts_with("--"))
+                .filter(|l| htmlang::syntax::is_comment(l.trim()))
                 .map(str::trim)
                 .map(String::from)
                 .collect::<Vec<_>>()

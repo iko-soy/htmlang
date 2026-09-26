@@ -63,8 +63,9 @@
   ],
   "repository": {
     "comment": {
+      "comment": "A line whose first word is --: -- followed by a space or the end of the line (--gap 12px is a custom property)",
       "name": "comment.line.double-dash.htmlang",
-      "match": "^\\s*--.*$"
+      "match": "^\\s*--(?:\\s.*)?$"
     },
     "page-directive": {
       "comment": "@page [attributes] Title: the page is the root element, so its attributes are an ordinary list",
@@ -230,6 +231,9 @@
       },
       "patterns": [
         {
+          "include": "#comment"
+        },
+        {
           "include": "#conditional"
         },
         {
@@ -252,6 +256,9 @@
         },
         {
           "include": "#state-prefix"
+        },
+        {
+          "include": "#custom-property"
         },
         {
           "include": "#html-attribute"
@@ -280,7 +287,16 @@
     },
     "state-prefix": {
       "name": "keyword.other.state.htmlang",
-      "match": "(?:[a-z0-9-]+|nth:[^:\\s,\\]]+|has\\([^)]*\\)):(?=[a-z])"
+      "match": "(?:[a-z0-9-]+|nth:[^:\\s,\\]]+|has\\([^)]*\\)):(?=[a-z-])"
+    },
+    "custom-property": {
+      "comment": "A custom property's or a vendor-prefixed property's name where an attribute starts: --gap, md:--gap, -webkit-text-stroke",
+      "match": "(?:(?<=[\\[,:])|^)(\\s*)(--[A-Za-z0-9_][A-Za-z0-9_-]*|-[a-z]+-[a-z][a-z0-9-]*)(?=[\\s,\\]]|$)",
+      "captures": {
+        "2": {
+          "name": "support.type.property-name.htmlang"
+        }
+      }
     },
     "attribute-name": {
       "name": "support.type.property-name.htmlang",

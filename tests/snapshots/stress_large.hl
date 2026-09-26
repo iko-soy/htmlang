@@ -8,10 +8,10 @@
 @let --light #f8fafc
 @let --gray #64748b
 @let --border #e2e8f0
-@let --radius 8
-@let --gap 16
-@let --gap-sm 8
-@let --gap-lg 24
+@let --radius 8px
+@let --gap 16px
+@let --gap-sm 8px
+@let --gap-lg 24px
 
 @style
   @keyframes fade-in {

@@ -45,7 +45,14 @@ pub(crate) fn completions(text: &str, position: Position) -> Vec<CompletionItem>
             let prefix = &current_word[..=colon];
             if vocab::is_prefixed(prefix) {
                 let element = owning_element(text, position);
-                return state_attr_completions(prefix, edit_range, element.as_deref());
+                let mut items = state_attr_completions(prefix, edit_range, element.as_deref());
+                items.extend(custom_property_completions(
+                    text,
+                    prefix,
+                    current_word,
+                    edit_range,
+                ));
+                return items;
             }
         }
 
@@ -70,6 +77,12 @@ pub(crate) fn completions(text: &str, position: Position) -> Vec<CompletionItem>
                 .into_iter()
                 .filter(|item| !given.contains(&item.label.trim_end_matches('='))),
         );
+        items.extend(custom_property_completions(
+            text,
+            "",
+            current_word,
+            edit_range,
+        ));
         return items;
     }
 
@@ -975,6 +988,49 @@ fn attr_completions(range: Range, element: Option<&str>) -> Vec<CompletionItem> 
     items
 }
 
+/// The custom properties the file names (`@let --brand`, `[--gap 8px]`,
+/// `var(--gap)`), to set on an element: `--gap `, or `md:--gap ` after a
+/// prefix. The name being written is left out.
+fn custom_property_completions(
+    text: &str,
+    prefix: &str,
+    current: &str,
+    range: Range,
+) -> Vec<CompletionItem> {
+    let is_name = |c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_';
+    let mut names: Vec<&str> = Vec::new();
+    for (at, _) in text.match_indices("--") {
+        if text[..at].ends_with(is_name) {
+            continue;
+        }
+        let rest = &text[at + 2..];
+        if !rest.starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_') {
+            continue;
+        }
+        let end = rest.find(|c: char| !is_name(c)).unwrap_or(rest.len());
+        let name = &text[at..at + 2 + end];
+        if !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    names
+        .into_iter()
+        .map(|name| format!("{}{}", prefix, name))
+        .filter(|full| full != current)
+        .map(|full| {
+            let mut completion = item(
+                &full,
+                CompletionItemKind::VARIABLE,
+                "Custom property: set on this element and everything inside it",
+                &format!("{} ", full),
+                range,
+            );
+            completion.sort_text = Some(format!("1_{}", full));
+            completion
+        })
+        .collect()
+}
+
 /// Does `element` lay out its children, so `spacing`, `wrap` and
 /// `grid-cols` work on it: a row, column or grid. A function's root isn't
 /// known, so a call (or no element) gets them all.
@@ -1217,7 +1273,10 @@ fn slot_completions(text: &str, line: u32, range: Range) -> Vec<CompletionItem> 
     for i in (0..line as usize).rev() {
         let l = lines[i];
         let trimmed = l.trim_start();
-        if trimmed.is_empty() || trimmed.starts_with("--") || indent(l) >= level {
+        if trimmed.is_empty()
+            || htmlang::syntax::is_comment(trimmed.trim_end())
+            || indent(l) >= level
+        {
             continue;
         }
         level = indent(l);
@@ -1486,6 +1545,25 @@ mod tests {
         assert!(!prefixed("hover:", "button", "wrap"));
         assert!(prefixed("hover:", "button", "padding"));
         assert!(prefixed("children:", "paragraph", "spacing"));
+    }
+
+    #[test]
+    fn the_file_s_custom_properties_are_offered_as_attributes() {
+        let text = "@let --surface white\n@el [background var(--muted), --gap 8px]\n@el [--s";
+        let items = completions(text, Position::new(2, 8));
+        let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+        for name in ["--surface", "--muted", "--gap"] {
+            assert!(labels.contains(&name), "{name}: {labels:?}");
+        }
+        // The name being written isn't one of them
+        assert!(!labels.contains(&"--s"));
+        let text = "@let --surface white\n@el [dark:";
+        let items = completions(text, Position::new(1, 10));
+        let item = items.iter().find(|i| i.label == "dark:--surface").unwrap();
+        match &item.text_edit {
+            Some(CompletionTextEdit::Edit(edit)) => assert_eq!(edit.new_text, "dark:--surface "),
+            _ => panic!("no edit"),
+        }
     }
 
     #[test]

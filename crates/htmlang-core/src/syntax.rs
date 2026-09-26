@@ -9,7 +9,9 @@
 //! [`DIRECTIVES`](crate::ast::DIRECTIVES) table.
 //!
 //! The grammar, line by line:
-//! - A line starting with `--` is a comment; an empty line is blank.
+//! - A line whose first word is `--` (a `--` followed by a space or the end
+//!   of the line) is a comment; an empty line is blank. `--gap 12px` is not
+//!   a comment: on a line of an attribute list it is a custom property.
 //! - A line starting with `@NAME` is a directive when `NAME` is in the
 //!   directive table, and an element (or function call) otherwise. An
 //!   element line is a chain of heads `@name [attributes]` joined by `>`,
@@ -650,6 +652,15 @@ fn visible_in<'a>(block: &'a [Node], line: usize, out: &mut Vec<Visible<'a>>) {
 // Parsing
 // ---------------------------------------------------------------------------
 
+/// Whether a line (without its indentation) is a comment: its first word
+/// is `--`, so `-- note` and a bare `--` are comments, while `--gap 12px`
+/// (a custom property on a line of an attribute list) and `---` are not.
+pub fn is_comment(trimmed: &str) -> bool {
+    trimmed
+        .strip_prefix("--")
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with(char::is_whitespace))
+}
+
 /// Parse source text into a syntax tree.
 pub fn parse(source: &str) -> Tree {
     parse_from(source, 0)
@@ -745,7 +756,7 @@ fn scan(
             i += 1;
             continue;
         }
-        if trimmed.starts_with("--") {
+        if is_comment(trimmed) {
             entries.push(Entry {
                 indent,
                 span: index.span(begin, begin + trimmed.len()),
@@ -768,7 +779,7 @@ fn scan(
             last += 1;
             let (next_start, next) = lines[last];
             let t = next.trim();
-            if t.is_empty() || t.starts_with("--") {
+            if t.is_empty() || is_comment(t) {
                 continue;
             }
             logical.push(t, next_start + leading_whitespace(next));
@@ -2175,6 +2186,33 @@ mod tests {
         assert_eq!(kinds(&tree.nodes), ["comment", "element", "element"]);
         assert_eq!(kinds(&tree.nodes[1].children), ["text", "blank", "element"]);
         assert!(tree.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn a_comment_is_a_double_dash_followed_by_a_space_or_nothing() {
+        for line in ["-- note", "--", "--\tnote", "--  "] {
+            assert!(is_comment(line), "{line:?}");
+        }
+        for line in ["--gap 12px", "---", "--x", "- - x", "text -- x"] {
+            assert!(!is_comment(line), "{line:?}");
+        }
+        // `--gap 12px` on a line of a list is one of its attributes
+        let tree = parse("@el [\n  padding 4,\n  -- note\n  --gap 12px,\n  --\n  color red\n]\n");
+        assert!(tree.diagnostics.is_empty(), "{:?}", tree.diagnostics);
+        let NodeKind::Element(line) = &tree.nodes[0].kind else {
+            panic!()
+        };
+        let keys: Vec<_> = line.chain[0]
+            .attrs
+            .as_ref()
+            .unwrap()
+            .attrs
+            .iter()
+            .map(|a| a.key.as_str())
+            .collect();
+        assert_eq!(keys, ["padding", "--gap", "color"]);
+        // At the start of a line outside a list, `--x` is text
+        assert_eq!(kinds(&parse("--x marks the spot\n").nodes), ["text"]);
     }
 
     #[test]

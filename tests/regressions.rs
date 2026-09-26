@@ -1766,7 +1766,7 @@ fn inline_works_with_the_src_attribute_too() {
     std::fs::write(dir.join("a.svg"), "<svg viewBox=\"0 0 1 1\"></svg>").unwrap();
     let html = compile_in(
         &dir,
-        "@image [src=a.svg, inline, alt=x]\n@image [inline, alt=x] a.svg\n",
+        "@image [src=a.svg, inline, aria-label=x]\n@image [inline, aria-label=x] a.svg\n",
     );
     assert_eq!(html.matches("<svg").count(), 2, "{}", html);
     assert!(!html.contains("<img"), "{}", html);
@@ -1897,4 +1897,14 @@ fn every_length_valued_property_gets_px() {
     ] {
         assert!(out.contains(decl), "{decl}: {out}");
     }
+}
+
+#[test]
+fn a_custom_property_starting_a_line_of_a_list_is_not_dropped() {
+    // `--surface white` on its own line of a list was read as a comment and
+    // left out without a word
+    let result = parser::parse("@el [\n  padding 4,\n  --surface white,\n  color red\n]\n  x\n");
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    let html = codegen::generate(&result.document);
+    assert!(html.contains("--surface:white;"), "{}", html);
 }

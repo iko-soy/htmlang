@@ -177,10 +177,11 @@ fn hover_user_fn(text: &str, name: &str) -> Option<String> {
     while j > 0 {
         j -= 1;
         let prev = lines[j].trim();
-        match prev.strip_prefix("--") {
-            Some(comment) => doc_lines.push(comment.strip_prefix(' ').unwrap_or(comment)),
-            None => break,
+        if !htmlang::syntax::is_comment(prev) {
+            break;
         }
+        let comment = &prev[2..];
+        doc_lines.push(comment.strip_prefix(' ').unwrap_or(comment));
     }
     doc_lines.reverse();
     let doc_str = if doc_lines.is_empty() {

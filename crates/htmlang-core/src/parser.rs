@@ -5293,15 +5293,49 @@ fn inline_svg(node: Node, line_num: usize, ctx: &mut ParseContext) -> Node {
         }
     };
     ctx.included_files.push(resolved);
+    // The file's markup has no class of its own, so a style reaches it only
+    // as one of the root's attributes: anything else is reported, never
+    // left out silently
+    let mut left_out: Vec<&str> = Vec::new();
     for attr in &elem.attrs {
-        let Some(value) = &attr.value else { continue };
-        let target = match (attr.key.as_str(), attr.html) {
-            ("width", false) | ("height", false) => attr.key.as_str(),
-            ("color", false) | ("fill", false) => "fill",
-            ("class", true) | ("id", true) => attr.key.as_str(),
-            _ => continue,
+        let target = match (attr.key.as_str(), attr.html, &attr.value) {
+            ("inline", false, None) | ("src", true, _) => continue,
+            ("width" | "height", false, Some(_)) => attr.key.as_str(),
+            ("color" | "fill", false, Some(_)) => "fill",
+            ("alt", true, _) => {
+                left_out.push(attr.key.as_str());
+                continue;
+            }
+            (key, true, Some(_)) => key,
+            (key, false, None) if crate::vocab::BOOLEAN_HTML_ATTRS.contains(&key) => key,
+            _ => {
+                left_out.push(attr.key.as_str());
+                continue;
+            }
         };
-        svg = set_svg_attr(&svg, target, value);
+        let value = attr.value.as_deref().unwrap_or("");
+        svg = set_svg_attr(&svg, target, &html_escape_md(value));
+    }
+    if !left_out.is_empty() {
+        let alt = left_out.contains(&"alt");
+        let names = left_out
+            .iter()
+            .map(|name| format!("'{}'", name))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut message = format!(
+            "{} can't go on an inline SVG: `@image [inline]` puts the file's own markup into the page, which takes `width`, `height`, `color` (as its fill) and HTML attributes (`class=`, `aria-label=`, ...)",
+            names
+        );
+        if alt {
+            message.push_str("; an SVG has no alt text: name it with `aria-label=` and `role=img`");
+        }
+        ctx.diagnostics.push(Diagnostic::new(
+            code::UNEXPECTED_ARGUMENT,
+            Severity::Error,
+            line_num,
+            message,
+        ));
     }
     Node::Raw(svg)
 }

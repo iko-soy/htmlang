@@ -167,14 +167,25 @@ anyway: `$5`, `$$`.
 
 ### Comments
 
-A line starting with `--` is a comment. A comment must be on its own line,
-because `--` later in a line is ordinary text.
+A line whose first word is `--` is a comment: `--` followed by a space, or
+alone on its line. A comment must be on its own line, because `--` later in
+a line is ordinary text. A comment may sit between the lines of an attribute
+list, and `--name` with no space is not a comment but a
+[custom property](#custom-properties), so it can start a line of a list.
 
 ```
 -- this is a comment
 @row [spacing 10]
   -- todo: more nav items
   @link / Home
+@el [
+  -- the gap, wider on larger screens
+  --gap 12px,
+  md:--gap 24px,
+  spacing var(--gap)
+]
+  @text One
+  @text Two
 ```
 
 ### Chains
@@ -250,7 +261,7 @@ runs.
 parameter or slot is an error, and so is an undefined variable. A CSS
 property htmlang doesn't know, but whose name CSS could have, is written to
 the CSS as it is, with a warning that suggests the closest known name
-(`corner-shape`, or `colr`, which asks "did you mean `color`?"). Values go to
+(`text-grow`, or `colr`, which asks "did you mean `color`?"). Values go to
 the CSS as written, so the browser decides what `z-index auto` or `color
 rebeccapurple` means; only what is wrong in any CSS is reported (see
 [CSS properties](#css-properties)).
@@ -471,7 +482,7 @@ The length properties are these, and only these:
 | Shadow | `box-shadow`, `text-shadow` |
 | Grid | `grid-template-columns`, `grid-template-rows`, `grid-auto-columns`, `grid-auto-rows` |
 | Background | `background-position` (and `-x`, `-y`), `background-size`, `object-position`, `mask-position`, `mask-size` |
-| Text | `font-size`, `letter-spacing`, `word-spacing`, `text-indent`, `text-decoration-thickness`, `text-underline-offset`, `vertical-align` |
+| Text | `font-size`, `letter-spacing`, `word-spacing`, `text-indent`, `text-decoration-thickness`, `text-underline-offset`, `vertical-align`, `baseline-shift` |
 | Other | `shape-margin`, `overflow-clip-margin`, `view-timeline-inset` |
 
 Shorthands that mix lengths with numbers of other kinds (`font`,
@@ -488,17 +499,14 @@ the `-webkit-box` declarations that browsers still need to cut text off
 after N lines.
 
 A property htmlang doesn't know is written to the CSS as it is, so new CSS
-(`corner-shape squircle`) works before htmlang lists it; the compiler warns
-and suggests the closest known name, in case it is a typo. Custom
-properties (`--gap`) and vendor-prefixed ones (`-webkit-tap-highlight-color`)
-pass without a warning. The value of a property htmlang doesn't know is
-written exactly as it is, without pixels added. A style needs a value:
-`[padding]` is an error. In a list that spans lines, a line that starts with
-`--` is a comment, so a custom property goes after another attribute on its
-line.
+(`text-grow per-line`) works before htmlang lists it; the
+compiler warns and suggests the closest known name, in case it is a typo.
+Vendor-prefixed properties (`-webkit-tap-highlight-color`) pass without a
+warning. The value of a property htmlang doesn't know is written exactly as
+it is, without pixels added. A style needs a value: `[padding]` is an error.
 
 ```
-@el [--gap 12px, gap var(--gap), -webkit-tap-highlight-color transparent]
+@el [-webkit-tap-highlight-color transparent, -webkit-text-stroke 1px black]
   Passed through as written
 ```
 
@@ -509,6 +517,46 @@ a `</style` (even quoted) would end the page's style element, so each is an
 error, including in a value that comes from a variable or from `@data`. A hex color that doesn't have 3, 4, 6 or 8 digits is a warning. A
 style whose value comes out empty, such as a field that a record doesn't
 have, is left out.
+
+#### Custom properties
+
+A custom property (`--name`) is a CSS property like any other: it goes on
+any element, under any prefix, and is written into the element's class.
+Its name is yours, so it is never checked against a list.
+CSS passes it down, so it holds for the element and everything inside it,
+where `var(--name)` reads it. Its value is written exactly as it is, since
+a custom property has no type for pixels to go by: `--hue 200` can feed
+`hsl(var(--hue) 80% 50%)` and `--cols 3` can feed `repeat(var(--cols),
+1fr)`. A length therefore takes its unit: `--gap 16px`, not `--gap 16`.
+
+```
+@el [
+  --gap 16px,
+  md:--gap 24px,
+  --hue 200,
+  spacing var(--gap),
+  background hsl(var(--hue) 80% 95%)
+]
+  @text One
+  @text Two
+```
+
+`@let --name value` declares a custom property for the whole page, on
+`:root` (see [CSS custom properties](#css-custom-properties));
+`[--name value]` sets it on one element and everything inside it. So a
+design token is declared once with `@let`, and a theme redefines it where
+it changes, once, rather than repeating a colour on every element that
+uses it:
+
+```
+@let --ink #0f172a
+@let --surface white
+@let --subtle #f8fafc
+@page [color var(--ink), background var(--surface), dark:--ink #e2e8f0, dark:--surface #0b1220, dark:--subtle #111a2e] Tokens
+@section [padding 96 24, background var(--subtle)]
+  @article [padding 24, background var(--surface)]
+    Both follow dark mode, from the one place that sets it.
+```
 
 ### Prefixes
 
@@ -1062,13 +1110,18 @@ function named `@if` could never be called, so both are warnings.
 
 ### CSS custom properties
 
-`@let --name value` declares the CSS custom property `--name` on `:root`.
-`var(--name)` refers to it at run time, so a stylesheet can still override
-it. `$--name` is its value at compile time, for use in expressions:
+`@let --name value` declares the CSS custom property `--name` on `:root`,
+for the whole page. Its value is written as it is, with no pixels added,
+so a length takes its unit (`@let --radius 8px`). `var(--name)` refers to
+it at run time, so an element (`[dark:--name value]`, see
+[Custom properties](#custom-properties)) or a stylesheet can still
+redefine it. `$--name` is its value at compile time, for use in
+expressions:
 
 ```
 @let --brand #3b82f6
-@el [background var(--brand), border 1 solid ${darken($--brand, 10)}] Themed
+@let --radius 8px
+@el [background var(--brand), border-radius var(--radius), border 1 solid ${darken($--brand, 10)}] Themed
 ```
 
 ## Expressions
@@ -1156,7 +1209,7 @@ the content to show when the list is empty.
 | `@data $name env:NAME [default]` | An environment variable |
 | `@include file.hl` | Insert another file: its content and its definitions. A file that holds only `@let`s outputs nothing (a [library](#layouts)) |
 | `@markdown` / `@markdown file.md` | Markdown (an indented body or a file), converted to HTML |
-| `@image [inline] file.svg` | Put the file inside the page: SVG as markup (`width`, `height`, `color`, `class=` and `id=` apply to it), other images as base64. `inline` goes only on `@image`, without a prefix |
+| `@image [inline] file.svg` | Put the file inside the page: SVG as markup, other images as base64. The SVG's root gets `width`, `height`, `color` (as its `fill`) and the HTML attributes (`class=`, `aria-label=`, ...); any other style, and `alt=`, is an error, since the markup has no generated class. `inline` goes only on `@image`, without a prefix |
 
 Records keep their values whole, even when a value contains spaces or
 commas:

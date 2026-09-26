@@ -3,15 +3,27 @@
 -- Shows the layout attributes (spacing, center-x, wrap, @spacer), CSS
 -- properties with their own names, design tokens as custom properties, and
 -- functions that take parameters, attributes and children.
-@page [lang=en, color var(--ink), dark:background #0b1220, dark:color #e2e8f0] Launchpad
+@page [
+  lang=en,
+  color var(--ink),
+  background var(--surface),
+  -- Dark mode redefines the tokens once, and everything that uses them follows
+  dark:--ink #e2e8f0,
+  dark:--muted #94a3b8,
+  dark:--line #1e293b,
+  dark:--surface #0b1220,
+  dark:--subtle #111a2e
+] Launchpad
 @meta description Launchpad turns static pages into a product site in minutes.
 @meta og:title Launchpad
 
--- Design tokens: CSS custom properties, usable as var(--name) and $--name
+-- Design tokens: CSS custom properties on :root, usable as var(--name) and
+-- $--name
 @let --brand #2563eb
 @let --ink #0f172a
 @let --muted #64748b
 @let --line #e2e8f0
+@let --surface white
 @let --subtle #f8fafc
 
 -- An attribute bundle shared by both button styles
@@ -60,7 +72,7 @@
     @primary-link [href /signup, padding 8 16] Sign up
 
 -- Hero
-@section [padding 96 24, background var(--subtle), dark:background #111a2e]
+@section [padding 96 24, background var(--subtle)]
   @el [max-width 720, center-x, spacing 24, text-align center]
     @h1 [font-size 52, line-height 1.1, letter-spacing -1, md:font-size 64] Build faster with less CSS.
     @paragraph [font-size 19, color var(--muted), line-height 1.6]
@@ -81,7 +93,7 @@
         @paragraph [color var(--muted), line-height 1.6] $feature.body
 
 -- Pricing: one plan is highlighted with if()
-@section [id=pricing, padding 80 24, spacing 40, background var(--subtle), dark:background #111a2e]
+@section [id=pricing, padding 80 24, spacing 40, background var(--subtle)]
   @section-heading [title Simple pricing, lede Start free and upgrade when your team grows.]
   @row [max-width 1000, center-x, spacing 20, wrap, align-items stretch]
     @each $plan in $plans
@@ -89,8 +101,7 @@
         flex 1 1 260px,
         padding 28,
         spacing 16,
-        background white,
-        dark:background #0b1220,
+        background var(--surface),
         border-radius 12,
         if($plan.featured, [border 2 solid var(--brand), box-shadow 0 12 32 rgba(37, 99, 235, 0.15)], border 1 solid var(--line))
       ]

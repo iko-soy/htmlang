@@ -130,7 +130,7 @@ fn has_comment(node: &Node, lines: &[&str]) -> bool {
     own_lines(node, lines)
         .iter()
         .skip(1)
-        .any(|l| l.trim_start().starts_with("--"))
+        .any(|l| syntax::is_comment(l.trim()))
 }
 
 /// Whether an attribute list on the line never closed.
@@ -276,10 +276,7 @@ fn print_header(header: Header, node: &Node, level: usize, out: &mut String) {
         // Wrap when too long; a list that was already wrapped stays wrapped
         // above the lower threshold (hysteresis).
         let wrap = len > MAX_LINE_WIDTH || (was_wrapped && len > WRAP_MIN_WIDTH);
-        // A line of a list that starts with `--` is a comment, so a custom
-        // property (`--gap 12`) can't start one: such a list stays on its line
-        let custom = attrs.iter().any(|a| a.starts_with("--"));
-        if wrap && attrs.len() > 1 && !custom {
+        if wrap && attrs.len() > 1 {
             out.push_str(&indent);
             out.push_str(&header.text[..*start]);
             out.push_str("[\n");
@@ -351,15 +348,24 @@ mod tests {
     }
 
     #[test]
-    fn a_list_with_a_custom_property_is_not_wrapped() {
-        // Wrapped, `--gap 12px,` would start a line and become a comment
+    fn a_list_with_a_custom_property_wraps_like_any_other() {
+        // `--gap 12px,` at the start of a line is a declaration, not a comment
         let input = format!(
             "@el [padding 4, --gap 12px, {}]\n  x\n",
             vec!["color red"; 12].join(", ")
         );
         let output = format(&input);
-        assert_eq!(output, input);
-        assert!(output.lines().all(|l| !l.trim_start().starts_with("--")));
+        assert!(output.contains("\n  --gap 12px,\n"), "{output}");
+        assert_eq!(format(&output), output);
+        let tree = syntax::parse(&output);
+        assert!(
+            tree.nodes
+                .iter()
+                .all(|n| !matches!(n.kind, NodeKind::Comment))
+        );
+        // A comment line in a list is kept, and so is the declaration after it
+        let src = "@el [\n  padding 4,\n  -- the gap\n  --gap 12px,\n  gap var(--gap)\n]\n  x\n";
+        assert_eq!(format(src), src);
     }
 
     #[test]

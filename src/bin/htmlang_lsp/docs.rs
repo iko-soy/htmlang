@@ -116,8 +116,8 @@ pub(crate) const DIRECTIVES: &[Doc] = &[
     ),
     doc(
         "let",
-        "Defines a value, quoted text (`\"...\"`, which keeps its quotes only in CSS), a computed value (`= expr`) or an attribute bundle (`[...]`), used as `$name`; or, with `@` before the name, a function with parameters `[param, param default]` (a name alone is required) and an indented body. A value is text, a list (commas make one: `a, b, c`, printed as written), a range (`1..5`), or, when it is one `$name` or `${...}`, whatever that holds (a record, a list). A function is called like an element, on its own line, in a chain or inline in text (`{@name ...}`): `@name [param value]`, or a parameter's name alone for `true`; its other attributes style its root element. They share one namespace. A definition is visible from its line to the end of its block, and a function's body sees its parameters and what is visible where it is defined. A function can't take the name of a built-in element or directive.",
-        "@let primary #3b82f6\n@let arrow \"→ \"\n@let gap = 8 * 2\n@let card [padding 20]\n@let @cta [label]\n  @el [$card] $label",
+        "Defines a value, quoted text (`\"...\"`, which keeps its quotes only in CSS), a computed value (`= expr`) or an attribute bundle (`[...]`), used as `$name`; or, with `@` before the name, a function with parameters `[param, param default]` (a name alone is required) and an indented body. A value is text, a list (commas make one: `a, b, c`, printed as written), a range (`1..5`), or, when it is one `$name` or `${...}`, whatever that holds (a record, a list). A function is called like an element, on its own line, in a chain or inline in text (`{@name ...}`): `@name [param value]`, or a parameter's name alone for `true`; its other attributes style its root element. They share one namespace. `@let --name VALUE` declares a CSS custom property on `:root`, for the whole page, with its value as written (no px); `[--name VALUE]` sets one on an element and everything inside it. A definition is visible from its line to the end of its block, and a function's body sees its parameters and what is visible where it is defined. A function can't take the name of a built-in element or directive.",
+        "@let primary #3b82f6\n@let arrow \"→ \"\n@let gap = 8 * 2\n@let --radius 8px\n@let card [padding 20]\n@let @cta [label]\n  @el [$card] $label",
     ),
     doc("include", "Inserts another `.hl` file here, with its definitions.", "@include header.hl"),
     doc("raw", "Pastes HTML into the output verbatim: the rest of the line, or an indented block (not both). It takes no attributes.", "@raw <hr class=\"fancy\">\n@raw\n  <div class=\"widget\"></div>"),
@@ -358,9 +358,14 @@ fn attribute_hover(name: &str) -> Option<String> {
             "**{name}** \u{2014} CSS property `{name}`, {value}.\n\n[MDN](https://developer.mozilla.org/docs/Web/CSS/{name})"
         ));
     }
-    if vocab::is_custom_property(name) || vocab::is_vendor_property(name) {
+    if vocab::is_custom_property(name) {
         return Some(format!(
-            "**{name}** \u{2014} CSS property `{name}`, written to the CSS as it is (no px)."
+            "**{name}** \u{2014} Custom property: sets `{name}` on this element and everything inside it, read with `var({name})`. Its value is written to the CSS as it is (no px), so a length takes its unit: `{name} 8px`. `@let {name} VALUE` declares it for the whole page, on `:root`."
+        ));
+    }
+    if vocab::is_vendor_property(name) {
+        return Some(format!(
+            "**{name}** \u{2014} Vendor-prefixed CSS property `{name}`, written to the CSS as it is (no px)."
         ));
     }
     if vocab::BOOLEAN_HTML_ATTRS.contains(&name) {
@@ -530,6 +535,8 @@ mod tests {
         assert!(hover("favicon").unwrap().contains("@page"));
         assert!(hover("@page").unwrap().contains("<body>"));
         assert!(hover("--gap").unwrap().contains("as it is"));
+        assert!(hover("--gap").unwrap().contains("everything inside it"));
+        assert!(hover("--gap").unwrap().contains(":root"));
         assert!(
             hover("-webkit-tap-highlight-color")
                 .unwrap()

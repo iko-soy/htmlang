@@ -61,7 +61,7 @@ pub fn diagnostics(source: &str) -> String {
 mod tests {
     #[test]
     fn warnings_are_reported_with_errors() {
-        let report = super::diagnostics("@el [corner-shape round, paddin 4]\n  $nope");
+        let report = super::diagnostics("@el [text-grow per-line, paddin 4]\n  $nope");
         let lines: Vec<&str> = report.lines().collect();
         assert!(
             lines[0].starts_with("error[undefined-variable] line 2:3"),
@@ -73,7 +73,7 @@ mod tests {
             "{}",
             report
         );
-        let page = super::compile("@el [corner-shape round, paddin 4]\n  $nope");
+        let page = super::compile("@el [text-grow per-line, paddin 4]\n  $nope");
         assert!(
             page.contains("Compilation Errors") && page.contains("warning["),
             "{}",
@@ -83,9 +83,9 @@ mod tests {
 
     #[test]
     fn a_page_with_warnings_still_compiles() {
-        let page = super::compile("@el [corner-shape round] Hi");
-        assert!(page.contains("corner-shape:round"), "{}", page);
-        assert!(super::diagnostics("@el [corner-shape round] Hi").starts_with("warning["));
+        let page = super::compile("@el [text-grow per-line] Hi");
+        assert!(page.contains("text-grow:per-line"), "{}", page);
+        assert!(super::diagnostics("@el [text-grow per-line] Hi").starts_with("warning["));
         assert_eq!(super::diagnostics("@el Hi"), "");
     }
 }

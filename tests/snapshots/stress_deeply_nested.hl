@@ -2,7 +2,7 @@
 
 @let --primary #3b82f6
 @let --border #e2e8f0
-@let --radius 8
+@let --radius 8px
 
 @let @deep-card [title]
   @el [background white, dark:background #1e293b, border-radius $--radius, padding 16, border 1 solid $--border]

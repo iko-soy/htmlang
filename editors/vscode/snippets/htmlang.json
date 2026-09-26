@@ -29,7 +29,17 @@
       "@let --${5:muted} ${6:#64748b}",
       "$0"
     ],
-    "description": "CSS custom properties: var(--name) at run time, \\$--name at compile time"
+    "description": "CSS custom properties on :root, values as written (a length takes its unit): var(--name) at run time, \\$--name at compile time; [--name value] sets one on an element and everything inside it"
+  },
+  "Dark mode tokens": {
+    "prefix": "@page-theme",
+    "body": [
+      "@let --${1:ink} ${2:#0f172a}",
+      "@let --${3:surface} ${4:white}",
+      "@page [color var(--$1), background var(--$3), dark:--$1 ${5:#e2e8f0}, dark:--$3 ${6:#0b1220}] ${7:My Page}",
+      "$0"
+    ],
+    "description": "Colour tokens on :root, redefined once for dark mode on the page: everything that uses them follows"
   },
   "Attribute bundle": {
     "prefix": "@let-bundle",
