@@ -85,7 +85,7 @@ pub(crate) const ELEMENTS: &[Doc] = &[
 pub(crate) const DIRECTIVES: &[Doc] = &[
     doc(
         "page",
-        "Produces a full HTML document with this title. Attributes set `lang`, `favicon`, `canonical` and `base`.",
+        "Produces a full HTML document with this title. Attributes set `lang` and `favicon`.",
         "@page [lang en] My Site",
     ),
     doc(

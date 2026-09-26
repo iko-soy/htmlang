@@ -1,4 +1,7 @@
-@page [canonical https://example.com/page, base https://example.com/] My Site
+@page My Site
+@head
+  <base href="https://example.com/">
+  <link rel="canonical" href="https://example.com/page">
 @style
   @font-face { font-family: 'Inter'; src: url('fonts/inter.woff2') format('woff2'); font-display: swap; }
 @head

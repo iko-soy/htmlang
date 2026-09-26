@@ -90,10 +90,6 @@ struct ParseContext {
     fn_lines: HashMap<String, usize>,
     /// Line numbers of attribute bundle definitions (name -> line)
     define_lines: HashMap<String, usize>,
-    /// Canonical URL
-    canonical: Option<String>,
-    /// Base URL for relative links
-    base_url: Option<String>,
 }
 
 /// Evaluates a syntax tree (see `syntax.rs`) into the document's nodes.
@@ -170,8 +166,6 @@ pub fn parse_with_base(input: &str, base_path: Option<&Path>) -> ParseResult {
         let_lines: HashMap::new(),
         fn_lines: HashMap::new(),
         define_lines: HashMap::new(),
-        canonical: None,
-        base_url: None,
     };
     load_prelude(&mut ctx);
     let nodes = Evaluator.eval_block(&tree, &mut ctx);
@@ -189,8 +183,6 @@ pub fn parse_with_base(input: &str, base_path: Option<&Path>) -> ParseResult {
             css_vars: ctx.css_vars,
             custom_css: ctx.custom_css,
             og_tags: ctx.og_tags,
-            canonical: ctx.canonical,
-            base_url: ctx.base_url,
             nodes,
         },
         diagnostics: ctx.diagnostics,
@@ -292,7 +284,7 @@ impl Evaluator {
             });
         }
 
-        // @page [lang en, favicon /f.png, canonical URL, base URL] Title
+        // @page [lang en, favicon /f.png] Title
         if let Some(rest) = content.strip_prefix("@page ") {
             let rest = rest.trim_start();
             let title = if rest.starts_with('[') {
@@ -302,13 +294,11 @@ impl Evaluator {
                     match attr.key.as_str() {
                         "lang" => ctx.lang = Some(value),
                         "favicon" => ctx.favicon = Some(value),
-                        "canonical" => ctx.canonical = Some(value),
-                        "base" => ctx.base_url = Some(value),
                         other => ctx.diagnostics.push(Diagnostic {
                             line: line_num,
                             column: None,
                             message: format!(
-                                "unknown @page attribute '{}' (expected lang, favicon, canonical or base)",
+                                "unknown @page attribute '{}' (expected lang or favicon)",
                                 other
                             ),
                             severity: Severity::Warning,
@@ -1447,8 +1437,8 @@ const REMOVED_SYNTAX: &[(&str, &str)] = &[
     ("@css-property", "write an `@property` rule in an `@style` block"),
     ("@lang", "use `@page [lang ...] Title`"),
     ("@favicon", "use `@page [favicon ...] Title`"),
-    ("@canonical", "use `@page [canonical ...] Title`"),
-    ("@base", "use `@page [base ...] Title`"),
+    ("@canonical", "write `<link rel=\"canonical\" href=\"...\">` in `@head`"),
+    ("@base", "write `<base href=\"...\">` in `@head`"),
     ("@og", "use `@meta og:NAME VALUE`"),
     ("@debug", "removed: a layout needs no compile-time messages"),
     ("@svg", "use `@image [inline] file.svg`"),

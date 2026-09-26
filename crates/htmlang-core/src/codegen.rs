@@ -697,30 +697,6 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
         None => String::new(),
     };
 
-    // Canonical URL
-    let canonical_html = match &doc.canonical {
-        Some(url) => {
-            if dev {
-                format!("<link rel=\"canonical\" href=\"{}\">\n", html_escape(url))
-            } else {
-                format!("<link rel=\"canonical\" href=\"{}\">", html_escape(url))
-            }
-        }
-        None => String::new(),
-    };
-
-    // Base URL
-    let base_html = match &doc.base_url {
-        Some(url) => {
-            if dev {
-                format!("<base href=\"{}\">\n", html_escape(url))
-            } else {
-                format!("<base href=\"{}\">", html_escape(url))
-            }
-        }
-        None => String::new(),
-    };
-
     // Focus-visible CSS for interactive elements (accessibility)
     let focus_visible_css = if ctx.has_interactive {
         if dev {
@@ -745,7 +721,7 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
 <meta charset=\"utf-8\">
 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
 <title>{title}</title>
-{base_html}{canonical_html}{meta_html}{og_html}{favicon_html}{head_html}\
+{meta_html}{og_html}{favicon_html}{head_html}\
 <style>
 {reset_css}{element_css}\
 </style>
@@ -757,8 +733,6 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
 ",
                     title = html_escape(title),
                     lang_attr = lang_attr,
-                    base_html = base_html,
-                    canonical_html = canonical_html,
                     meta_html = meta_html,
                     favicon_html = favicon_html,
                     head_html = head_html,
@@ -769,11 +743,9 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
                 )
             } else {
                 format!(
-                    "<!DOCTYPE html><html{lang_attr}><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>{title}</title>{base_html}{canonical_html}{meta_html}{og_html}{favicon_html}{head_html}<style>{reset_css}{element_css}</style></head><body>{body}</body></html>",
+                    "<!DOCTYPE html><html{lang_attr}><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>{title}</title>{meta_html}{og_html}{favicon_html}{head_html}<style>{reset_css}{element_css}</style></head><body>{body}</body></html>",
                     title = html_escape(title),
                     lang_attr = lang_attr,
-                    base_html = base_html,
-                    canonical_html = canonical_html,
                     meta_html = meta_html,
                     og_html = og_html,
                     favicon_html = favicon_html,

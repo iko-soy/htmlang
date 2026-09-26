@@ -828,10 +828,10 @@ fn rewrite_block(
     None
 }
 
-/// Move `@lang`, `@favicon`, `@canonical` and `@base` into the `@page`
+/// Move `@lang` and `@favicon` into the `@page`
 /// line's attributes: `@page [lang en, favicon /f.png] Title`.
 fn fold_head_directives(input: &str, manual: &mut Vec<(usize, String)>) -> (String, usize) {
-    const FOLDED: &[&str] = &["lang", "favicon", "canonical", "base"];
+    const FOLDED: &[&str] = &["lang", "favicon"];
     let lines: Vec<&str> = input.lines().collect();
     let mut attrs = Vec::new();
     let mut keep = Vec::with_capacity(lines.len());
@@ -907,6 +907,13 @@ fn rewrite_directive_line(
         if let Some(rest) = trimmed.strip_prefix(old) {
             return format!("{pad}@let {}", rest);
         }
+    }
+    // `@canonical URL` / `@base URL` → the HTML line in @head
+    if let Some(url) = trimmed.strip_prefix("@canonical ") {
+        return format!("{pad}@head\n{pad}  <link rel=\"canonical\" href=\"{}\">", url.trim());
+    }
+    if let Some(url) = trimmed.strip_prefix("@base ") {
+        return format!("{pad}@head\n{pad}  <base href=\"{}\">", url.trim());
     }
     if let Some(rest) = trimmed.strip_prefix("@og ")
         && let Some((key, value)) = rest.trim().split_once(' ')
@@ -1756,6 +1763,7 @@ mod tests {
             "@page [lang en, favicon /f.png] Home\n@text hi\n"
         );
         assert_eq!(up("@og title \"My Page\""), "@meta og:title My Page");
+        assert_eq!(up("@canonical https://x.dev/a"), "@head\n  <link rel=\"canonical\" href=\"https://x.dev/a\">");
         assert_eq!(up("@debug hi $x\n@log $a $b\n@assert $x == 1\n@warn hi\n@text x"), "@text x");
         assert_eq!(up("@component card $t\n  @text $t"), "@let card $t\n  @text $t");
         assert_eq!(up("@el [color $on ? green : gray]"), "@el [color if($on, green, gray)]");

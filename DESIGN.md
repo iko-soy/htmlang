@@ -429,7 +429,7 @@ with `@slot name` (named blocks, with default content) and `@children`
 ## Page and head
 
 `@page TITLE` produces a full HTML document; without it the output is a fragment.
-Its attributes set `lang`, `favicon`, `canonical` and `base`. `@meta NAME VALUE`
+Its attributes set `lang` and `favicon` (inlined into the page). `@meta NAME VALUE`
 adds a meta tag (`og:` names become Open Graph `property` tags), and
 `@head` holds any other raw HTML for the `<head>` (fonts, JSON-LD, a manifest
 link). Translations are a JSON file per locale: `@data $t locales/$lang.json`.
@@ -479,7 +479,8 @@ removed form with its replacement.
 | `@with $x as y` | `@let y $x` |
 | `@extends layout.hl`, `@layout file` | `@include layout.hl` and a call to the layout, now a function (both files are converted) |
 | `@scope`, `@starting-style`, `@css-property` | The CSS rule in `@style` |
-| `@lang`, `@favicon`, `@canonical`, `@base` | `@page [lang ..., favicon ..., canonical ..., base ...] Title` |
+| `@lang`, `@favicon` | `@page [lang ..., favicon ...] Title` |
+| `@canonical URL`, `@base URL` | `<link rel="canonical" href="URL">`, `<base href="URL">` in `@head` |
 | `@og KEY VALUE` | `@meta og:KEY VALUE` |
 | `@assert`, `@warn`, `@debug`, `@log` | Nothing (the lines are removed) |
 | `@defer` | Its content, directly |

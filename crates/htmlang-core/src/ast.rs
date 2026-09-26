@@ -13,8 +13,6 @@ pub struct Document {
     pub css_vars: Vec<(String, String)>,
     pub custom_css: Vec<String>,
     pub og_tags: Vec<(String, String)>,
-    pub canonical: Option<String>,
-    pub base_url: Option<String>,
     pub nodes: Vec<Node>,
 }
 

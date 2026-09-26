@@ -463,3 +463,16 @@ fn css_values_pass_through() {
     assert!(out.contains("content:\"→ \""), "{}", out);
     assert!(out.contains("content:attr(title)"), "{}", out);
 }
+
+#[test]
+fn page_takes_lang_and_favicon_only() {
+    let result = parser::parse("@page [lang en, canonical https://x.dev] T\n");
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("unknown @page attribute 'canonical'")),
+        "{:?}",
+        result.diagnostics
+    );
+}

@@ -3237,26 +3237,6 @@ fn search_element() {
 }
 
 #[test]
-fn canonical_directive() {
-    let output = compile("@page [canonical https://example.com/page] T\n@text Hello");
-    assert!(
-        output.contains("<link rel=\"canonical\" href=\"https://example.com/page\">"),
-        "canonical: {}",
-        output
-    );
-}
-
-#[test]
-fn base_directive() {
-    let output = compile("@page [base https://example.com/] T\n@text Hello");
-    assert!(
-        output.contains("<base href=\"https://example.com/\">"),
-        "base: {}",
-        output
-    );
-}
-
-#[test]
 fn font_face_directive() {
     let output = compile("@page T\n@style\n  @font-face { font-family: 'Inter'; src: url('fonts/inter.woff2') format('woff2'); font-display: swap; }\n@head\n  <link rel=\"preload\" href=\"fonts/inter.woff2\" as=\"font\" crossorigin>\n@text Hello");
     assert!(output.contains("@font-face"), "font-face: {}", output);
