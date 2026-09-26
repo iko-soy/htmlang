@@ -5527,3 +5527,47 @@ fn a_misplaced_slot_in_an_included_file_names_the_file() {
         misplaced[0].message
     );
 }
+
+#[test]
+fn an_included_file_s_slots_are_where_its_include_is() {
+    let dir = std::env::temp_dir().join("htmlang_p9_include_in_body");
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    // A part of a function's body in a file of its own
+    fs::write(dir.join("part.hl"), "@el\n  @children\n  @slot foot\n").unwrap();
+    // The `@slot` blocks for a call in a file of their own
+    fs::write(
+        dir.join("fillers.hl"),
+        "@slot foot\n  From fillers\nPlain\n",
+    )
+    .unwrap();
+    fs::write(dir.join("typo.hl"), "@slot fot\n  Lost\n").unwrap();
+    let result = htmlang::parser::parse_with_base(
+        "@let @f\n  @include part.hl\n@f\n  Hello\n  @slot foot\n    Foot\n@f\n  @include fillers.hl\n",
+        Some(&dir),
+    );
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    let html = htmlang::codegen::generate(&result.document);
+    for text in ["Hello", "Foot", "From fillers", "Plain"] {
+        assert!(html.contains(text), "{}: {}", text, html);
+    }
+
+    // A block in an included file for a slot the function doesn't have
+    let result = htmlang::parser::parse_with_base(
+        "@let @f\n  @include part.hl\n@f\n  @include typo.hl\n",
+        Some(&dir),
+    );
+    let _ = fs::remove_dir_all(&dir);
+    let unknown = coded(&result.diagnostics, "unknown-slot");
+    assert_eq!(unknown.len(), 1, "{:?}", result.diagnostics);
+    assert!(
+        unknown[0].message.contains("did you mean 'foot'"),
+        "{}",
+        unknown[0].message
+    );
+    assert!(
+        unknown[0].message.contains("typo.hl"),
+        "{}",
+        unknown[0].message
+    );
+}

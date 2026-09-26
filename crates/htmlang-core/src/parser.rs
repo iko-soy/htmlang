@@ -103,6 +103,11 @@ struct ParseContext {
     /// include chain that leads to each, for the checks of code that never
     /// runs.
     trees: Vec<(Rc<Tree>, Option<String>)>,
+    /// The files each `@include` line brought in (by the line's node id),
+    /// with the include chain that leads to each, so the checks of
+    /// `@slot` and `@children` see an included file's lines where the
+    /// `@include` is written.
+    included_by: Rc<IncludedBy>,
     /// Every function defined anywhere in the file or the files it
     /// includes, whether or not its definition runs.
     namespace: HashSet<String>,
@@ -528,6 +533,7 @@ pub fn parse_with_base(input: &str, base_path: Option<&Path>) -> ParseResult {
         visited: HashSet::new(),
         next_id: 0,
         trees: Vec::new(),
+        included_by: Rc::default(),
         namespace: HashSet::new(),
         current_source: (0, None),
         reported: HashSet::new(),
@@ -1143,7 +1149,7 @@ impl Evaluator {
             }
 
             ("include", DirectiveArgs::Text(Some(path))) => {
-                self.eval_include(path, line_num, content, ctx)
+                self.eval_include(node.id, path, line_num, content, ctx)
             }
 
             ("data", DirectiveArgs::Data { name, source, .. }) => {
@@ -1167,6 +1173,7 @@ impl Evaluator {
 
     fn eval_include(
         &mut self,
+        id: usize,
         path: &syntax::Arg,
         line_num: usize,
         content: &str,
@@ -1221,6 +1228,10 @@ impl Evaluator {
         let tree = ctx.parse_tree(&imported_text);
         ctx.diagnostics.extend(tree.diagnostics.iter().cloned());
         ctx.trees.push((tree.clone(), Some(import_chain.clone())));
+        let files = Rc::make_mut(&mut ctx.included_by).entry(id).or_default();
+        if !files.iter().any(|(_, chain)| *chain == import_chain) {
+            files.push((tree.clone(), import_chain.clone()));
+        }
         let saved_file = ctx.current_file.replace(import_chain.clone());
         let included_nodes = self.eval_block(&tree.nodes, ctx);
         ctx.current_file = saved_file;
@@ -1583,8 +1594,10 @@ impl Evaluator {
                 Resolved::Element(_) => None,
             })
             .collect();
-        check_fillers(node, element, &calls, ctx);
         let mut current = self.eval_block(&node.children, ctx);
+        // After the lines under the call ran, so the files they include
+        // are read
+        check_fillers(node, element, &calls, ctx);
         for link in links.into_iter().rev() {
             current = self.complete(link, current, ctx)?;
         }
@@ -2197,6 +2210,14 @@ fn replace_children_and_slots(
 // Where @slot and @children are written
 // ---------------------------------------------------------------------------
 
+/// The files each `@include` line brought in, by the line's node id, with
+/// the include chain that leads to each.
+type IncludedBy = HashMap<usize, Vec<(Rc<Tree>, String)>>;
+
+/// The lines of the files an `@include` line brings in, and the include
+/// chain of each (for diagnostics).
+type Included<'a, 'f> = &'f dyn Fn(&syntax::Node) -> Vec<(&'a [syntax::Node], Option<&'a str>)>;
+
 /// Whether `name` is a function here: defined so far, or anywhere in the
 /// file and the files it includes.
 fn is_function(name: &str, ctx: &ParseContext) -> bool {
@@ -2222,6 +2243,39 @@ enum Place<'a> {
     Call,
 }
 
+/// Where a line is, for [`slot_uses`].
+#[derive(Clone, Copy)]
+struct At<'a> {
+    /// Inside a function's body.
+    body: bool,
+    place: Place<'a>,
+    /// Outside a body: the call (and its line) whose content it is in.
+    call: Option<(&'a str, usize)>,
+    /// The include chain of the file it is in, when that isn't the file
+    /// being compiled.
+    file: Option<&'a str>,
+}
+
+impl At<'_> {
+    /// The top of a file, or of a function's body.
+    fn top(body: bool) -> Self {
+        At {
+            body,
+            place: Place::Element(None),
+            call: None,
+            file: None,
+        }
+    }
+}
+
+/// What [`slot_uses`] knows about the names and files it walks.
+struct Scan<'a, 'f> {
+    is_function: &'f dyn Fn(&str) -> bool,
+    included: Included<'a, 'f>,
+    /// Visit the bodies of the functions defined in the lines too.
+    into_lets: bool,
+}
+
 /// A `@slot` or `@children` written in a file, and where.
 struct SlotUse<'a> {
     node: &'a syntax::Node,
@@ -2231,11 +2285,7 @@ struct SlotUse<'a> {
     text: Option<&'a syntax::Text>,
     /// Written inline in a line of text, `{@slot x}`.
     inline: bool,
-    place: Place<'a>,
-    /// Inside a function's body.
-    body: bool,
-    /// Outside a body: the call (and its line) whose content it is in.
-    call: Option<(&'a str, usize)>,
+    at: At<'a>,
 }
 
 impl SlotUse<'_> {
@@ -2251,51 +2301,43 @@ impl SlotUse<'_> {
     /// A `@slot NAME` that marks a place in a function's body (not one
     /// that fills a slot of a call).
     fn declares(&self) -> bool {
-        self.is_slot() && !self.inline && !matches!(self.place, Place::Call)
+        self.is_slot() && !self.inline && !matches!(self.at.place, Place::Call)
     }
 }
 
 /// Where each `@slot` and `@children` in `block` is written. A `@slot`
 /// directly under a call (under its `@if`, `@else` and `@each` too) fills
 /// one of its slots; anywhere else in a function's body it declares one.
-/// With `into_lets`, the bodies of functions defined in `block` are
-/// visited too.
-#[allow(clippy::too_many_arguments)]
+/// An included file's lines are where its `@include` is.
 fn slot_uses<'a>(
     block: &'a [syntax::Node],
-    body: bool,
-    place: Place<'a>,
-    call: Option<(&'a str, usize)>,
-    into_lets: bool,
-    is_function: &dyn Fn(&str) -> bool,
+    at: At<'a>,
+    scan: &Scan<'a, '_>,
     out: &mut Vec<SlotUse<'a>>,
 ) {
-    #[allow(clippy::too_many_arguments)]
     fn inline<'a>(
         text: &'a syntax::Text,
         node: &'a syntax::Node,
-        body: bool,
-        place: Place<'a>,
-        call: Option<(&'a str, usize)>,
-        is_function: &dyn Fn(&str) -> bool,
+        at: At<'a>,
+        scan: &Scan<'a, '_>,
         out: &mut Vec<SlotUse<'a>>,
     ) {
         for segment in &text.segments {
             if let Segment::Inline(inline_element) = segment {
                 let head = &inline_element.head;
-                if matches!(head.name.as_str(), "slot" | "children") && !is_function(&head.name) {
+                if matches!(head.name.as_str(), "slot" | "children")
+                    && !(scan.is_function)(&head.name)
+                {
                     out.push(SlotUse {
                         node,
                         head,
                         text: inline_element.text.as_ref(),
                         inline: true,
-                        place,
-                        body,
-                        call,
+                        at,
                     });
                 }
                 if let Some(text) = &inline_element.text {
-                    inline(text, node, body, place, call, is_function, out);
+                    inline(text, node, at, scan, out);
                 }
             }
         }
@@ -2304,76 +2346,58 @@ fn slot_uses<'a>(
         match &node.kind {
             NodeKind::Directive(directive) => match &directive.args {
                 DirectiveArgs::Let(def) if matches!(def.form, LetForm::Function(_)) => {
-                    if into_lets {
-                        let top = Place::Element(None);
-                        slot_uses(&node.children, true, top, None, true, is_function, out);
+                    if scan.into_lets {
+                        let top = At {
+                            file: at.file,
+                            ..At::top(true)
+                        };
+                        slot_uses(&node.children, top, scan, out);
                     }
                 }
                 // A value's body is an error of its own
                 DirectiveArgs::Let(_) => {}
                 _ if directive.spec.body == BodyKind::Verbatim => {}
-                // `@if`, `@else` and `@each` put their lines in place;
-                // the lines under a directive that takes no body are its
-                // siblings
-                _ => slot_uses(
-                    &node.children,
-                    body,
-                    place,
-                    call,
-                    into_lets,
-                    is_function,
-                    out,
-                ),
+                // `@if`, `@else` and `@each` put their lines in place, and
+                // `@include` its file's; the lines under a directive that
+                // takes no body are its siblings
+                _ => {
+                    for (lines, file) in (scan.included)(node) {
+                        slot_uses(lines, At { file, ..at }, scan, out);
+                    }
+                    slot_uses(&node.children, at, scan, out);
+                }
             },
             NodeKind::Element(line) => {
-                let (mut place, mut call) = (place, call);
+                let mut at = at;
                 let last = line.chain.len() - 1;
                 for (i, head) in line.chain.iter().enumerate() {
                     let text = if i == last { line.text.as_ref() } else { None };
-                    let function = is_function(&head.name);
+                    let function = (scan.is_function)(&head.name);
                     if !function && matches!(head.name.as_str(), "slot" | "children") {
                         out.push(SlotUse {
                             node,
                             head,
                             text,
                             inline: false,
-                            place,
-                            body,
-                            call,
+                            at,
                         });
                     } else if let Some(text) = text {
-                        inline(text, node, body, place, call, is_function, out);
+                        inline(text, node, at, scan, out);
                     }
                     if function {
-                        place = Place::Call;
-                        if !body {
-                            call = Some((&head.name, node.span.line));
+                        at.place = Place::Call;
+                        if !at.body {
+                            at.call = Some((&head.name, node.span.line));
                         }
                     } else {
-                        place = Place::Element(Some(&head.name));
+                        at.place = Place::Element(Some(&head.name));
                     }
                 }
-                slot_uses(
-                    &node.children,
-                    body,
-                    place,
-                    call,
-                    into_lets,
-                    is_function,
-                    out,
-                );
+                slot_uses(&node.children, at, scan, out);
             }
             NodeKind::Text(text) => {
-                inline(text, node, body, place, call, is_function, out);
-                slot_uses(
-                    &node.children,
-                    body,
-                    place,
-                    call,
-                    into_lets,
-                    is_function,
-                    out,
-                );
+                inline(text, node, at, scan, out);
+                slot_uses(&node.children, at, scan, out);
             }
             NodeKind::Blank | NodeKind::Comment | NodeKind::Verbatim(_) => {}
         }
@@ -2381,29 +2405,93 @@ fn slot_uses<'a>(
 }
 
 /// The slots a function's body declares, and whether it has a
-/// `@children`.
-fn declared_slots(body: &[syntax::Node], ctx: &ParseContext) -> (Vec<String>, bool) {
-    function_slots(body, &|name| is_function(name, ctx))
+/// `@children`, when it is defined. The files its `@include` lines bring
+/// in count too: they are read now, since they run only at a call.
+fn declared_slots(body: &[syntax::Node], ctx: &mut ParseContext) -> (Vec<String>, bool) {
+    let mut files = HashMap::new();
+    read_includes(
+        body,
+        ctx.base_path.clone(),
+        &mut Vec::new(),
+        ctx,
+        &mut files,
+    );
+    let included = |node: &syntax::Node| match files.get(&node.id) {
+        Some(tree) => vec![(&tree.nodes[..], None)],
+        None => Vec::new(),
+    };
+    let is_function = |name: &str| is_function(name, ctx);
+    slots_of(body, &is_function, &included)
+}
+
+/// Read and parse the files the `@include` lines in `nodes` bring in (by
+/// a literal path, relative to `base`), and the files those include, by
+/// the node id of each `@include` line.
+fn read_includes(
+    nodes: &[syntax::Node],
+    base: Option<PathBuf>,
+    stack: &mut Vec<PathBuf>,
+    ctx: &mut ParseContext,
+    files: &mut HashMap<usize, Rc<Tree>>,
+) {
+    let mut includes = Vec::new();
+    for node in nodes {
+        node.walk(&mut |node| {
+            if let Some(DirectiveArgs::Text(Some(path))) = node.directive().map(|d| &d.args)
+                && node.is_directive("include")
+            {
+                includes.push((node.id, path.raw.clone()));
+            }
+        });
+    }
+    for (id, path) in includes {
+        let path = path.trim_matches('"');
+        if path.contains('$') {
+            continue;
+        }
+        let resolved = match &base {
+            Some(base) => base.join(path),
+            None => PathBuf::from(path),
+        };
+        if stack.contains(&resolved) {
+            continue;
+        }
+        let Ok(text) = ctx.read_file(&resolved) else {
+            continue;
+        };
+        let tree = ctx.parse_tree(&text);
+        stack.push(resolved.clone());
+        let parent = resolved.parent().map(Path::to_path_buf);
+        read_includes(&tree.nodes, parent, stack, ctx, files);
+        stack.pop();
+        files.insert(id, tree);
+    }
 }
 
 /// The slots a function's body declares (`@slot NAME`, in order), and
 /// whether it has a `@children` for the content of a call. A `@slot`
 /// directly under a call in the body fills that call's slot instead, so
-/// `is_function` says which names are functions.
+/// `is_function` says which names are functions. The files the body
+/// includes aren't read.
 pub fn function_slots(
     body: &[syntax::Node],
     is_function: &dyn Fn(&str) -> bool,
 ) -> (Vec<String>, bool) {
-    let mut uses = Vec::new();
-    slot_uses(
-        body,
-        true,
-        Place::Element(None),
-        None,
-        false,
+    slots_of(body, is_function, &|_| Vec::new())
+}
+
+fn slots_of<'a>(
+    body: &'a [syntax::Node],
+    is_function: &dyn Fn(&str) -> bool,
+    included: Included<'a, '_>,
+) -> (Vec<String>, bool) {
+    let scan = Scan {
         is_function,
-        &mut uses,
-    );
+        included,
+        into_lets: false,
+    };
+    let mut uses = Vec::new();
+    slot_uses(body, At::top(true), &scan, &mut uses);
     let mut slots: Vec<String> = Vec::new();
     for slot in uses.iter().filter(|u| u.declares()) {
         let name = slot.name();
@@ -2424,30 +2512,55 @@ fn written_line(node: &syntax::Node) -> String {
     }
 }
 
+/// The lines of the files an `@include` line brought in when it ran, from
+/// `included_by`.
+fn ran_includes<'a>(
+    included_by: &'a IncludedBy,
+    node: &syntax::Node,
+) -> Vec<(&'a [syntax::Node], Option<&'a str>)> {
+    match included_by.get(&node.id) {
+        Some(files) => files
+            .iter()
+            .map(|(tree, chain)| (&tree.nodes[..], Some(chain.as_str())))
+            .collect(),
+        None => Vec::new(),
+    }
+}
+
 /// Check where every `@slot` and `@children` of the file and the files it
 /// includes is written, whether or not it runs: a slot has one name, a
 /// function's body marks places with them, and a call fills its slots
-/// with `@slot` blocks directly under it.
+/// with `@slot` blocks directly under it. An included file's lines are
+/// where its `@include` is (in a body, under a call), so an `@include`
+/// that never ran leaves its file unchecked.
 fn check_slot_places(ctx: &mut ParseContext) {
     let trees = std::mem::take(&mut ctx.trees);
-    for (tree, chain) in &trees {
-        let mut uses = Vec::new();
-        let top = Place::Element(None);
-        let is_function = |name: &str| is_function(name, ctx);
-        slot_uses(&tree.nodes, false, top, None, true, &is_function, &mut uses);
-        for slot in &uses {
-            if let Some(mut d) = slot_problem(slot) {
-                if d.column.is_none() {
-                    d = d.column(slot.head.name_span.column);
-                }
-                d = d.source(written_line(slot.node));
-                if let Some(chain) = chain {
-                    d.message = format!("{}\n  in {}", d.message, chain);
-                }
-                ctx.diagnostics.push(d);
-            }
-        }
+    let included_by = ctx.included_by.clone();
+    let is_function = |name: &str| is_function(name, ctx);
+    let scan = Scan {
+        is_function: &is_function,
+        included: &|node| ran_includes(&included_by, node),
+        into_lets: true,
+    };
+    let mut uses = Vec::new();
+    for (tree, _) in trees.iter().filter(|(_, chain)| chain.is_none()) {
+        slot_uses(&tree.nodes, At::top(false), &scan, &mut uses);
     }
+    let found: Vec<Diagnostic> = uses
+        .iter()
+        .filter_map(|slot| {
+            let mut d = slot_problem(slot)?;
+            if d.column.is_none() {
+                d = d.column(slot.head.name_span.column);
+            }
+            d = d.source(written_line(slot.node));
+            if let Some(file) = slot.at.file {
+                d.message = format!("{}\n  in {}", d.message, file);
+            }
+            Some(d)
+        })
+        .collect();
+    ctx.diagnostics.extend(found);
     ctx.trees = trees;
 }
 
@@ -2518,10 +2631,10 @@ fn slot_problem(slot: &SlotUse) -> Option<Diagnostic> {
                 None => d,
             });
         }
-        if matches!(slot.place, Place::Call) || slot.body {
+        if matches!(slot.at.place, Place::Call) || slot.at.body {
             return None;
         }
-        let message = match (slot.call, slot.place) {
+        let message = match (slot.at.call, slot.at.place) {
             (Some((call, call_line)), Place::Element(Some(element))) => format!(
                 "{} is inside @{}, so it fills nothing: a @slot block that fills a slot of \
                  @{} (line {}) goes directly under the call",
@@ -2535,10 +2648,10 @@ fn slot_problem(slot: &SlotUse) -> Option<Diagnostic> {
         };
         return Some(Diagnostic::error(code::MISPLACED_SLOT, line, message));
     }
-    if slot.body {
+    if slot.at.body {
         return None;
     }
-    let message = match slot.call {
+    let message = match slot.at.call {
         Some((call, _)) => format!(
             "@children is outside a function's body, so it stands for nothing: the content \
              for @{} is written directly under the call",
@@ -2555,6 +2668,9 @@ fn slot_problem(slot: &SlotUse) -> Option<Diagnostic> {
 struct Filler<'a> {
     node: &'a syntax::Node,
     text: &'a syntax::Text,
+    /// The include chain of the file it is in, when that isn't the file
+    /// being compiled.
+    file: Option<&'a str>,
 }
 
 /// Whether `@slot` is the built-in element here, and not a function
@@ -2564,22 +2680,29 @@ fn slot_is_built_in(ctx: &ParseContext) -> bool {
 }
 
 /// The `@slot NAME` blocks directly under a call, in `block` (under its
-/// `@if`, `@else` and `@each` too).
-fn fillers<'a>(block: &'a [syntax::Node], ctx: &ParseContext, out: &mut Vec<Filler<'a>>) {
+/// `@if`, `@else` and `@each` too, and in the files its `@include` lines
+/// brought in).
+fn fillers<'a>(
+    block: &'a [syntax::Node],
+    file: Option<&'a str>,
+    included: &'a IncludedBy,
+    out: &mut Vec<Filler<'a>>,
+) {
     for node in block {
         match &node.kind {
             NodeKind::Directive(directive)
                 if matches!(directive.name(), "if" | "else" | "each") =>
             {
-                fillers(&node.children, ctx, out);
+                fillers(&node.children, file, included, out);
             }
-            NodeKind::Element(line)
-                if line.chain.len() == 1
-                    && line.chain[0].name == "slot"
-                    && slot_is_built_in(ctx) =>
-            {
+            NodeKind::Directive(directive) if directive.name() == "include" => {
+                for (lines, file) in ran_includes(included, node) {
+                    fillers(lines, file, included, out);
+                }
+            }
+            NodeKind::Element(line) if line.chain.len() == 1 && line.chain[0].name == "slot" => {
                 if let Some(text) = &line.text {
-                    out.push(Filler { node, text });
+                    out.push(Filler { node, text, file });
                 }
             }
             _ => {}
@@ -2614,6 +2737,10 @@ fn check_fillers(
     calls: &[Option<(String, Rc<FnDef>)>],
     ctx: &mut ParseContext,
 ) {
+    if !slot_is_built_in(ctx) {
+        return;
+    }
+    let included = ctx.included_by.clone();
     let last = element.chain.len() - 1;
     for (i, call) in calls.iter().enumerate() {
         let Some((name, function)) = call else {
@@ -2621,23 +2748,29 @@ fn check_fillers(
         };
         let mut found = Vec::new();
         if i == last {
-            fillers(&node.children, ctx, &mut found);
+            fillers(&node.children, None, &included, &mut found);
         } else if i + 1 == last
             && element.chain[last].name == "slot"
-            && slot_is_built_in(ctx)
             && let Some(text) = &element.text
         {
             // `@card > @slot footer`
-            found.push(Filler { node, text });
+            found.push(Filler {
+                node,
+                text,
+                file: None,
+            });
         }
         for filler in found {
             let slot = filler.text.raw.trim();
             if !is_slot_name(slot) || function.slots.iter().any(|s| s == slot) {
                 continue;
             }
-            let d = unknown_slot(name, slot, &function.slots, filler.text.span.line)
+            let mut d = unknown_slot(name, slot, &function.slots, filler.text.span.line)
                 .column(filler.text.span.column)
                 .source(written_line(filler.node));
+            if let Some(file) = filler.file {
+                d.message = format!("{}\n  in {}", d.message, file);
+            }
             ctx.push_once(d);
         }
     }
