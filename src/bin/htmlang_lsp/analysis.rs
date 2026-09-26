@@ -1211,6 +1211,30 @@ mod tests {
         assert_eq!(edits[0].range.start, Position::new(0, 16));
         assert_eq!(edits[0].range.end, Position::new(0, 21));
 
+        // CSS's names: a misspelled functional pseudo-class keeps its
+        // argument, and a pseudo-class that takes none loses it
+        let found = fixes("@el [nth-chld(2n + 1):color red, first:color blue] x\n");
+        let (_, edits) = found
+            .iter()
+            .find(|(t, _)| t == "Replace with 'nth-child('")
+            .unwrap_or_else(|| panic!("{:?}", found));
+        assert_eq!(edits[0].range.start, Position::new(0, 5));
+        assert_eq!(edits[0].range.end, Position::new(0, 14));
+        assert!(
+            found
+                .iter()
+                .any(|(t, _)| t == "Replace with 'first-child:'"),
+            "{:?}",
+            found
+        );
+        let found = fixes("@el [first-child(2):color red] x\n");
+        let (_, edits) = found
+            .iter()
+            .find(|(t, _)| t == "Replace with 'first-child:'")
+            .unwrap_or_else(|| panic!("{:?}", found));
+        assert_eq!(edits[0].range.start, Position::new(0, 5));
+        assert_eq!(edits[0].range.end, Position::new(0, 20));
+
         // A pseudo-element goes last among the selector prefixes
         let found = fixes("@el [before:hover:color red] x\n");
         let (_, edits) = found

@@ -4083,14 +4083,21 @@ fn check_prefixes(
             );
         }
     }
-    // `nth-child():`: CSS has no pseudo-class with an empty argument
-    if let Some(empty) = prefixes.iter().find(|p| p.ends_with("():")) {
+    // `nth-child():` or `has( ):`: CSS has no pseudo-class with an empty
+    // argument
+    let empty_argument = |prefix: &str| {
+        prefix
+            .strip_suffix("):")
+            .and_then(|p| p.split_once('('))
+            .is_some_and(|(_, argument)| argument.trim().is_empty())
+    };
+    if let Some(empty) = prefixes.iter().find(|p| empty_argument(p)) {
         return fail(
             ctx,
             format!(
-                "'{}': `:{}` takes an argument between its parentheses, as in CSS",
+                "'{}': `:{}()` takes an argument between its parentheses, as in CSS",
                 attr.key,
-                empty.trim_end_matches(':')
+                vocab::pseudo_name(empty)
             ),
             empty,
             None,

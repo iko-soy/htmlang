@@ -6008,6 +6008,7 @@ fn prefixes_are_checked_by_name_and_number() {
         "has(.a{):color red",
         "md:has(.a{):color red",
         "nth-child():color red",
+        "has( ):color red",
     ] {
         let src = format!("@el [{}]\n  x\n", attr);
         let d = parse_diagnostics(&src);
@@ -6029,7 +6030,8 @@ fn selector_prefixes_are_css_pseudo_classes_and_elements() {
                @el [has(> img):padding 0, not(.featured):opacity 0.8, is(:hover, :focus-visible):color red]\n  x\n\
                @dialog [backdrop:background rgba(0,0,0,.5)] Hi\n\
                @input [type=email, aria-label=Email, user-invalid:border-color red, only-child:margin 0, file-selector-button:padding 4]\n\
-               @el [nth-last-of-type(2):hover:first-letter:font-size 20] x\n";
+               @el [nth-last-of-type(2):hover:first-letter:font-size 20] x\n\
+               @el [not([title=\") x\"]):color blue] x\n";
     let result = htmlang::parser::parse(src);
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     let html = htmlang::codegen::generate(&result.document);
@@ -6045,6 +6047,7 @@ fn selector_prefixes_are_css_pseudo_classes_and_elements() {
         ":only-child{margin:0;}",
         "::file-selector-button{padding:4px;}",
         ":nth-last-of-type(2):hover::first-letter{font-size:20px;}",
+        ":not([title=\") x\"]){color:blue;}",
     ] {
         assert!(html.contains(css), "{} in {}", css, html);
     }

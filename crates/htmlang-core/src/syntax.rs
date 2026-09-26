@@ -2189,19 +2189,34 @@ pub(crate) fn split_attribute(raw: &str) -> (String, Option<String>, bool) {
 }
 
 /// Where a style's key ends: at the first space outside parentheses, so a
-/// prefix's argument can hold spaces (`has(> img):padding 0`). When a `(`
-/// is never closed, at the first space.
+/// prefix's argument can hold spaces (`has(> img):padding 0`). Inside
+/// parentheses, a quoted string and a character after a backslash don't
+/// count, as in [`crate::vocab::closing_paren`]
+/// (`not([title=") x"]):color red`). When a `(` is never closed, at the
+/// first space.
 fn key_end(raw: &str) -> Option<usize> {
     let mut depth = 0usize;
-    for (i, c) in raw.char_indices() {
-        match c {
-            '(' => depth += 1,
-            ')' => depth = depth.saturating_sub(1),
-            ' ' if depth == 0 => return Some(i),
+    let mut quote = None;
+    let mut chars = raw.char_indices();
+    while let Some((i, c)) = chars.next() {
+        match (quote, c) {
+            (_, '\\') if depth > 0 => {
+                chars.next();
+            }
+            (Some(q), c) if c == q => quote = None,
+            (Some(_), _) => {}
+            (None, '"' | '\'') if depth > 0 => quote = Some(c),
+            (None, '(') => depth += 1,
+            (None, ')') => depth = depth.saturating_sub(1),
+            (None, ' ') if depth == 0 => return Some(i),
             _ => {}
         }
     }
-    if depth > 0 { raw.find(' ') } else { None }
+    if depth > 0 || quote.is_some() {
+        raw.find(' ')
+    } else {
+        None
+    }
 }
 
 /// Split an HTML attribute written `key=value` (`alt=`, `type=email`,
@@ -2792,6 +2807,11 @@ mod tests {
         assert_eq!(
             split("grid-template-columns repeat(2, 1fr)"),
             pair("grid-template-columns", "repeat(2, 1fr)")
+        );
+        // A quoted `)` inside the argument doesn't close it
+        assert_eq!(
+            split("not([title=\") x\"]):color red"),
+            pair("not([title=\") x\"]):color", "red")
         );
         // A `(` never closed: the first space, as before
         assert_eq!(split("has(.a:color red"), pair("has(.a:color", "red"));

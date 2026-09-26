@@ -773,12 +773,14 @@ fn element_specific_attrs(element: &str) -> &'static [&'static str] {
 /// name plus a single space and no value yet typed.
 fn attr_value_completions(before: &str, range: Range) -> Option<Vec<CompletionItem>> {
     let segment = attr_context(before)?.segment.trim_start();
-    // A style (`cursor `) or an HTML attribute (`type=`) with no value typed yet.
-    let attr = segment
+    // A style (`cursor `) or an HTML attribute (`type=`) with no value typed
+    // yet. A prefix's argument may hold spaces (`has(> img):cursor `).
+    let (_, unprefixed) = vocab::split_prefixes(segment);
+    let attr = unprefixed
         .strip_suffix('=')
         .filter(|a| !a.contains(char::is_whitespace))
         .or_else(|| {
-            let (attr, rest) = segment.split_once(' ')?;
+            let (attr, rest) = unprefixed.split_once(' ')?;
             rest.trim().is_empty().then_some(attr)
         })?;
 
@@ -1210,9 +1212,11 @@ fn color_value_completions(before: &str, range: Range) -> Option<Vec<CompletionI
     // Find the preceding attribute name before the cursor value position.
     // Inside brackets, attributes are comma-separated. Look for the last attribute token
     // before the current value position. Pattern: "attr value" or "attr " at end.
-    let segment = attr_context(before)?.segment.trim();
+    let segment = attr_context(before)?.segment.trim_start();
 
-    // Check if the first word in this segment is a color-related attribute
+    // Check if the first word in this segment, after its prefixes (whose
+    // arguments may hold spaces), is a color-related attribute
+    let (_, segment) = vocab::split_prefixes(segment);
     let attr = segment.split_whitespace().next()?;
 
     // Strip state prefix (e.g., "hover:background" -> "background")
@@ -1824,6 +1828,18 @@ mod tests {
     fn value_completions_after_html_attribute() {
         let items = completions("@input [type=", Position::new(0, 13));
         assert!(items.iter().any(|i| i.label == "email"));
+    }
+
+    #[test]
+    fn value_completions_after_a_prefix_with_spaces_in_its_argument() {
+        for line in ["@el [has(> img):cursor ", "@el [is(:hover, .x):cursor "] {
+            let items = completions(line, Position::new(0, line.len() as u32));
+            assert!(items.iter().any(|i| i.label == "pointer"), "{line}");
+        }
+        for line in ["@el [color ", "@el [not(.a .b):color "] {
+            let items = completions(line, Position::new(0, line.len() as u32));
+            assert!(items.iter().any(|i| i.label == "white"), "{line}");
+        }
     }
 
     #[test]

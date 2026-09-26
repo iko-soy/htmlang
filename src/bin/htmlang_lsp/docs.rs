@@ -79,7 +79,7 @@ pub(crate) const ELEMENTS: &[Doc] = &[
     doc("ul", "List (`<ul>`), shown without markers.", "@ul [spacing 4]\n  @li First\n  @li Second"),
     doc(
         "ol",
-        "Numbered list (`<ol>`), shown without numbers; to show them, add `list-style decimal, padding-inline-start 20, children:display list-item`.",
+        "Numbered list (`<ol>`), shown without numbers; to show them, add `list-style decimal, padding-inline-start 20, children:display list-item` (and `children:marker:color` to colour them).",
         "@ol [spacing 4]\n  @li First",
     ),
     doc("li", "List item.", "@li First"),
