@@ -18,6 +18,10 @@ pub(crate) struct Def {
     pub params: Vec<Param>,
     /// The value as written (a value or a bundle).
     pub value: Option<String>,
+    /// A function's slots (`@slot NAME` in its body), in order.
+    pub slots: Vec<String>,
+    /// Whether a function's body has `@children`, so a call takes content.
+    pub takes_content: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -43,9 +47,25 @@ pub(crate) fn range(span: Span) -> Range {
 /// Every `@let` in `text`, in source order.
 pub(crate) fn definitions(text: &str) -> Vec<Def> {
     let tree = syntax::parse(text);
-    tree.definitions()
-        .into_iter()
-        .map(|def| Def {
+    let definitions = tree.definitions();
+    let functions: Vec<&str> = definitions
+        .iter()
+        .filter(|def| def.kind == DefinitionKind::Function)
+        .map(|def| def.name)
+        .collect();
+    let is_function = |name: &str| functions.contains(&name);
+    definitions
+        .iter()
+        .map(|def| {
+            let (slots, takes_content) = match def.kind {
+                DefinitionKind::Function => {
+                    htmlang::parser::function_slots(&def.node.children, &is_function)
+                }
+                _ => (Vec::new(), false),
+            };
+            (def, slots, takes_content)
+        })
+        .map(|(def, slots, takes_content)| Def {
             name: def.name.to_string(),
             kind: def.kind,
             name_range: range(def.name_span),
@@ -60,7 +80,9 @@ pub(crate) fn definitions(text: &str) -> Vec<Def> {
                     name_range: range(p.name_span),
                 })
                 .collect(),
-            value: def.value,
+            value: def.value.clone(),
+            slots,
+            takes_content,
         })
         .collect()
 }
@@ -135,5 +157,29 @@ mod tests {
         assert_eq!(card.params[1].default.as_deref(), Some("x"));
         // The name without the function's `@`
         assert_eq!(card.name_range.start, Position::new(1, 6));
+    }
+
+    #[test]
+    fn a_function_knows_its_slots_and_whether_it_takes_content() {
+        let text = "@let @inner
+  @el
+    @slot footer
+@let @panel
+  @el
+    @slot actions
+    @children
+  @inner
+    @slot footer
+      @slot footer
+";
+        let defs = definitions(text);
+        assert_eq!(
+            (defs[0].slots.clone(), defs[0].takes_content),
+            (vec!["footer".to_string()], false)
+        );
+        // A `@slot` directly under the call of @inner fills it; the one
+        // inside that block is @panel's own
+        assert_eq!(defs[1].slots, ["actions", "footer"]);
+        assert!(defs[1].takes_content);
     }
 }

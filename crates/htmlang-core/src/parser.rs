@@ -39,6 +39,10 @@ struct FnDef {
     /// The file it is defined in, when that isn't the file being compiled
     /// (see `ParseContext::current_file`).
     file: Option<String>,
+    /// The slots its body declares (`@slot NAME`), in order.
+    slots: Vec<String>,
+    /// Whether its body has a `@children` for the content of a call.
+    has_children: bool,
 }
 
 impl FnDef {
@@ -543,6 +547,7 @@ pub fn parse_with_base(input: &str, base_path: Option<&Path>) -> ParseResult {
     );
     let nodes = Evaluator.eval_block(&tree.nodes, &mut ctx);
     check_unevaluated(&mut ctx);
+    check_slot_places(&mut ctx);
     validate_tree(&nodes, None, &mut ctx.diagnostics);
     check_unused(&mut ctx);
     dedupe(&mut ctx.diagnostics);
@@ -651,6 +656,7 @@ fn check_unevaluated_node(node: &syntax::Node, ctx: &mut ParseContext) {
                 for head in &element.chain {
                     check_head(head, line, false, ctx);
                 }
+                check_unevaluated_content(node, element, ctx);
                 if let Some(text) = &element.text {
                     check_inline_heads(text, line, ctx);
                 }
@@ -658,17 +664,54 @@ fn check_unevaluated_node(node: &syntax::Node, ctx: &mut ParseContext) {
             NodeKind::Text(text) => check_inline_heads(text, line, ctx),
             _ => {}
         }
-        // As written, indented, so a column points into it
-        let text = match node.line_count <= 1 {
-            true => format!("{}{}", " ".repeat(node.indent), node.source),
-            false => node.source.clone(),
-        };
+        let text = written_line(node);
         for d in &mut ctx.diagnostics[before..] {
             d.source_line.get_or_insert_with(|| text.as_str().into());
         }
     }
     for child in &node.children {
         check_unevaluated_node(child, ctx);
+    }
+}
+
+/// Check the content passed to the calls of a line that was never
+/// evaluated: its `@slot NAME` blocks, and, for a function without
+/// `@children`, any other content.
+fn check_unevaluated_content(
+    node: &syntax::Node,
+    element: &syntax::ElementLine,
+    ctx: &mut ParseContext,
+) {
+    let calls: Vec<Option<(String, Rc<FnDef>)>> = element
+        .chain
+        .iter()
+        .map(|head| {
+            let function = ctx.functions.get(&head.name)?;
+            Some((head.name.clone(), function.clone()))
+        })
+        .collect();
+    check_fillers(node, element, &calls, ctx);
+    let last = calls.len() - 1;
+    for (i, call) in calls.iter().enumerate() {
+        let Some((name, function)) = call else {
+            continue;
+        };
+        if function.has_children {
+            continue;
+        }
+        let content = if i == last {
+            element.text.is_some() || holds_content(&node.children, ctx)
+        } else {
+            element.chain[i + 1].name != "slot" || !slot_is_built_in(ctx)
+        };
+        if content {
+            let head = &element.chain[i];
+            ctx.push_once(no_children(
+                name,
+                node.span.line,
+                name_column(head, node.span.line),
+            ));
+        }
     }
 }
 
@@ -1486,6 +1529,8 @@ impl Evaluator {
             track_var_refs(default, &mut ctx.used_variables);
         }
         ctx.fn_lines.entry(name.to_string()).or_insert(line_num);
+        let body: Vec<syntax::Node> = body.into_iter().cloned().collect();
+        let (slots, has_children) = declared_slots(&body, ctx);
         ctx.functions.insert(
             name.to_string(),
             Rc::new(FnDef {
@@ -1493,8 +1538,10 @@ impl Evaluator {
                 line: line_num,
                 source: ctx.current_source.1.clone(),
                 node: node.id,
-                body: body.into_iter().cloned().collect(),
+                body,
                 file: ctx.current_file.clone(),
+                slots,
+                has_children,
             }),
         );
     }
@@ -1529,6 +1576,14 @@ impl Evaluator {
             };
             links.push(resolve(head, text, line_num, &node.source, ctx)?);
         }
+        let calls: Vec<Option<(String, Rc<FnDef>)>> = links
+            .iter()
+            .map(|link| match link {
+                Resolved::Call(call) => Some((call.name.clone(), call.function.clone())),
+                Resolved::Element(_) => None,
+            })
+            .collect();
+        check_fillers(node, element, &calls, ctx);
         let mut current = self.eval_block(&node.children, ctx);
         for link in links.into_iter().rev() {
             current = self.complete(link, current, ctx)?;
@@ -1573,18 +1628,23 @@ impl Evaluator {
         } = call;
         let (name, content) = (name.as_str(), content.as_str());
 
-        // Separate the caller's named slots from its other children
+        // Separate the caller's `@slot NAME` blocks from its other
+        // children. A block for a slot the function doesn't declare was
+        // reported where it is written (see `check_fillers`), like one
+        // without a name.
         let mut slot_contents: HashMap<String, Vec<Node>> = HashMap::new();
         let mut caller_children = Vec::new();
         for child in all_caller_children {
-            if let Node::Element(ref elem) = child
-                && let ElementKind::Slot(ref slot_name) = elem.kind
-                && !slot_name.is_empty()
-            {
-                slot_contents
-                    .entry(slot_name.clone())
-                    .or_default()
-                    .extend(elem.children.clone());
+            if let Node::Element(elem) = child {
+                match elem.kind {
+                    ElementKind::Slot(slot_name) => {
+                        slot_contents
+                            .entry(slot_name)
+                            .or_default()
+                            .extend(elem.children);
+                    }
+                    kind => caller_children.push(Node::Element(Element { kind, ..elem })),
+                }
                 continue;
             }
             caller_children.push(child);
@@ -1594,6 +1654,15 @@ impl Evaluator {
         // evaluated where the call is written.
         if let Some(text) = &trailing_text {
             caller_children.insert(0, Node::Text(text_segments(text, ctx)));
+        }
+        // Content goes where the body's `@children` is: without one, it
+        // would be dropped
+        if !fn_def.has_children && !caller_children.is_empty() {
+            let (column, text) = match &name_at {
+                Some((column, text)) => (Some(*column), text.as_str()),
+                None => (None, content),
+            };
+            ctx.push_once(no_children(name, line_num, column).source(text));
         }
 
         // Only the body is inside the call, so a function may appear in the
@@ -2122,6 +2191,503 @@ fn replace_children_and_slots(
         }
     }
     result
+}
+
+// ---------------------------------------------------------------------------
+// Where @slot and @children are written
+// ---------------------------------------------------------------------------
+
+/// Whether `name` is a function here: defined so far, or anywhere in the
+/// file and the files it includes.
+fn is_function(name: &str, ctx: &ParseContext) -> bool {
+    ctx.functions.contains_key(name) || ctx.namespace.contains(name)
+}
+
+/// Whether `name` is one slot name: letters, digits, `-` and `_`,
+/// starting with a letter (like a function's name).
+fn is_slot_name(name: &str) -> bool {
+    name.chars().next().is_some_and(char::is_alphabetic)
+        && name
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+}
+
+/// What a `@slot` or `@children` line is written in.
+#[derive(Clone, Copy)]
+enum Place<'a> {
+    /// The top of a file or of a function's body, or a built-in element
+    /// (by its name).
+    Element(Option<&'a str>),
+    /// A call: its content.
+    Call,
+}
+
+/// A `@slot` or `@children` written in a file, and where.
+struct SlotUse<'a> {
+    node: &'a syntax::Node,
+    head: &'a syntax::Head,
+    /// The text after it, which is a slot's name; `None` when it isn't
+    /// the last head of its chain.
+    text: Option<&'a syntax::Text>,
+    /// Written inline in a line of text, `{@slot x}`.
+    inline: bool,
+    place: Place<'a>,
+    /// Inside a function's body.
+    body: bool,
+    /// Outside a body: the call (and its line) whose content it is in.
+    call: Option<(&'a str, usize)>,
+}
+
+impl SlotUse<'_> {
+    fn is_slot(&self) -> bool {
+        self.head.name == "slot"
+    }
+
+    /// The slot's name as written.
+    fn name(&self) -> &str {
+        self.text.map_or("", |t| t.raw.trim())
+    }
+
+    /// A `@slot NAME` that marks a place in a function's body (not one
+    /// that fills a slot of a call).
+    fn declares(&self) -> bool {
+        self.is_slot() && !self.inline && !matches!(self.place, Place::Call)
+    }
+}
+
+/// Where each `@slot` and `@children` in `block` is written. A `@slot`
+/// directly under a call (under its `@if`, `@else` and `@each` too) fills
+/// one of its slots; anywhere else in a function's body it declares one.
+/// With `into_lets`, the bodies of functions defined in `block` are
+/// visited too.
+#[allow(clippy::too_many_arguments)]
+fn slot_uses<'a>(
+    block: &'a [syntax::Node],
+    body: bool,
+    place: Place<'a>,
+    call: Option<(&'a str, usize)>,
+    into_lets: bool,
+    is_function: &dyn Fn(&str) -> bool,
+    out: &mut Vec<SlotUse<'a>>,
+) {
+    #[allow(clippy::too_many_arguments)]
+    fn inline<'a>(
+        text: &'a syntax::Text,
+        node: &'a syntax::Node,
+        body: bool,
+        place: Place<'a>,
+        call: Option<(&'a str, usize)>,
+        is_function: &dyn Fn(&str) -> bool,
+        out: &mut Vec<SlotUse<'a>>,
+    ) {
+        for segment in &text.segments {
+            if let Segment::Inline(inline_element) = segment {
+                let head = &inline_element.head;
+                if matches!(head.name.as_str(), "slot" | "children") && !is_function(&head.name) {
+                    out.push(SlotUse {
+                        node,
+                        head,
+                        text: inline_element.text.as_ref(),
+                        inline: true,
+                        place,
+                        body,
+                        call,
+                    });
+                }
+                if let Some(text) = &inline_element.text {
+                    inline(text, node, body, place, call, is_function, out);
+                }
+            }
+        }
+    }
+    for node in block {
+        match &node.kind {
+            NodeKind::Directive(directive) => match &directive.args {
+                DirectiveArgs::Let(def) if matches!(def.form, LetForm::Function(_)) => {
+                    if into_lets {
+                        let top = Place::Element(None);
+                        slot_uses(&node.children, true, top, None, true, is_function, out);
+                    }
+                }
+                // A value's body is an error of its own
+                DirectiveArgs::Let(_) => {}
+                _ if directive.spec.body == BodyKind::Verbatim => {}
+                // `@if`, `@else` and `@each` put their lines in place;
+                // the lines under a directive that takes no body are its
+                // siblings
+                _ => slot_uses(
+                    &node.children,
+                    body,
+                    place,
+                    call,
+                    into_lets,
+                    is_function,
+                    out,
+                ),
+            },
+            NodeKind::Element(line) => {
+                let (mut place, mut call) = (place, call);
+                let last = line.chain.len() - 1;
+                for (i, head) in line.chain.iter().enumerate() {
+                    let text = if i == last { line.text.as_ref() } else { None };
+                    let function = is_function(&head.name);
+                    if !function && matches!(head.name.as_str(), "slot" | "children") {
+                        out.push(SlotUse {
+                            node,
+                            head,
+                            text,
+                            inline: false,
+                            place,
+                            body,
+                            call,
+                        });
+                    } else if let Some(text) = text {
+                        inline(text, node, body, place, call, is_function, out);
+                    }
+                    if function {
+                        place = Place::Call;
+                        if !body {
+                            call = Some((&head.name, node.span.line));
+                        }
+                    } else {
+                        place = Place::Element(Some(&head.name));
+                    }
+                }
+                slot_uses(
+                    &node.children,
+                    body,
+                    place,
+                    call,
+                    into_lets,
+                    is_function,
+                    out,
+                );
+            }
+            NodeKind::Text(text) => {
+                inline(text, node, body, place, call, is_function, out);
+                slot_uses(
+                    &node.children,
+                    body,
+                    place,
+                    call,
+                    into_lets,
+                    is_function,
+                    out,
+                );
+            }
+            NodeKind::Blank | NodeKind::Comment | NodeKind::Verbatim(_) => {}
+        }
+    }
+}
+
+/// The slots a function's body declares, and whether it has a
+/// `@children`.
+fn declared_slots(body: &[syntax::Node], ctx: &ParseContext) -> (Vec<String>, bool) {
+    function_slots(body, &|name| is_function(name, ctx))
+}
+
+/// The slots a function's body declares (`@slot NAME`, in order), and
+/// whether it has a `@children` for the content of a call. A `@slot`
+/// directly under a call in the body fills that call's slot instead, so
+/// `is_function` says which names are functions.
+pub fn function_slots(
+    body: &[syntax::Node],
+    is_function: &dyn Fn(&str) -> bool,
+) -> (Vec<String>, bool) {
+    let mut uses = Vec::new();
+    slot_uses(
+        body,
+        true,
+        Place::Element(None),
+        None,
+        false,
+        is_function,
+        &mut uses,
+    );
+    let mut slots: Vec<String> = Vec::new();
+    for slot in uses.iter().filter(|u| u.declares()) {
+        let name = slot.name();
+        if is_slot_name(name) && !slots.iter().any(|s| s == name) {
+            slots.push(name.to_string());
+        }
+    }
+    let has_children = uses.iter().any(|u| !u.is_slot() && !u.inline);
+    (slots, has_children)
+}
+
+/// The line as written, indented, when it is one physical line, so a
+/// column points into it.
+fn written_line(node: &syntax::Node) -> String {
+    match node.line_count <= 1 {
+        true => format!("{}{}", " ".repeat(node.indent), node.source),
+        false => node.source.clone(),
+    }
+}
+
+/// Check where every `@slot` and `@children` of the file and the files it
+/// includes is written, whether or not it runs: a slot has one name, a
+/// function's body marks places with them, and a call fills its slots
+/// with `@slot` blocks directly under it.
+fn check_slot_places(ctx: &mut ParseContext) {
+    let trees = std::mem::take(&mut ctx.trees);
+    for (tree, chain) in &trees {
+        let mut uses = Vec::new();
+        let top = Place::Element(None);
+        let is_function = |name: &str| is_function(name, ctx);
+        slot_uses(&tree.nodes, false, top, None, true, &is_function, &mut uses);
+        for slot in &uses {
+            if let Some(mut d) = slot_problem(slot) {
+                if d.column.is_none() {
+                    d = d.column(slot.head.name_span.column);
+                }
+                d = d.source(written_line(slot.node));
+                if let Some(chain) = chain {
+                    d.message = format!("{}\n  in {}", d.message, chain);
+                }
+                ctx.diagnostics.push(d);
+            }
+        }
+    }
+    ctx.trees = trees;
+}
+
+/// What is wrong with a `@slot` or `@children` where it is written.
+fn slot_problem(slot: &SlotUse) -> Option<Diagnostic> {
+    let line = slot.node.span.line;
+    let what = if slot.is_slot() {
+        match slot.name() {
+            "" => "@slot".to_string(),
+            name => format!("@slot {}", name),
+        }
+    } else {
+        "@children".to_string()
+    };
+    if slot.inline {
+        return Some(Diagnostic::error(
+            code::MISPLACED_SLOT,
+            line,
+            format!(
+                "{} goes on a line of its own: inline in text it marks and fills nothing",
+                what
+            ),
+        ));
+    }
+    if let Some(list) = &slot.head.attrs {
+        return Some(
+            Diagnostic::error(
+                code::UNEXPECTED_ARGUMENT,
+                line,
+                format!(
+                    "{} takes no attributes: it is replaced by content, so style the \
+                     element around it",
+                    what
+                ),
+            )
+            .column(list.span.column),
+        );
+    }
+    if slot.is_slot() {
+        let name = slot.name();
+        if name.is_empty() {
+            return Some(Diagnostic::error(
+                code::MISSING_ARGUMENT,
+                line,
+                "@slot needs a name: `@slot footer` (the caller's content without a \
+                 name goes where `@children` is)"
+                    .to_string(),
+            ));
+        }
+        if !is_slot_name(name) {
+            let joined = name.split_whitespace().collect::<Vec<_>>().join("-");
+            let suggestion = is_slot_name(&joined).then_some(joined);
+            let column = slot.text.map(|t| t.span.column);
+            let d = Diagnostic::error(
+                code::INVALID_SLOT_NAME,
+                line,
+                format!(
+                    "'{}' is not a slot name: a slot's name is one word of letters, digits, \
+                     `-` and `_`, starting with a letter, and its content goes on the lines \
+                     under it",
+                    name
+                ),
+            )
+            .subject(name)
+            .suggest(suggestion);
+            return Some(match column {
+                Some(column) => d.column(column),
+                None => d,
+            });
+        }
+        if matches!(slot.place, Place::Call) || slot.body {
+            return None;
+        }
+        let message = match (slot.call, slot.place) {
+            (Some((call, call_line)), Place::Element(Some(element))) => format!(
+                "{} is inside @{}, so it fills nothing: a @slot block that fills a slot of \
+                 @{} (line {}) goes directly under the call",
+                what, element, call, call_line
+            ),
+            _ => format!(
+                "{} is outside a function's body: `@slot NAME` marks a place in a body \
+                 (`@let @name`), and directly under a call it fills one",
+                what
+            ),
+        };
+        return Some(Diagnostic::error(code::MISPLACED_SLOT, line, message));
+    }
+    if slot.body {
+        return None;
+    }
+    let message = match slot.call {
+        Some((call, _)) => format!(
+            "@children is outside a function's body, so it stands for nothing: the content \
+             for @{} is written directly under the call",
+            call
+        ),
+        None => "@children is outside a function's body: it marks where a body puts the \
+                 content of each call"
+            .to_string(),
+    };
+    Some(Diagnostic::error(code::MISPLACED_SLOT, line, message))
+}
+
+/// A `@slot NAME` block that fills a slot of a call.
+struct Filler<'a> {
+    node: &'a syntax::Node,
+    text: &'a syntax::Text,
+}
+
+/// Whether `@slot` is the built-in element here, and not a function
+/// defined so far that took its name.
+fn slot_is_built_in(ctx: &ParseContext) -> bool {
+    !ctx.functions.contains_key("slot")
+}
+
+/// The `@slot NAME` blocks directly under a call, in `block` (under its
+/// `@if`, `@else` and `@each` too).
+fn fillers<'a>(block: &'a [syntax::Node], ctx: &ParseContext, out: &mut Vec<Filler<'a>>) {
+    for node in block {
+        match &node.kind {
+            NodeKind::Directive(directive)
+                if matches!(directive.name(), "if" | "else" | "each") =>
+            {
+                fillers(&node.children, ctx, out);
+            }
+            NodeKind::Element(line)
+                if line.chain.len() == 1
+                    && line.chain[0].name == "slot"
+                    && slot_is_built_in(ctx) =>
+            {
+                if let Some(text) = &line.text {
+                    out.push(Filler { node, text });
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Whether `block`, the lines under a call, holds content other than
+/// `@slot` blocks (under `@if`, `@else` and `@each` too): text, an
+/// element, raw HTML, Markdown or an included file. For code that doesn't
+/// run.
+fn holds_content(block: &[syntax::Node], ctx: &ParseContext) -> bool {
+    block.iter().any(|node| match &node.kind {
+        NodeKind::Directive(directive) => match directive.name() {
+            "if" | "else" | "each" => holds_content(&node.children, ctx),
+            name => matches!(name, "raw" | "markdown" | "include"),
+        },
+        NodeKind::Element(line) => {
+            line.chain[0].name != "slot" || !slot_is_built_in(ctx) || line.chain.len() > 1
+        }
+        NodeKind::Text(_) => true,
+        _ => false,
+    })
+}
+
+/// Check the `@slot NAME` blocks passed to each call of a line against
+/// the slots its function declares. `calls` has the function of each head
+/// of the chain that is a call.
+fn check_fillers(
+    node: &syntax::Node,
+    element: &syntax::ElementLine,
+    calls: &[Option<(String, Rc<FnDef>)>],
+    ctx: &mut ParseContext,
+) {
+    let last = element.chain.len() - 1;
+    for (i, call) in calls.iter().enumerate() {
+        let Some((name, function)) = call else {
+            continue;
+        };
+        let mut found = Vec::new();
+        if i == last {
+            fillers(&node.children, ctx, &mut found);
+        } else if i + 1 == last
+            && element.chain[last].name == "slot"
+            && slot_is_built_in(ctx)
+            && let Some(text) = &element.text
+        {
+            // `@card > @slot footer`
+            found.push(Filler { node, text });
+        }
+        for filler in found {
+            let slot = filler.text.raw.trim();
+            if !is_slot_name(slot) || function.slots.iter().any(|s| s == slot) {
+                continue;
+            }
+            let d = unknown_slot(name, slot, &function.slots, filler.text.span.line)
+                .column(filler.text.span.column)
+                .source(written_line(filler.node));
+            ctx.push_once(d);
+        }
+    }
+}
+
+/// A `@slot NAME` block for a slot the function doesn't declare.
+fn unknown_slot(function: &str, slot: &str, slots: &[String], line: usize) -> Diagnostic {
+    let candidates: Vec<&str> = slots.iter().map(String::as_str).collect();
+    let suggestion = suggest_closest(slot, &candidates);
+    let message = match (slots.is_empty(), suggestion) {
+        (true, _) => format!(
+            "@{} has no slot '{}': its body declares no slots (`@slot NAME`)",
+            function, slot
+        ),
+        (false, Some(close)) => format!(
+            "@{} has no slot '{}', did you mean '{}'? (its slots: {})",
+            function,
+            slot,
+            close,
+            slots.join(", ")
+        ),
+        (false, None) => format!(
+            "@{} has no slot '{}' (its slots: {})",
+            function,
+            slot,
+            slots.join(", ")
+        ),
+    };
+    Diagnostic::error(code::UNKNOWN_SLOT, line, message)
+        .subject(slot)
+        .suggest(suggestion)
+}
+
+/// Content passed to a function whose body has no `@children`.
+fn no_children(function: &str, line: usize, column: Option<usize>) -> Diagnostic {
+    let d = Diagnostic::error(
+        code::UNEXPECTED_CONTENT,
+        line,
+        format!(
+            "@{0} takes no content: its body has no `@children`, so the text and lines \
+             passed to it would be dropped (pass text as a parameter, `@{0} [name value]`, \
+             or add `@children` to the body)",
+            function
+        ),
+    )
+    .subject(function);
+    match column {
+        Some(column) => d.column(column),
+        None => d,
+    }
 }
 
 // ---------------------------------------------------------------------------

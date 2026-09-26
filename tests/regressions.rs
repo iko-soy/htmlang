@@ -1127,3 +1127,43 @@ fn a_parameter_default_fills_in_its_variables() {
     assert!(out.contains("color:#123456"), "{}", out);
     assert!(!out.contains("$brand"), "{}", out);
 }
+
+// --- Slot mistakes used to drop content silently ---
+
+#[test]
+fn slot_mistakes_no_longer_drop_content_silently() {
+    let card = "@let @card [title]\n  @article\n    @h3 $title\n    @children\n    @slot footer\n      No footer\n";
+    let box_ = "@let @box\n  @el Box\n";
+    for (source, code) in [
+        ("@card [title A]\n  @slot foter\n    Hi\n", "unknown-slot"),
+        (
+            "@card [title A]\n  @el\n    @slot footer\n      Hi\n",
+            "misplaced-slot",
+        ),
+        ("@box Hi\n", "unexpected-content"),
+        ("@box\n  Hi\n", "unexpected-content"),
+        ("@slot footer\n  Hi\n", "misplaced-slot"),
+        ("@children\n", "misplaced-slot"),
+    ] {
+        let result = parser::parse(&format!("{}{}{}", card, box_, source));
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.code == code && d.severity == Severity::Error),
+            "{}: {:?}",
+            source,
+            result.diagnostics
+        );
+    }
+    // A slot name with a space used to name the slot `my footer`
+    let result = parser::parse("@let @c\n  @el\n    @slot my footer\n@c\n");
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "invalid-slot-name"),
+        "{:?}",
+        result.diagnostics
+    );
+}

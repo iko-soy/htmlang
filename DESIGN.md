@@ -523,9 +523,13 @@ inline in text (`{@key Ctrl+K}`):
   like an attribute written on that element, so `@panel [title Hi,
   padding 40]` works the same as styling a built-in element, and
   `[paddin 40]` gets the same warning.
-- Text after the attributes and the indented children replace `@children`.
-  A caller's `@slot NAME` block replaces the function's `@slot NAME`, and
-  the slot's own children are the default content.
+- Text after the attributes and the indented lines are the call's
+  content, and replace `@children` in the body. A `@slot NAME` block
+  directly under the call (or under an `@if`, `@else` or `@each` there)
+  fills the body's `@slot NAME` instead.
+- The lines indented under `@children` or `@slot NAME` in the body are its
+  fallback: they are shown when a call passes no content, or no block for
+  that slot.
 
 ```
 @let @card [title, tone #f9fafb]
@@ -547,6 +551,32 @@ inline in text (`{@key Ctrl+K}`):
   @slot footer
     @text Updated today
 ```
+
+`@children` takes a fallback the same way:
+
+```
+@let @notice
+  @el [padding 12, background #fef3c7]
+    @children
+      @text Nothing to report.
+
+@notice
+@notice Deploys are paused today.
+```
+
+Content that would go nowhere is an error, so a mistake can't drop it:
+
+- a `@slot NAME` block for a slot the function doesn't have (the message
+  lists the slots it has);
+- text or lines passed to a function whose body has no `@children`;
+- a `@slot NAME` block inside an element at the call, instead of directly
+  under the call;
+- `@slot` or `@children` outside a function's body, or inline in text.
+
+A slot's name is one word of letters, digits, `-` and `_`, starting with a
+letter, like a function's. Inside a body, a call can pass on what the
+function got: `@children` under the call passes the content, and a
+`@slot footer` block holding `@slot footer` passes that slot.
 
 A parameter that is off unless the call names it is a flag: give it the
 default `false`, and name it alone to turn it on.
@@ -733,8 +763,9 @@ commas:
 ### Layouts
 
 A layout is an ordinary function in a file of its own. It marks where content
-goes with `@slot NAME` (named blocks, with default content) and `@children`
-(everything in the call that is outside a `@slot` block).
+goes with `@slot NAME` (named blocks) and `@children` (everything in the call
+that is outside a `@slot` block), each with fallback content indented under
+it.
 
 ```
 -- layout.hl

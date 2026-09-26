@@ -115,6 +115,15 @@ pub mod code {
     /// A function named like a built-in element (which it replaces) or a
     /// directive (which it can't replace).
     pub const SHADOWS_BUILT_IN: &str = "shadows-built-in";
+    /// A `@slot NAME` block at a call whose function has no such slot.
+    pub const UNKNOWN_SLOT: &str = "unknown-slot";
+    /// Content passed to a function whose body has no `@children`.
+    pub const UNEXPECTED_CONTENT: &str = "unexpected-content";
+    /// A `@slot` or `@children` where it marks or fills nothing: outside
+    /// a function's body, inside an element at a call, or inline in text.
+    pub const MISPLACED_SLOT: &str = "misplaced-slot";
+    /// A slot name that isn't one name (`@slot my footer`).
+    pub const INVALID_SLOT_NAME: &str = "invalid-slot-name";
 
     // Files
     pub const UNREADABLE_FILE: &str = "unreadable-file";
@@ -173,6 +182,10 @@ pub mod code {
         MISSING_PARAMETER,
         PARAMETER_FORM,
         SHADOWS_BUILT_IN,
+        UNKNOWN_SLOT,
+        UNEXPECTED_CONTENT,
+        MISPLACED_SLOT,
+        INVALID_SLOT_NAME,
         UNREADABLE_FILE,
         CIRCULAR_INCLUDE,
         UNSET_ENVIRONMENT,

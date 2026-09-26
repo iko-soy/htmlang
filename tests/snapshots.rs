@@ -4811,6 +4811,11 @@ fn snapshot_parameters() {
     snapshot_test("parameters");
 }
 
+#[test]
+fn snapshot_slots_and_children() {
+    snapshot_test("slots_and_children");
+}
+
 fn coded<'a>(
     diagnostics: &'a [htmlang::parser::Diagnostic],
     code: &str,
@@ -5316,4 +5321,209 @@ fn a_call_that_never_runs_has_its_attributes_checked() {
     let unknown = coded(&diags, "unknown-attribute");
     let lines: Vec<usize> = unknown.iter().map(|d| d.line).collect();
     assert_eq!(lines, [4, 6], "{:?}", diags);
+}
+
+// --- Slot mistakes are errors ---
+
+const CARD: &str = "@let @card [title]\n  @article\n    @h3 $title\n    @children\n    @slot footer\n      No footer\n";
+
+#[test]
+fn a_slot_block_for_a_slot_the_function_does_not_have_lists_its_slots() {
+    let result =
+        htmlang::parser::parse(&format!("{}@card [title A]\n  @slot foter\n    Hi\n", CARD));
+    let unknown = coded(&result.diagnostics, "unknown-slot");
+    assert_eq!(unknown.len(), 1, "{:?}", result.diagnostics);
+    let d = unknown[0];
+    assert_eq!(d.severity, htmlang::parser::Severity::Error);
+    assert_eq!(
+        d.message,
+        "@card has no slot 'foter', did you mean 'footer'? (its slots: footer)"
+    );
+    assert_eq!((d.line, d.column), (8, Some(8)));
+    assert_eq!(d.subject.as_deref(), Some("foter"));
+    assert_eq!(d.suggestion.as_deref(), Some("footer"));
+    assert_eq!(d.source_line.as_deref(), Some("  @slot foter"));
+    // Nothing else is reported for it
+    assert_eq!(result.diagnostics.len(), 1, "{:?}", result.diagnostics);
+
+    let diags =
+        parse_diagnostics("@let @box\n  @el\n    @children\n@box\n  @slot header\n    Hi\n");
+    let unknown = coded(&diags, "unknown-slot");
+    assert_eq!(
+        unknown[0].message,
+        "@box has no slot 'header': its body declares no slots (`@slot NAME`)"
+    );
+    let diags = parse_diagnostics(&format!(
+        "{}@let @two\n  @el\n    @slot a\n    @slot b\n    @children\n@two\n  @slot zzz\n    x\n",
+        CARD
+    ));
+    assert_eq!(
+        coded(&diags, "unknown-slot")[0].message,
+        "@two has no slot 'zzz' (its slots: a, b)"
+    );
+}
+
+#[test]
+fn content_for_a_function_without_children_is_an_error() {
+    let lib = "@let @box [tone red]\n  @el [color $tone] Box\n";
+    for (call, line, column) in [
+        ("@box Extra\n", 3, Some(0)),
+        ("@box\n  A line\n", 3, Some(0)),
+        ("@box\n  @el Child\n", 3, Some(0)),
+        ("@el > @box > @el x\n", 3, Some(6)),
+        ("@paragraph\n  Say {@box hi}\n", 4, Some(7)),
+    ] {
+        let diags = parse_diagnostics(&format!("{}{}", lib, call));
+        let content = coded(&diags, "unexpected-content");
+        assert_eq!(content.len(), 1, "{}: {:?}", call, diags);
+        assert_eq!(
+            (content[0].line, content[0].column),
+            (line, column),
+            "{}",
+            call
+        );
+        assert!(
+            content[0].message.starts_with("@box takes no content"),
+            "{}",
+            content[0].message
+        );
+    }
+    // No content, or only what produces nothing, is fine
+    for call in [
+        "@box\n",
+        "@box [tone blue]\n",
+        "@box\n  -- a comment\n\n",
+        "@box\n  @if false\n    Hidden\n",
+    ] {
+        let diags = parse_diagnostics(&format!("{}{}", lib, call));
+        assert!(
+            coded(&diags, "unexpected-content").is_empty(),
+            "{}: {:?}",
+            call,
+            diags
+        );
+    }
+}
+
+#[test]
+fn a_slot_block_nested_in_an_element_at_the_call_is_an_error() {
+    let diags = parse_diagnostics(&format!(
+        "{}@card [title B]\n  @el\n    @slot footer\n      Nested\n",
+        CARD
+    ));
+    let misplaced = coded(&diags, "misplaced-slot");
+    assert_eq!(misplaced.len(), 1, "{:?}", diags);
+    assert_eq!(misplaced[0].line, 9);
+    assert_eq!(
+        misplaced[0].message,
+        "@slot footer is inside @el, so it fills nothing: a @slot block that fills a slot of \
+         @card (line 7) goes directly under the call"
+    );
+    // Under @if, @else and @each directly under the call, it fills the slot
+    let html = compile(&format!(
+        "{}@card [title C]\n  @if false\n    x\n  @else\n    @slot footer\n      Filled\n",
+        CARD
+    ));
+    assert!(
+        html.contains("Filled") && !html.contains("No footer"),
+        "{}",
+        html
+    );
+}
+
+#[test]
+fn slot_and_children_outside_a_function_body_are_errors() {
+    let diags = parse_diagnostics(&format!(
+        "@slot footer\n@children\n@el\n  @children\n{}@card [title D]\n  @children\n@let @inline\n  @el\n    Press {{@children}} now\n",
+        CARD
+    ));
+    let misplaced = coded(&diags, "misplaced-slot");
+    let lines: Vec<usize> = misplaced.iter().map(|d| d.line).collect();
+    assert_eq!(lines, [1, 2, 4, 12, 15], "{:?}", diags);
+    assert!(misplaced[0].message.contains("outside a function's body"));
+    assert!(
+        misplaced[3]
+            .message
+            .contains("the content for @card is written directly under the call"),
+        "{}",
+        misplaced[3].message
+    );
+    assert!(misplaced[4].message.contains("goes on a line of its own"));
+    assert_eq!(misplaced[4].column, Some(11));
+}
+
+#[test]
+fn a_slot_name_is_one_word() {
+    let diags = parse_diagnostics(
+        "@let @card\n  @el\n    @slot my footer\n    @slot\n    @slot $x\n    @slot [padding 4] side\n    @slot ok\n@card\n",
+    );
+    let invalid = coded(&diags, "invalid-slot-name");
+    assert_eq!(invalid.len(), 2, "{:?}", diags);
+    assert_eq!((invalid[0].line, invalid[0].column), (3, Some(10)));
+    assert_eq!(invalid[0].subject.as_deref(), Some("my footer"));
+    assert_eq!(invalid[0].suggestion.as_deref(), Some("my-footer"));
+    assert_eq!(invalid[1].line, 5);
+    assert!(invalid[1].suggestion.is_none());
+    let missing = coded(&diags, "missing-argument");
+    assert_eq!(missing.len(), 1, "{:?}", diags);
+    assert_eq!(missing[0].line, 4);
+    let attrs = coded(&diags, "unexpected-argument");
+    assert_eq!(attrs.len(), 1, "{:?}", diags);
+    assert!(
+        attrs[0]
+            .message
+            .starts_with("@slot side takes no attributes")
+    );
+}
+
+#[test]
+fn slot_mistakes_in_code_that_does_not_run_are_reported() {
+    let diags = parse_diagnostics(&format!(
+        "{}@let @box\n  @el Box\n@if false\n  @card [title G]\n    @slot fooer\n      x\n  @box Dead\n  @el\n    @slot footer\n",
+        CARD
+    ));
+    assert_eq!(coded(&diags, "unknown-slot").len(), 1, "{:?}", diags);
+    assert_eq!(coded(&diags, "unknown-slot")[0].line, 11);
+    assert_eq!(coded(&diags, "unexpected-content").len(), 1, "{:?}", diags);
+    assert_eq!(coded(&diags, "unexpected-content")[0].line, 13);
+    assert_eq!(coded(&diags, "misplaced-slot").len(), 1, "{:?}", diags);
+}
+
+#[test]
+fn slot_mistakes_in_a_loop_are_reported_once() {
+    let diags = parse_diagnostics(&format!(
+        "{}@let @box\n  @el Box\n@each $i in 1..3\n  @card [title $i]\n    @slot foter\n      x\n  @box $i\n",
+        CARD
+    ));
+    assert_eq!(coded(&diags, "unknown-slot").len(), 1, "{:?}", diags);
+    assert_eq!(coded(&diags, "unexpected-content").len(), 1, "{:?}", diags);
+}
+
+#[test]
+fn a_body_passes_on_its_slots_and_children_without_errors() {
+    let html = compile(
+        "@let @inner\n  @section\n    @slot footer\n      Inner default\n    @children\n@let @outer\n  @inner\n    @slot footer\n      @slot footer\n        Outer default\n    @children\n@outer\n  @slot footer\n    Filled\n  Body\n@outer\n",
+    );
+    assert!(html.contains("Filled") && html.contains("Body"), "{}", html);
+    assert!(
+        html.contains("Outer default") && !html.contains("Inner default"),
+        "{}",
+        html
+    );
+}
+
+#[test]
+fn a_misplaced_slot_in_an_included_file_names_the_file() {
+    let dir = std::env::temp_dir().join("htmlang_p9_included_slot");
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("part.hl"), "@el\n  @children\n").unwrap();
+    let result = htmlang::parser::parse_with_base("@include part.hl\n", Some(&dir));
+    let misplaced = coded(&result.diagnostics, "misplaced-slot");
+    assert_eq!(misplaced.len(), 1, "{:?}", result.diagnostics);
+    assert!(
+        misplaced[0].message.contains("part.hl"),
+        "{}",
+        misplaced[0].message
+    );
 }

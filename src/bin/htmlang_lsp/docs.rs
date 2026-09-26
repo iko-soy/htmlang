@@ -52,13 +52,18 @@ pub(crate) const ELEMENTS: &[Doc] = &[
     ),
     doc(
         "children",
-        "Inside a function body: where the caller's content goes.",
-        "@let @card\n  @el [padding 20]\n    @children",
+        "In a function's body: where a call's content goes (its text and the lines under \
+         it, except `@slot` blocks). Lines indented under `@children` are the fallback, \
+         shown when a call passes no content. Content passed to a function without \
+         `@children` is an error.",
+        "@let @card\n  @el [padding 20]\n    @children\n      @text Nothing yet",
     ),
     doc(
         "slot",
-        "Named placeholder in a function or layout, filled by the caller's `@slot` block.",
-        "@slot header",
+        "`@slot NAME` in a function's body marks a named place; lines indented under it \
+         are the fallback. Directly under a call, a `@slot NAME` block fills that place. \
+         A name is one word, and a block for a slot the function doesn't have is an error.",
+        "@let @card\n  @el\n    @children\n    @slot footer\n      @text No footer\n\n@card\n  Body\n  @slot footer\n    @text Updated today",
     ),
     doc("grid", "Grid container (`display: grid`).", "@grid [grid-cols 3, spacing 20]"),
     doc(

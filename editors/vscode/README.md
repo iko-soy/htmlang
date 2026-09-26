@@ -16,16 +16,16 @@ Syntax highlighting, snippets, and language server support for
   `@include` and `@data` paths resolve from the file's folder.
 - **Completion** of elements, directives, layout attributes, CSS properties,
   HTML attributes, prefixes, variables, functions and the parameters a
-  function call hasn't passed yet, and elements and functions inside
-  `{@...}` in text. It triggers on `@`, `$`, `[` and `,`.
+  function call hasn't passed yet, the slot names of a call's `@slot`
+  blocks, and elements and functions inside `{@...}` in text. It triggers on `@`, `$`, `[` and `,`.
 - **Hover** documentation for elements, directives and attributes (CSS
-  properties link to MDN), function signatures, variable values, and color
-  swatches.
+  properties link to MDN), function signatures with their slots and
+  whether they take content, variable values, and color swatches.
 - **Navigation**: go to definition, find references and rename for
   `$variables`, bundles and `@let @name` functions. `@include`, `@markdown` and
   `@data` file paths are links.
 - **Code actions**: fixes keyed on diagnostic codes (replace a misspelled
-  name, add a missing `alt` or `type`, include the file that defines an
+  name or slot name, write a slot name as one word, add a missing `alt` or `type`, include the file that defines an
   unknown function, write a quoted font stack as `A\, B`, drop the `$` from
   `@let $x` and add it to `@each x`, pass a parameter as `name value`
   instead of `name=value`), removing unused

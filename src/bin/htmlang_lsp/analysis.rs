@@ -183,6 +183,7 @@ pub(crate) fn code_actions(
             code::UNKNOWN_ELEMENT
             | code::UNKNOWN_ATTRIBUTE
             | code::UNKNOWN_COLOR
+            | code::UNKNOWN_SLOT
             | code::UNDEFINED_VARIABLE => {
                 let (Some(subject), Some(suggestion)) = (subject, suggestion) else {
                     continue;
@@ -212,8 +213,8 @@ pub(crate) fn code_actions(
             }
 
             // Rewrite a value as the compiler suggests (a quoted font
-            // stack as `A\, B`).
-            code::INVALID_VALUE => {
+            // stack as `A\, B`, a slot name `my footer` as `my-footer`).
+            code::INVALID_VALUE | code::INVALID_SLOT_NAME => {
                 let (Some(subject), Some(suggestion)) = (subject, suggestion) else {
                     continue;
                 };
@@ -1168,6 +1169,25 @@ mod tests {
         assert_eq!(edits[0].new_text, r"Inter\, sans-serif");
         assert_eq!(edits[0].range.start, Position::new(0, 17));
         assert_eq!(edits[0].range.end, Position::new(0, 36));
+    }
+
+    #[test]
+    fn slot_names_are_fixed_as_the_compiler_suggests() {
+        let text = "@let @card\n  @el\n    @slot footer\n@card\n  @slot foter\n    Hi\n";
+        let found = fixes(text);
+        let (_, edits) = found
+            .iter()
+            .find(|(t, _)| t == "Replace with 'footer'")
+            .unwrap_or_else(|| panic!("{:?}", found));
+        assert_eq!(edits[0].range.start, Position::new(4, 8));
+        assert_eq!(edits[0].range.end, Position::new(4, 13));
+
+        let found = fixes("@let @card\n  @el\n    @slot my footer\n@card\n");
+        let (_, edits) = found
+            .iter()
+            .find(|(t, _)| t == "Replace with 'my-footer'")
+            .unwrap_or_else(|| panic!("{:?}", found));
+        assert_eq!(edits[0].range.start, Position::new(2, 10));
     }
 
     #[test]

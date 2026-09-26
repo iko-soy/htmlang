@@ -169,7 +169,8 @@
       @slot actions
         @link [color var(--brand), font-size 14] /edit Edit
       @paragraph
-        Children fill {@code @children}; {@code @slot} blocks fill slots by name.
+        Children fill {@code @children}; {@code @slot} blocks fill slots by name,
+        and a slot name the panel doesn't have is an error.
     @row [spacing $unit]
       @badge [text scoped style, dot]
       @badge [text same function]

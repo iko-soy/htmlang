@@ -74,8 +74,15 @@ pub(crate) fn completions(text: &str, position: Position) -> Vec<CompletionItem>
         return items;
     }
 
-    // @ element/directive or start of line
+    // The name of a `@slot` block under a call: the slots of its function
     let trimmed = before.trim_start();
+    if let Some(name) = trimmed.strip_prefix("@slot ")
+        && !name.contains(char::is_whitespace)
+    {
+        return slot_completions(text, position.line, edit_range);
+    }
+
+    // @ element/directive or start of line
     if trimmed.is_empty() || trimmed.starts_with('@') {
         let mut items = element_completions(edit_range);
         items.extend(directive_completions(edit_range));
@@ -1017,6 +1024,55 @@ fn param_completions(text: &str, name: &str, before: &str, range: Range) -> Vec<
         .collect()
 }
 
+/// The slots of the function called on the line that a `@slot` block on
+/// `line` is under (through `@if`, `@else` and `@each`).
+fn slot_completions(text: &str, line: u32, range: Range) -> Vec<CompletionItem> {
+    let lines: Vec<&str> = text.lines().collect();
+    let indent = |l: &str| l.len() - l.trim_start().len();
+    let Some(mut level) = lines.get(line as usize).map(|l| indent(l)) else {
+        return Vec::new();
+    };
+    let mut parent = None;
+    for i in (0..line as usize).rev() {
+        let l = lines[i];
+        let trimmed = l.trim_start();
+        if trimmed.is_empty() || trimmed.starts_with("--") || indent(l) >= level {
+            continue;
+        }
+        level = indent(l);
+        let directive = trimmed.split_whitespace().next().unwrap_or("");
+        if !matches!(directive, "@if" | "@else" | "@each") {
+            parent = Some(i as u32);
+            break;
+        }
+    }
+    let Some(parent) = parent else {
+        return Vec::new();
+    };
+    let tree = htmlang::syntax::parse(text);
+    let Some(htmlang::syntax::NodeKind::Element(element)) =
+        crate::tree::node_at(&tree, parent).map(|n| &n.kind)
+    else {
+        return Vec::new();
+    };
+    let Some(head) = element.chain.last() else {
+        return Vec::new();
+    };
+    let Some(def) = crate::tree::definitions(text)
+        .into_iter()
+        .find(|d| d.kind == DefinitionKind::Function && d.name == head.name)
+    else {
+        return Vec::new();
+    };
+    def.slots
+        .iter()
+        .map(|slot| {
+            let detail = format!("Slot of @{}", head.name);
+            item(slot, CompletionItemKind::FIELD, &detail, slot, range)
+        })
+        .collect()
+}
+
 fn function_completions(text: &str, range: Range) -> Vec<CompletionItem> {
     let mut items = Vec::new();
     for def in crate::tree::definitions(text) {
@@ -1193,6 +1249,18 @@ mod tests {
     fn value_completions_after_html_attribute() {
         let items = completions("@input [type=", Position::new(0, 13));
         assert!(items.iter().any(|i| i.label == "email"));
+    }
+
+    #[test]
+    fn a_slot_block_under_a_call_offers_the_function_s_slots() {
+        let text = "@let @card\n  @el\n    @slot actions\n    @children\n    @slot footer\n@card\n  @if true\n    @slot fo";
+        let items = completions(text, pos(7, 12));
+        let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+        assert_eq!(labels, ["actions", "footer"]);
+        assert_eq!(items[1].detail.as_deref(), Some("Slot of @card"));
+        // Under an element, not a call: nothing to offer
+        let text = "@el\n  @slot ";
+        assert!(completions(text, pos(1, 8)).is_empty());
     }
 
     #[test]

@@ -134,8 +134,44 @@ fn hover_user_fn(text: &str, name: &str) -> Option<String> {
         format!("\n\nParameters: {}", formatted.join(", "))
     };
 
+    // Where a call's content goes
+    let mut content = Vec::new();
+    if !def.slots.is_empty() {
+        let slots: Vec<String> = def.slots.iter().map(|s| format!("`{}`", s)).collect();
+        content.push(format!("Slots: {}", slots.join(", ")));
+    }
+    content.push(match def.takes_content {
+        true => "Content goes where `@children` is".to_string(),
+        false => "Takes no content (no `@children`)".to_string(),
+    });
+    let content_str = format!("\n\n{}", content.join("\n\n"));
+
     Some(format!(
-        "**@{}** \u{2014} User function{}{}",
-        name, params_str, doc_str
+        "**@{}** \u{2014} User function{}{}{}",
+        name, params_str, content_str, doc_str
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hover_text(text: &str, line: u32, character: u32) -> String {
+        match hover_at(text, Position::new(line, character)).map(|h| h.contents) {
+            Some(HoverContents::Markup(markup)) => markup.value,
+            other => panic!("no hover: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn a_function_s_hover_says_where_its_content_goes() {
+        let text =
+            "@let @card\n  @el\n    @slot footer\n    @children\n@let @dot\n  @el\n@card\n@dot\n";
+        let card = hover_text(text, 6, 2);
+        assert!(card.contains("Slots: `footer`"), "{}", card);
+        assert!(card.contains("where `@children` is"), "{}", card);
+        let dot = hover_text(text, 7, 2);
+        assert!(dot.contains("Takes no content"), "{}", dot);
+        assert!(!dot.contains("Slots"), "{}", dot);
+    }
 }
