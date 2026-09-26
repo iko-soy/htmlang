@@ -109,13 +109,31 @@ impl ElementKind {
         }
     }
 
-    /// Does this element lay its children out in a flex column (`@el` and
-    /// the semantic containers)?
-    pub fn is_column(&self) -> bool {
-        matches!(self, ElementKind::El)
-            || self
-                .spec()
-                .is_some_and(|spec| spec.css.contains("flex-direction:column"))
+    /// How the element lays out what is inside it. `@fragment`, `@children`
+    /// and `@slot` have no element of their own: their content lands in the
+    /// element around them and takes its layout.
+    pub fn layout(&self) -> Layout {
+        match self {
+            ElementKind::Row => Layout::Row,
+            ElementKind::El => Layout::Column,
+            ElementKind::Text | ElementKind::Paragraph | ElementKind::Link => Layout::Text,
+            ElementKind::Image => Layout::Void,
+            ElementKind::Script
+            | ElementKind::Fragment
+            | ElementKind::Children
+            | ElementKind::Slot(_) => Layout::Native,
+            ElementKind::Tag(spec) => spec.layout,
+        }
+    }
+
+    /// The CSS every such element starts with, besides its layout's
+    /// `display` (browser margins reset, the list markers of a column).
+    pub fn css(&self) -> &'static str {
+        match self {
+            ElementKind::Paragraph => "margin:0;",
+            ElementKind::Tag(spec) => spec.css,
+            _ => "",
+        }
     }
 
     /// Is this the table element named `name` (e.g. `"main"`)?
@@ -164,10 +182,58 @@ impl ElementKind {
 pub enum TagArg {
     /// Leading text content (`@section Hello`).
     Child,
-    /// Printed as the element's text (`@li First`).
+    /// Its first line of text, taken as written (`@li First`); the
+    /// element's layout decides whether it is a child of its own.
     Text,
     /// Emitted as this HTML attribute (`@iframe URL` sets `src`).
     Attr(&'static str),
+}
+
+/// How an element lays out what is inside it: one value per element,
+/// after elm-ui's layouts. It decides what its text lines are, whether
+/// `spacing` works on it, and how its children's `width fill`, `center-x`
+/// and `align-*` compile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Layout {
+    /// A flex column (`@el`, `@section`, `@ul`, `@li`): each text line is a
+    /// child of its own, and `spacing` is the gap between the children.
+    Column,
+    /// A flex row (`@row`): like a column, side by side.
+    Row,
+    /// A CSS grid (`@grid`): each text line is a cell.
+    Grid,
+    /// Flowing text (`@paragraph`, `@h1`, `@button`, `@td`): the argument,
+    /// the text lines and the children are one run, joined with spaces. It
+    /// has no gap for `spacing`, and a row, column or grid inside it is laid
+    /// out inline (`@el` becomes an inline-flex `<span>`).
+    Text,
+    /// HTML's own layout, which htmlang leaves alone: tables, `@select`,
+    /// `@picture`, media and form controls. Text lines are separated by a
+    /// line break, which HTML shows as a space except in `@pre` and
+    /// `@textarea`.
+    Native,
+    /// No content at all (`@input`, `@hr`, `@image`).
+    Void,
+}
+
+impl Layout {
+    /// A row, column or grid: an element that lays out its children, so
+    /// `spacing`, `wrap` and `grid-cols` work on it.
+    pub fn is_container(self) -> bool {
+        matches!(self, Layout::Column | Layout::Row | Layout::Grid)
+    }
+
+    /// The name used in messages and the reference: `column`, `text`, ...
+    pub fn name(self) -> &'static str {
+        match self {
+            Layout::Column => "column",
+            Layout::Row => "row",
+            Layout::Grid => "grid",
+            Layout::Text => "text",
+            Layout::Native => "native",
+            Layout::Void => "void",
+        }
+    }
 }
 
 /// How an element compiles: the data behind [`ElementKind::Tag`].
@@ -177,17 +243,11 @@ pub struct TagSpec {
     pub name: &'static str,
     /// HTML element emitted.
     pub html: &'static str,
-    /// Default CSS (flex column, margin reset, ...).
+    /// Default CSS besides the layout's `display` (margin reset, ...).
     pub css: &'static str,
     pub arg: TagArg,
-    /// Bare text children are wrapped in `<span>` (flex containers).
-    pub wraps_text: bool,
-    /// Accepts layout attributes for its children (`spacing`, ...).
-    pub container: bool,
-    /// Void element: no children, no closing tag (`<hr>`, `<input>`).
-    pub void: bool,
-    /// Children are joined with spaces, like a paragraph (headings).
-    pub inline: bool,
+    /// How it lays out its content.
+    pub layout: Layout,
 }
 
 impl TagSpec {
@@ -196,80 +256,77 @@ impl TagSpec {
         html: "",
         css: "",
         arg: TagArg::Child,
-        wraps_text: false,
-        container: false,
-        void: false,
-        inline: false,
+        layout: Layout::Native,
     };
 }
 
 /// Every element besides the core ones in [`ElementKind`].
 #[rustfmt::skip]
 pub static TAGS: &[TagSpec] = &[
-    TagSpec { name: "nav", html: "nav", css: "display:flex;flex-direction:column;", wraps_text: true, container: true, ..TagSpec::DEFAULT },
-    TagSpec { name: "header", html: "header", css: "display:flex;flex-direction:column;", wraps_text: true, container: true, ..TagSpec::DEFAULT },
-    TagSpec { name: "footer", html: "footer", css: "display:flex;flex-direction:column;", wraps_text: true, container: true, ..TagSpec::DEFAULT },
-    TagSpec { name: "main", html: "main", css: "display:flex;flex-direction:column;", wraps_text: true, container: true, ..TagSpec::DEFAULT },
-    TagSpec { name: "section", html: "section", css: "display:flex;flex-direction:column;", wraps_text: true, container: true, ..TagSpec::DEFAULT },
-    TagSpec { name: "article", html: "article", css: "display:flex;flex-direction:column;", wraps_text: true, container: true, ..TagSpec::DEFAULT },
-    TagSpec { name: "aside", html: "aside", css: "display:flex;flex-direction:column;", wraps_text: true, container: true, ..TagSpec::DEFAULT },
-    TagSpec { name: "details", html: "details", css: "display:flex;flex-direction:column;", wraps_text: true, container: true, ..TagSpec::DEFAULT },
-    TagSpec { name: "dialog", html: "dialog", css: "display:flex;flex-direction:column;", wraps_text: true, container: true, ..TagSpec::DEFAULT },
-    TagSpec { name: "search", html: "search", wraps_text: true, container: true, ..TagSpec::DEFAULT },
-    TagSpec { name: "address", html: "address", wraps_text: true, container: true, ..TagSpec::DEFAULT },
-    TagSpec { name: "noscript", html: "noscript", wraps_text: true, container: true, ..TagSpec::DEFAULT },
-    TagSpec { name: "form", html: "form", css: "display:flex;flex-direction:column;", arg: TagArg::Attr("action"), wraps_text: true, container: true, ..TagSpec::DEFAULT },
-    TagSpec { name: "figure", html: "figure", css: "display:flex;flex-direction:column;margin:0;", wraps_text: true, container: true, ..TagSpec::DEFAULT },
-    TagSpec { name: "blockquote", html: "blockquote", css: "display:flex;flex-direction:column;margin:0;", wraps_text: true, container: true, ..TagSpec::DEFAULT },
-    TagSpec { name: "fieldset", html: "fieldset", css: "display:flex;flex-direction:column;border:1px solid currentColor;padding:8px;margin:0;", wraps_text: true, container: true, ..TagSpec::DEFAULT },
-    TagSpec { name: "datalist", html: "datalist", wraps_text: true, container: true, ..TagSpec::DEFAULT },
-    TagSpec { name: "ul", html: "ul", css: "margin:0;padding-left:0;list-style:none;", container: true, ..TagSpec::DEFAULT },
-    TagSpec { name: "ol", html: "ol", css: "margin:0;padding-left:0;list-style:none;", container: true, ..TagSpec::DEFAULT },
-    TagSpec { name: "li", html: "li", css: "display:flex;flex-direction:column;", arg: TagArg::Text, wraps_text: true, container: true, ..TagSpec::DEFAULT },
-    TagSpec { name: "dl", html: "dl", css: "margin:0;", wraps_text: true, container: true, ..TagSpec::DEFAULT },
-    TagSpec { name: "dt", html: "dt", arg: TagArg::Text, container: true, ..TagSpec::DEFAULT },
-    TagSpec { name: "dd", html: "dd", css: "margin:0;display:flex;flex-direction:column;", arg: TagArg::Text, wraps_text: true, container: true, ..TagSpec::DEFAULT },
-    TagSpec { name: "table", html: "table", ..TagSpec::DEFAULT },
-    TagSpec { name: "thead", html: "thead", ..TagSpec::DEFAULT },
-    TagSpec { name: "tbody", html: "tbody", ..TagSpec::DEFAULT },
-    TagSpec { name: "tr", html: "tr", ..TagSpec::DEFAULT },
-    TagSpec { name: "select", html: "select", ..TagSpec::DEFAULT },
-    TagSpec { name: "picture", html: "picture", ..TagSpec::DEFAULT },
-    TagSpec { name: "progress", html: "progress", ..TagSpec::DEFAULT },
-    TagSpec { name: "meter", html: "meter", ..TagSpec::DEFAULT },
-    TagSpec { name: "output", html: "output", ..TagSpec::DEFAULT },
-    TagSpec { name: "canvas", html: "canvas", container: true, ..TagSpec::DEFAULT },
-    TagSpec { name: "td", html: "td", arg: TagArg::Text, ..TagSpec::DEFAULT },
-    TagSpec { name: "th", html: "th", arg: TagArg::Text, ..TagSpec::DEFAULT },
-    TagSpec { name: "button", html: "button", arg: TagArg::Text, ..TagSpec::DEFAULT },
-    TagSpec { name: "label", html: "label", arg: TagArg::Text, ..TagSpec::DEFAULT },
-    TagSpec { name: "option", html: "option", arg: TagArg::Text, ..TagSpec::DEFAULT },
-    TagSpec { name: "textarea", html: "textarea", arg: TagArg::Text, ..TagSpec::DEFAULT },
-    TagSpec { name: "summary", html: "summary", arg: TagArg::Text, ..TagSpec::DEFAULT },
-    TagSpec { name: "cite", html: "cite", arg: TagArg::Text, ..TagSpec::DEFAULT },
-    TagSpec { name: "figcaption", html: "figcaption", arg: TagArg::Text, ..TagSpec::DEFAULT },
-    TagSpec { name: "legend", html: "legend", arg: TagArg::Text, ..TagSpec::DEFAULT },
-    TagSpec { name: "time", html: "time", arg: TagArg::Text, ..TagSpec::DEFAULT },
-    TagSpec { name: "mark", html: "mark", arg: TagArg::Text, ..TagSpec::DEFAULT },
-    TagSpec { name: "abbr", html: "abbr", arg: TagArg::Text, ..TagSpec::DEFAULT },
-    TagSpec { name: "code", html: "code", css: "font-family:ui-monospace,monospace;", arg: TagArg::Text, ..TagSpec::DEFAULT },
-    TagSpec { name: "kbd", html: "kbd", css: "font-family:ui-monospace,monospace;", arg: TagArg::Text, ..TagSpec::DEFAULT },
-    TagSpec { name: "pre", html: "pre", css: "margin:0;white-space:pre;font-family:ui-monospace,monospace;", ..TagSpec::DEFAULT },
-    TagSpec { name: "h1", html: "h1", css: "margin:0;", arg: TagArg::Text, inline: true, ..TagSpec::DEFAULT },
-    TagSpec { name: "h2", html: "h2", css: "margin:0;", arg: TagArg::Text, inline: true, ..TagSpec::DEFAULT },
-    TagSpec { name: "h3", html: "h3", css: "margin:0;", arg: TagArg::Text, inline: true, ..TagSpec::DEFAULT },
-    TagSpec { name: "h4", html: "h4", css: "margin:0;", arg: TagArg::Text, inline: true, ..TagSpec::DEFAULT },
-    TagSpec { name: "h5", html: "h5", css: "margin:0;", arg: TagArg::Text, inline: true, ..TagSpec::DEFAULT },
-    TagSpec { name: "h6", html: "h6", css: "margin:0;", arg: TagArg::Text, inline: true, ..TagSpec::DEFAULT },
-    TagSpec { name: "input", html: "input", void: true, ..TagSpec::DEFAULT },
-    TagSpec { name: "hr", html: "hr", void: true, ..TagSpec::DEFAULT },
-    TagSpec { name: "source", html: "source", arg: TagArg::Attr("src"), void: true, ..TagSpec::DEFAULT },
-    TagSpec { name: "video", html: "video", arg: TagArg::Attr("src"), ..TagSpec::DEFAULT },
-    TagSpec { name: "audio", html: "audio", arg: TagArg::Attr("src"), ..TagSpec::DEFAULT },
-    TagSpec { name: "iframe", html: "iframe", arg: TagArg::Attr("src"), container: true, ..TagSpec::DEFAULT },
-    TagSpec { name: "grid", html: "div", css: "display:grid;", wraps_text: true, container: true, ..TagSpec::DEFAULT },
-    TagSpec { name: "in-front", html: "div", css: "display:flex;flex-direction:column;position:absolute;inset:0;", container: true, ..TagSpec::DEFAULT },
-    TagSpec { name: "behind", html: "div", css: "display:flex;flex-direction:column;position:absolute;inset:0;z-index:-1;", container: true, ..TagSpec::DEFAULT },
+    TagSpec { name: "nav", html: "nav", layout: Layout::Column, ..TagSpec::DEFAULT },
+    TagSpec { name: "header", html: "header", layout: Layout::Column, ..TagSpec::DEFAULT },
+    TagSpec { name: "footer", html: "footer", layout: Layout::Column, ..TagSpec::DEFAULT },
+    TagSpec { name: "main", html: "main", layout: Layout::Column, ..TagSpec::DEFAULT },
+    TagSpec { name: "section", html: "section", layout: Layout::Column, ..TagSpec::DEFAULT },
+    TagSpec { name: "article", html: "article", layout: Layout::Column, ..TagSpec::DEFAULT },
+    TagSpec { name: "aside", html: "aside", layout: Layout::Column, ..TagSpec::DEFAULT },
+    TagSpec { name: "details", html: "details", layout: Layout::Column, ..TagSpec::DEFAULT },
+    TagSpec { name: "dialog", html: "dialog", layout: Layout::Column, ..TagSpec::DEFAULT },
+    TagSpec { name: "search", html: "search", layout: Layout::Column, ..TagSpec::DEFAULT },
+    TagSpec { name: "address", html: "address", layout: Layout::Column, ..TagSpec::DEFAULT },
+    TagSpec { name: "noscript", html: "noscript", layout: Layout::Column, ..TagSpec::DEFAULT },
+    TagSpec { name: "form", html: "form", arg: TagArg::Attr("action"), layout: Layout::Column, ..TagSpec::DEFAULT },
+    TagSpec { name: "figure", html: "figure", css: "margin:0;", layout: Layout::Column, ..TagSpec::DEFAULT },
+    TagSpec { name: "blockquote", html: "blockquote", css: "margin:0;", layout: Layout::Column, ..TagSpec::DEFAULT },
+    TagSpec { name: "fieldset", html: "fieldset", css: "border:1px solid currentColor;padding:8px;margin:0;", layout: Layout::Column, ..TagSpec::DEFAULT },
+    TagSpec { name: "datalist", html: "datalist", layout: Layout::Native, ..TagSpec::DEFAULT },
+    TagSpec { name: "ul", html: "ul", css: "margin:0;padding-left:0;list-style:none;", layout: Layout::Column, ..TagSpec::DEFAULT },
+    TagSpec { name: "ol", html: "ol", css: "margin:0;padding-left:0;list-style:none;", layout: Layout::Column, ..TagSpec::DEFAULT },
+    TagSpec { name: "li", html: "li", arg: TagArg::Text, layout: Layout::Column, ..TagSpec::DEFAULT },
+    TagSpec { name: "dl", html: "dl", css: "margin:0;", layout: Layout::Column, ..TagSpec::DEFAULT },
+    TagSpec { name: "dt", html: "dt", arg: TagArg::Text, layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "dd", html: "dd", css: "margin:0;", arg: TagArg::Text, layout: Layout::Column },
+    TagSpec { name: "table", html: "table", layout: Layout::Native, ..TagSpec::DEFAULT },
+    TagSpec { name: "thead", html: "thead", layout: Layout::Native, ..TagSpec::DEFAULT },
+    TagSpec { name: "tbody", html: "tbody", layout: Layout::Native, ..TagSpec::DEFAULT },
+    TagSpec { name: "tr", html: "tr", layout: Layout::Native, ..TagSpec::DEFAULT },
+    TagSpec { name: "select", html: "select", layout: Layout::Native, ..TagSpec::DEFAULT },
+    TagSpec { name: "picture", html: "picture", layout: Layout::Native, ..TagSpec::DEFAULT },
+    TagSpec { name: "progress", html: "progress", layout: Layout::Native, ..TagSpec::DEFAULT },
+    TagSpec { name: "meter", html: "meter", layout: Layout::Native, ..TagSpec::DEFAULT },
+    TagSpec { name: "output", html: "output", layout: Layout::Native, ..TagSpec::DEFAULT },
+    TagSpec { name: "canvas", html: "canvas", layout: Layout::Native, ..TagSpec::DEFAULT },
+    TagSpec { name: "td", html: "td", arg: TagArg::Text, layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "th", html: "th", arg: TagArg::Text, layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "button", html: "button", arg: TagArg::Text, layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "label", html: "label", arg: TagArg::Text, layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "option", html: "option", arg: TagArg::Text, layout: Layout::Native, ..TagSpec::DEFAULT },
+    TagSpec { name: "textarea", html: "textarea", arg: TagArg::Text, layout: Layout::Native, ..TagSpec::DEFAULT },
+    TagSpec { name: "summary", html: "summary", arg: TagArg::Text, layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "cite", html: "cite", arg: TagArg::Text, layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "figcaption", html: "figcaption", arg: TagArg::Text, layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "legend", html: "legend", arg: TagArg::Text, layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "time", html: "time", arg: TagArg::Text, layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "mark", html: "mark", arg: TagArg::Text, layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "abbr", html: "abbr", arg: TagArg::Text, layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "code", html: "code", css: "font-family:ui-monospace,monospace;", arg: TagArg::Text, layout: Layout::Text },
+    TagSpec { name: "kbd", html: "kbd", css: "font-family:ui-monospace,monospace;", arg: TagArg::Text, layout: Layout::Text },
+    TagSpec { name: "pre", html: "pre", css: "margin:0;white-space:pre;font-family:ui-monospace,monospace;", layout: Layout::Native, ..TagSpec::DEFAULT },
+    TagSpec { name: "h1", html: "h1", css: "margin:0;", arg: TagArg::Text, layout: Layout::Text },
+    TagSpec { name: "h2", html: "h2", css: "margin:0;", arg: TagArg::Text, layout: Layout::Text },
+    TagSpec { name: "h3", html: "h3", css: "margin:0;", arg: TagArg::Text, layout: Layout::Text },
+    TagSpec { name: "h4", html: "h4", css: "margin:0;", arg: TagArg::Text, layout: Layout::Text },
+    TagSpec { name: "h5", html: "h5", css: "margin:0;", arg: TagArg::Text, layout: Layout::Text },
+    TagSpec { name: "h6", html: "h6", css: "margin:0;", arg: TagArg::Text, layout: Layout::Text },
+    TagSpec { name: "input", html: "input", layout: Layout::Void, ..TagSpec::DEFAULT },
+    TagSpec { name: "hr", html: "hr", layout: Layout::Void, ..TagSpec::DEFAULT },
+    TagSpec { name: "source", html: "source", arg: TagArg::Attr("src"), layout: Layout::Void, ..TagSpec::DEFAULT },
+    TagSpec { name: "video", html: "video", arg: TagArg::Attr("src"), layout: Layout::Native, ..TagSpec::DEFAULT },
+    TagSpec { name: "audio", html: "audio", arg: TagArg::Attr("src"), layout: Layout::Native, ..TagSpec::DEFAULT },
+    TagSpec { name: "iframe", html: "iframe", arg: TagArg::Attr("src"), layout: Layout::Native, ..TagSpec::DEFAULT },
+    TagSpec { name: "grid", html: "div", layout: Layout::Grid, ..TagSpec::DEFAULT },
+    TagSpec { name: "in-front", html: "div", css: "position:absolute;inset:0;", layout: Layout::Column, ..TagSpec::DEFAULT },
+    TagSpec { name: "behind", html: "div", css: "position:absolute;inset:0;z-index:-1;", layout: Layout::Column, ..TagSpec::DEFAULT },
 ];
 
 /// Elements that print their argument as their text (`@text Hello`,
@@ -356,5 +413,75 @@ pub fn body_kind(name: &str) -> BodyKind {
         Some(spec) => spec.body,
         None if name == "script" => BodyKind::Verbatim,
         None => BodyKind::Htmlang,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ElementKind, Layout};
+
+    fn layout(name: &str) -> Layout {
+        ElementKind::from_name(name).unwrap().layout()
+    }
+
+    #[test]
+    fn every_element_has_the_layout_it_is_documented_with() {
+        let text = [
+            "text",
+            "paragraph",
+            "link",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "button",
+            "td",
+            "th",
+            "label",
+            "summary",
+            "legend",
+            "figcaption",
+            "dt",
+            "cite",
+            "code",
+            "kbd",
+            "mark",
+            "abbr",
+            "time",
+        ];
+        for name in text {
+            assert_eq!(layout(name), Layout::Text, "@{}", name);
+        }
+        let columns = [
+            "el", "li", "dd", "ul", "ol", "dl", "search", "address", "noscript", "section", "form",
+            "in-front", "behind",
+        ];
+        for name in columns {
+            assert_eq!(layout(name), Layout::Column, "@{}", name);
+        }
+        assert_eq!(layout("row"), Layout::Row);
+        assert_eq!(layout("grid"), Layout::Grid);
+        for name in [
+            "table", "tr", "select", "option", "picture", "video", "pre", "canvas",
+        ] {
+            assert_eq!(layout(name), Layout::Native, "@{}", name);
+        }
+        for name in ["image", "input", "hr", "source"] {
+            assert_eq!(layout(name), Layout::Void, "@{}", name);
+        }
+    }
+
+    #[test]
+    fn a_layout_s_display_is_not_repeated_in_the_row_s_css() {
+        for spec in super::TAGS {
+            assert!(
+                !spec.css.contains("display"),
+                "@{}: {}",
+                spec.name,
+                spec.css
+            );
+        }
     }
 }

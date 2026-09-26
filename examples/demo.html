@@ -63,7 +63,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
   .al {display:flex;flex-direction:column;padding:16px;background:white;border:1px solid var(--line);border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.1), 0 8px 24px rgba(0,0,0,0.08);transform:rotate(-2deg);}
   .am {display:flex;flex-direction:column;padding:16px;background:white;border:1px solid var(--line);border-radius:8px;transition:all 0.15s ease;cursor:pointer;}
   .an,.ao,.ar,.bv {display:flex;flex-direction:column;padding:16px;background:white;border:1px solid var(--line);border-radius:8px;}
-  .ap {margin:0;padding-left:0;list-style:none;padding:16px;background:white;border:1px solid var(--line);border-radius:8px;gap:4px;}
+  .ap {display:flex;flex-direction:column;margin:0;padding-left:0;list-style:none;padding:16px;background:white;border:1px solid var(--line);border-radius:8px;gap:4px;}
   .aq {display:flex;flex-direction:column;border-radius:4px;}
   .as {cursor:pointer;}
   .at {margin-inline-end:8px;}
@@ -355,13 +355,16 @@ Besides the layout attributes, every attribute is a CSS property with its CSS na
     <ul class="ap" data-hl-line="116" data-hl-el="ul">
       <!-- @li line 118 -->
       <li class="aq" data-hl-line="118" data-hl-el="li">
-first: bolds this one      </li>
+        <span>first: bolds this one</span>
+      </li>
       <!-- @li line 118 -->
       <li class="aq" data-hl-line="118" data-hl-el="li">
-odd: shades every other row      </li>
+        <span>odd: shades every other row</span>
+      </li>
       <!-- @li line 118 -->
       <li class="aq" data-hl-line="118" data-hl-el="li">
-children: pads them all      </li>
+        <span>children: pads them all</span>
+      </li>
     </ul>
     <!-- @el line 119 -->
     <div class="ar" data-hl-line="119" data-hl-el="el">
@@ -369,7 +372,7 @@ children: pads them all      </li>
       <label class="as" data-hl-line="120" data-hl-el="label">
         <!-- @input line 121 -->
         <input class="at" type="checkbox" data-hl-line="121" data-hl-el="input">
-Tick the box: has() styles the card around it      </label>
+ Tick the box: has() styles the card around it      </label>
     </div>
   </section>
   <!-- @section line 158 -->

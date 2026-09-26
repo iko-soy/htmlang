@@ -34,10 +34,14 @@ unless you write some, and nothing is added that you didn't ask for.
 - **`@` starts structure, and any other line is content.** Indentation nests
   elements. Text after an element's attributes is its content, and `{...}`
   puts an element inside a line of text.
-- **Layout comes from elm-ui.** `@el` lays out its children in a column and
-  `@row` in a row, and every other container is a column too. Layout
-  attributes (`spacing`, `width fill`, `center-x`, `align-right`, `wrap`) say
-  how an element sits inside its parent.
+- **Layout comes from elm-ui.** Every element has one layout. `@el` and the
+  containers (`@section`, `@nav`, `@ul`, `@li`, ...) are columns, `@row` is a
+  row and `@grid` a grid: in them each line of text is a child, and
+  `spacing` is the gap between the children. Text elements (`@paragraph`,
+  `@h1`, `@button`, `@td`) let their lines flow, joined with spaces, and an
+  `@el` inside text is laid out inline. Layout attributes (`width fill`,
+  `center-x`, `align-right`, `wrap`) say how an element sits inside its
+  parent.
 - **Styling is CSS.** Any other attribute is a CSS property with its CSS
   name and value: `padding 20`, `border 1 solid #eee`,
   `grid-template-columns 1fr 2fr`. In lengths, a bare number means pixels.

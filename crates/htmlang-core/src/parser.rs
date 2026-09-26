@@ -700,7 +700,7 @@ pub fn parse_with_base(input: &str, base_path: Option<&Path>) -> ParseResult {
     let nodes = Evaluator.eval_block(&tree.nodes, &mut ctx);
     check_unevaluated(&mut ctx);
     check_slot_places(&mut ctx);
-    validate_tree(&nodes, None, &mut ctx.diagnostics);
+    validate_tree(&nodes, None, false, &mut ctx.diagnostics);
     check_unused(&mut ctx);
     dedupe(&mut ctx.diagnostics);
     // What the file itself defines at its top level
@@ -4338,25 +4338,30 @@ fn check_attrs(tokens: &[syntax::Attr], line: usize, ctx: &mut ParseContext, tex
 // Post-parse validation (context-dependent warnings)
 // ---------------------------------------------------------------------------
 
-/// Attributes that only make sense on container elements (@row, @el, @el).
-const CONTAINER_ONLY_ATTRS: &[&str] = &[
-    "spacing",
-    "gap",
-    "wrap",
-    "grid-cols",
-    "grid-rows",
-    "container",
-    "container-name",
-    "container-type",
-];
-
 fn element_kind_name(kind: &ElementKind) -> String {
     format!("@{}", kind.name())
 }
 
-fn is_container(kind: &ElementKind) -> bool {
-    matches!(kind, ElementKind::Row | ElementKind::El)
-        || kind.spec().is_some_and(|spec| spec.container)
+/// HTML elements whose start tag ends an open `<p>`: written inside a
+/// `@paragraph`, the browser moves them out of it. (`div` isn't here:
+/// inside text, htmlang writes its `<div>`s as `<span>`s.)
+#[rustfmt::skip]
+const ENDS_A_PARAGRAPH: &[&str] = &[
+    "address", "article", "aside", "blockquote", "dd", "details", "dialog", "dl", "dt",
+    "fieldset", "figcaption", "figure", "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6",
+    "header", "hr", "li", "main", "nav", "ol", "p", "pre", "search", "section", "summary",
+    "table", "ul",
+];
+
+/// The HTML element `kind` is written as, if the browser would take it out
+/// of a `<p>`.
+fn ends_a_paragraph(kind: &ElementKind) -> Option<&'static str> {
+    let html = match kind {
+        ElementKind::Paragraph => "p",
+        ElementKind::Tag(spec) => spec.html,
+        _ => return None,
+    };
+    ENDS_A_PARAGRAPH.contains(&html).then_some(html)
 }
 
 /// Stricter checks for `htmlang lint`, on top of the diagnostics every
@@ -4381,8 +4386,10 @@ pub fn lint(nodes: &[Node]) -> Vec<Diagnostic> {
             }
             // A function's body may draw with an empty element (a spacer,
             // a dot): only one written in the page is flagged
-            if matches!(elem.kind, ElementKind::Row | ElementKind::El)
+            let has_text = elem.argument.is_some() && renders_argument_as_text(&elem.kind);
+            if elem.kind.layout().is_container()
                 && elem.children.is_empty()
+                && !has_text
                 && elem.function.is_none()
             {
                 warn(
@@ -4406,9 +4413,12 @@ pub fn lint(nodes: &[Node]) -> Vec<Diagnostic> {
     out
 }
 
+/// `in_paragraph`: the nodes are inside a `@paragraph` (and not inside a
+/// `@button` in it, which the browser keeps whole).
 fn validate_tree(
     nodes: &[Node],
     parent_kind: Option<&ElementKind>,
+    in_paragraph: bool,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for node in nodes {
@@ -4422,26 +4432,42 @@ fn validate_tree(
                     _ => None,
                 })
                 .collect();
-            validate_tree(&inline, parent_kind, diagnostics);
+            validate_tree(&inline, parent_kind, in_paragraph, diagnostics);
         }
         if let Node::Element(elem) = node {
             let start = diagnostics.len();
             dropped_by_the_element(elem, diagnostics);
+            if in_paragraph && let Some(html) = ends_a_paragraph(&elem.kind) {
+                diagnostics.push(
+                    Diagnostic::warning(
+                        code::BLOCK_IN_PARAGRAPH,
+                        elem.line_num,
+                        format!(
+                            "{0} inside @paragraph: HTML ends a <p> before a <{1}>, so the \
+                             browser moves the <{1}> out of the paragraph. Put {0} after the \
+                             paragraph, or use @el, @row or @grid, which are laid out inline \
+                             in text",
+                            element_kind_name(&elem.kind),
+                            html
+                        ),
+                    )
+                    .subject(elem.kind.name()),
+                );
+            }
             for attr in &elem.attrs {
                 let base = crate::vocab::base_attribute(&attr.key);
 
-                // Container-only attributes on non-container elements
-                if CONTAINER_ONLY_ATTRS.contains(&base) && !is_container(&elem.kind) {
-                    diagnostics.push(Diagnostic::new(
-                        code::NO_EFFECT,
-                        Severity::Warning,
-                        elem.line_num,
-                        format!(
-                            "'{}' has no effect on {} (only works on a container, such as @el, @row or @grid)",
-                            base,
-                            element_kind_name(&elem.kind)
-                        ),
-                    ));
+                // htmlang's words for laying out children, on an element
+                // that doesn't lay out its children: left out (codegen)
+                if !attr.html
+                    && crate::vocab::CONTAINER_ATTRIBUTES.contains(&base)
+                    && !elem.kind.layout().is_container()
+                    && !has_no_element(&elem.kind)
+                    && !crate::vocab::split_prefixes(&attr.key)
+                        .0
+                        .contains(&"children:")
+                {
+                    diagnostics.push(not_a_container(elem, base));
                 }
 
                 // Form-specific: placeholder only on @input/@textarea
@@ -4645,7 +4671,9 @@ fn validate_tree(
             }
             in_function_body(elem, &mut diagnostics[start..]);
 
-            validate_tree(&elem.children, Some(&elem.kind), diagnostics);
+            let in_paragraph = (in_paragraph || elem.kind == ElementKind::Paragraph)
+                && !elem.kind.is_tag("button");
+            validate_tree(&elem.children, Some(&elem.kind), in_paragraph, diagnostics);
         }
     }
 }
@@ -4712,8 +4740,7 @@ fn dropped_by_the_element(elem: &Element, diagnostics: &mut Vec<Diagnostic>) {
             ),
         );
     }
-    let void = elem.kind == ElementKind::Image || elem.kind.spec().is_some_and(|spec| spec.void);
-    if void && !elem.children.is_empty() {
+    if elem.kind.layout() == Layout::Void && !elem.children.is_empty() {
         error(
             code::UNEXPECTED_CONTENT,
             format!(
@@ -4723,6 +4750,43 @@ fn dropped_by_the_element(elem: &Element, diagnostics: &mut Vec<Diagnostic>) {
             ),
         );
     }
+}
+
+/// `@fragment`, `@script`, `@children` and `@slot`, whose attributes are
+/// reported on their own (see `dropped_by_the_element`).
+fn has_no_element(kind: &ElementKind) -> bool {
+    matches!(
+        kind,
+        ElementKind::Fragment | ElementKind::Script | ElementKind::Children | ElementKind::Slot(_)
+    )
+}
+
+/// htmlang's word `word` for laying out children (`spacing`, `wrap`,
+/// `grid-cols`, `grid-rows`) on an element that doesn't lay out its
+/// children: an error, and the word is left out.
+fn not_a_container(elem: &Element, word: &str) -> Diagnostic {
+    let name = element_kind_name(&elem.kind);
+    let (what, instead) = match elem.kind.layout() {
+        Layout::Text => (
+            "is text, whose lines and children flow together with no gap between them",
+            "; to space the children out, put them in an @el or @row",
+        ),
+        Layout::Void => ("has no content to lay out", ""),
+        _ => (
+            "keeps HTML's own layout",
+            "; for a flex layout of your own, write CSS, such as `display flex, gap 8`",
+        ),
+    };
+    Diagnostic::error(
+        code::NO_EFFECT,
+        elem.line_num,
+        format!(
+            "'{0}' can't go on {1}: {1} {2}. `{0}` works on a row, column or grid \
+             (@el, @row, @grid, @section, ...){3}",
+            word, name, what, instead
+        ),
+    )
+    .subject(word)
 }
 
 /// Diagnostics about an element a function's body wrote are reported at

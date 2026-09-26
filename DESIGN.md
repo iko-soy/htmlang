@@ -19,7 +19,7 @@ Every example block in this file is compiled by the test suite
 - **`@` starts structure, and any other line is content.** An element is `@name`,
   and a line without `@` is text.
 - **htmlang's own vocabulary is about layout.** It comes from elm-ui. An
-  element is a row or a column, `spacing` sets the gap between its children,
+  element is a row, a column or text, `spacing` sets the gap between its children,
   and each child says how it sits in its parent (`width fill`, `center-x`,
   `align-right`). The layout attributes are the only styling words htmlang
   adds.
@@ -223,12 +223,33 @@ keyed on it.
 
 ## Layout
 
-### Rows and columns
+### Rows, columns and text
 
-`@el` is the container, and it lays out its children in a column. `@row`
-lays them out side by side. Every other container (`@section`, `@nav`,
-`@article`, `@form`, and so on) is a column too, so `@row` is the only
-element that changes direction. `@grid` is a CSS grid.
+Every element has one layout, which decides what the lines written inside
+it are. **In a row or column each line is a child; in a text element lines
+flow.**
+
+| Layout | Elements | What is inside it |
+|---|---|---|
+| column | `@el`, and the containers: `@section`, `@nav`, `@form`, `@ul`, `@li`, ... | Each line of text is a child of its own, and the children are laid out top to bottom |
+| row | `@row` | The same, side by side |
+| grid | `@grid` | Each line of text is a cell |
+| text | `@paragraph`, `@text`, `@link`, `@h1` … `@h6`, `@button`, `@label`, `@td`, ... | The argument, the lines and the children flow as one run of text, joined with spaces |
+| native | `@table`, `@select`, `@pre`, `@textarea`, `@video`, ... | HTML's own layout, which htmlang leaves alone |
+| void | `@input`, `@hr`, `@image`, `@source` | Nothing: it takes no content |
+
+The table under [Elements](#elements) gives every element's layout.
+
+```
+@el [spacing 4]
+  First line
+  Second line
+@button [type=button]
+  Save
+  changes
+```
+
+The column shows two lines 4px apart; the button says "Save changes".
 
 These attributes are htmlang's own. They describe how an element lays out
 its children, and how it sits in its parent:
@@ -236,13 +257,21 @@ its children, and how it sits in its parent:
 | Attribute | Effect |
 |---|---|
 | `spacing N` | Gap between children |
-| `width fill` / `width shrink` / `width N` | Take the remaining space in a row (the full width in a column), fit the content, or an exact size |
-| `height fill` / `height shrink` / `height N` | Take the remaining space in a column (the full height in a row), fit the content, or an exact size |
+| `width fill` / `width shrink` / `width N` | Take the remaining space in a row (the full width anywhere else), fit the content, or an exact size |
+| `height fill` / `height shrink` / `height N` | Take the remaining space in a column (the full height anywhere else), fit the content, or an exact size |
 | `center-x`, `center-y` | Center the element in its parent |
 | `align-left`, `align-right`, `align-top`, `align-bottom` | Align the element in its parent |
 | `wrap` | Let a row wrap onto more lines |
 | `grid-cols N`, `grid-rows N` | Equal grid columns or rows (on `@grid`) |
 | `col-span N`, `row-span N` | Cells a grid child spans |
+
+`spacing`, `wrap`, `grid-cols` and `grid-rows` lay out an element's
+children, so they go on a row, column or grid. On a text, native or void
+element they are an error: text has no gap between its lines. For a flex
+layout of your own on such an element, write the CSS (`@label [display
+flex, gap 8]`). How a child's `width fill`, `center-x` or `align-*` works
+depends on its parent's layout: in a row, `width fill` takes the remaining
+width, and in a column, `height fill` takes the remaining height.
 
 ```
 @row [spacing 8]
@@ -260,6 +289,26 @@ its children, and how it sits in its parent:
 
 Everything else about layout is plain CSS: `justify-content`, `align-items`,
 `flex 1 1 240px`, `grid-template-areas`, `position`.
+
+### Layout inside text
+
+A row, column or grid written inside text, inline in a line (`{@el ...}`) or
+as a child of a text element, is laid out inline (`display: inline-flex`, or
+`inline-grid`), and keeps its attributes. Anywhere inside text, `@el`, `@row`
+and `@grid` are written as a `<span>` rather than a `<div>`, since text can't
+hold a `<div>`.
+
+```
+@paragraph
+  Price: {@el [padding 2 6, background #fef3c7, border-radius 4] $9} a month.
+@h2
+  Plans
+  @row [spacing 4, font-size 14] > @text New
+```
+
+Any other element keeps its HTML element. One whose HTML ends a paragraph,
+such as `@section`, `@ul` or `@h2`, is a warning inside `@paragraph`
+(`block-in-paragraph`): the browser would move it out of the `<p>`.
 
 ### Overlays: `@in-front` and `@behind`
 
@@ -412,22 +461,23 @@ its HTML name.
 | `@image SRC` | img | Image |
 | `@fragment` | (none) | Its children, without a wrapper element (so it takes no attributes) |
 
-The HTML elements, by kind:
+Every element has one [layout](#rows-columns-and-text):
 
-- **Semantic containers**, all laid out as columns: `@nav`, `@header`,
-  `@footer`, `@main`, `@section`, `@article`, `@aside`, `@address`,
-  `@search`, `@form`, `@details` / `@summary`, `@dialog`, `@figure` /
-  `@figcaption`, `@blockquote` / `@cite`, `@fieldset` / `@legend`,
-  `@noscript`.
-- **Text**: `@h1` … `@h6`, `@code`, `@pre`, `@mark`, `@kbd`, `@abbr`,
-  `@time`.
-- **Lists and tables**: `@ul` / `@ol` / `@li`, `@dl` / `@dt` / `@dd`,
-  `@table` / `@thead` / `@tbody` / `@tr` / `@th` / `@td`.
-- **Forms**: `@input`, `@button`, `@select` / `@option`, `@textarea`,
-  `@label`, `@datalist`, `@progress`, `@meter`, `@output`. For `@form URL`,
-  the URL is the form's `action`.
-- **Media and embeds**: `@picture` / `@source`, `@video SRC`, `@audio SRC`,
-  `@iframe SRC`, `@canvas`, `@script`, `@hr`.
+| Layout | Elements |
+|---|---|
+| column | `@el`, `@in-front`, `@behind`, `@nav`, `@header`, `@footer`, `@main`, `@section`, `@article`, `@aside`, `@address`, `@search`, `@noscript`, `@form`, `@details`, `@dialog`, `@figure`, `@blockquote`, `@fieldset`, `@ul`, `@ol`, `@li`, `@dl`, `@dd` |
+| row | `@row` |
+| grid | `@grid` |
+| text | `@text`, `@paragraph`, `@link`, `@h1`, `@h2`, `@h3`, `@h4`, `@h5`, `@h6`, `@button`, `@label`, `@legend`, `@summary`, `@figcaption`, `@cite`, `@dt`, `@td`, `@th`, `@code`, `@kbd`, `@mark`, `@abbr`, `@time` |
+| native | `@table`, `@thead`, `@tbody`, `@tr`, `@select`, `@option`, `@datalist`, `@textarea`, `@progress`, `@meter`, `@output`, `@pre`, `@picture`, `@video`, `@audio`, `@iframe`, `@canvas`, `@script` |
+| void | `@image`, `@input`, `@hr`, `@source` |
+
+`@fragment`, `@children` and `@slot` have no element of their own: what
+they hold takes the layout of the element they are in. For `@form URL`, the
+URL is the form's `action`; for `@video`, `@audio`, `@iframe` and `@source`,
+the argument is the `src`. In a native element, lines of text are separated
+by a line break, which HTML shows as a space except where whitespace is
+kept, as in `@pre` and `@textarea`.
 
 `@script` takes HTML attributes (`@script [src=app.js, defer]`) and its code
 as a verbatim body; it isn't shown, so a style on it is an error. An element
@@ -435,8 +485,9 @@ without a closing tag (`@input`, `@hr`, `@image`, `@source`) takes no
 content.
 
 Browser default margins on headings, paragraphs, lists and figures are reset
-to 0, so `spacing` controls the gaps. List items are columns like other
-containers, so a list shows no markers. To bring them back, write
+to 0, so `spacing` controls the gaps. Lists and list items are columns like
+other containers, so `spacing` on a list is the gap between its items, and
+a list shows no markers. To bring them back, write
 `[list-style disc, padding-inline-start 20, children:display list-item]` on
 the list.
 
@@ -783,9 +834,9 @@ nothing to stop it is an error.
 @tree [items $menu]
 ```
 
-The elements a function's body writes are the call's: a warning about
+The elements a function's body writes are the call's: a problem with
 one of them, such as low contrast or `spacing` on an element that isn't a
-container, is reported at the call, once, and names the function. A
+row, column or grid, is reported at the call, once, and names the function. A
 problem in the text of a body is reported on its own line, or at the call
 when the function comes from `std.hl` or another file.
 

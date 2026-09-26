@@ -15,13 +15,15 @@ Syntax highlighting, snippets, and language server support for
   unused definitions, and accessibility warnings. The whole file is
   checked, including branches and functions that don't run, and relative
   `@include` and `@data` paths resolve from the file's folder.
-- **Completion** of elements, directives, layout attributes, CSS properties,
+- **Completion** of elements, directives, layout attributes (`spacing`,
+  `wrap` and `grid-cols` only on a row, column or grid), CSS properties,
   HTML attributes, prefixes, `if()` (and attributes inside its branches),
   the variables visible where you type (definitions above in the block and
   the blocks around it, `@each` variables and a function's parameters),
   functions and the parameters a function call hasn't passed yet, the slot names of a call's `@slot`
   blocks, and elements and functions inside `{@...}` in text. It triggers on `@`, `$`, `[` and `,`.
-- **Hover** documentation for elements, directives, attributes (CSS
+- **Hover** documentation for elements (with their layout: column, row,
+  grid, text, native or void), directives, attributes (CSS
   properties link to MDN) and `if()`, function signatures with their slots and
   whether they take content, variable values, and color swatches.
 - **Navigation**: go to definition (the definition a name means at that

@@ -140,3 +140,48 @@ fn examples_compile() {
         failures.join("\n\n")
     );
 }
+
+/// The table of layouts under DESIGN.md's Elements lists every element
+/// once, with the layout the compiler gives it.
+#[test]
+fn design_md_gives_every_element_its_layout() {
+    use htmlang::ast::{ElementKind, Layout};
+    let design =
+        std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("DESIGN.md")).unwrap();
+    let start = design
+        .find("Every element has one [layout]")
+        .expect("DESIGN.md has the table of layouts");
+    let mut listed: Vec<(String, &str)> = Vec::new();
+    for line in design[start..].lines().skip(4) {
+        let Some(row) = line.strip_prefix("| ") else {
+            break;
+        };
+        let (layout, names) = row.split_once(" | ").unwrap();
+        for name in names.trim_end_matches(" |").split(", ") {
+            let name = name.trim_matches('`').trim_start_matches('@');
+            listed.push((name.to_string(), layout));
+        }
+    }
+    let placeholders = ["fragment", "children", "slot"];
+    for name in ElementKind::all_names().filter(|n| !placeholders.contains(n)) {
+        let rows: Vec<&str> = listed
+            .iter()
+            .filter(|(n, _)| n == name)
+            .map(|(_, l)| *l)
+            .collect();
+        let layout: Layout = ElementKind::from_name(name).unwrap().layout();
+        assert_eq!(
+            rows,
+            [layout.name()],
+            "@{} in DESIGN.md's table of layouts",
+            name
+        );
+    }
+    for (name, _) in &listed {
+        assert!(
+            ElementKind::from_name(name).is_some(),
+            "@{} isn't an element",
+            name
+        );
+    }
+}

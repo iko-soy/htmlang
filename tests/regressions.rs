@@ -1509,3 +1509,51 @@ fn a_misspelled_parameter_in_a_bundle_is_an_error_at_the_call() {
         d
     );
 }
+
+// --- One layout per element (P1) ---
+
+#[test]
+fn spacing_on_a_list_was_a_gap_on_a_block() {
+    // `@ol [spacing 4]` emitted gap:4px on a block <ol>, which did nothing
+    let out = compile("@ol [spacing 4]\n  @li First\n  @li Second\n");
+    assert!(
+        out.contains("display:flex;flex-direction:column;"),
+        "{}",
+        out
+    );
+    assert!(out.contains("gap:4px"), "{}", out);
+}
+
+#[test]
+fn a_button_s_lines_were_glued_together() {
+    // 'Savechanges'
+    let out = compile("@button [type=button]\n  Save\n  changes\n");
+    assert!(out.contains(">Save changes</button>"), "{}", out);
+}
+
+#[test]
+fn an_el_in_a_paragraph_was_a_div_inside_a_p() {
+    // `<p>Price: <div>...` made the browser end the paragraph early
+    let out = compile("@paragraph\n  Price: {@el [padding 2] 9}\n");
+    assert!(!out.contains("<div"), "{}", out);
+    assert!(out.contains("display:inline-flex"), "{}", out);
+}
+
+#[test]
+fn canvas_and_iframe_took_spacing_without_laying_anything_out() {
+    for src in [
+        "@canvas [spacing 4]",
+        "@iframe [spacing 4, title=x] https://x.org",
+    ] {
+        let result = parser::parse(src);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "no-effect" && d.severity == Severity::Error),
+            "{}: {:?}",
+            src,
+            result.diagnostics
+        );
+    }
+}

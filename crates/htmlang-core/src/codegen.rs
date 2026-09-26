@@ -422,6 +422,9 @@ struct GenContext {
     dev: bool,
     depth: usize,
     has_interactive: bool,
+    /// Writing inside a text element, at any depth: htmlang's own `<div>`s
+    /// are `<span>`s there, which text can hold.
+    in_text: bool,
 }
 
 impl GenContext {
@@ -591,6 +594,7 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
         dev,
         depth: 0,
         has_interactive: false,
+        in_text: false,
     };
 
     let mut body = String::new();
@@ -852,6 +856,7 @@ fn generate_partial_inner(doc: &Document, dev: bool) -> String {
         dev,
         depth: 0,
         has_interactive: false,
+        in_text: false,
     };
     let mut body = String::new();
 
@@ -874,20 +879,20 @@ fn generate_partial_inner(doc: &Document, dev: bool) -> String {
 // Node generation
 // ---------------------------------------------------------------------------
 
+/// Write `node`, which is inside an element with the layout `parent`
+/// (`None` at the top of the page).
 fn generate_node(
     node: &Node,
-    parent_kind: Option<&ElementKind>,
+    parent: Option<Layout>,
     out: &mut String,
     styles: &mut StyleCollector,
     ctx: &mut GenContext,
 ) {
     match node {
-        Node::Element(elem) => generate_element(elem, parent_kind, out, styles, ctx),
+        Node::Element(elem) => generate_element(elem, parent, out, styles, ctx),
         Node::Text(segments) => {
-            let needs_wrap = matches!(parent_kind, Some(ElementKind::Row | ElementKind::El))
-                || parent_kind
-                    .and_then(ElementKind::spec)
-                    .is_some_and(|spec| spec.wraps_text);
+            // In a row, column or grid each line of text is a child
+            let needs_wrap = parent.is_some_and(Layout::is_container);
             if needs_wrap {
                 out.push_str(&ctx.indent());
                 out.push_str("<span>");
@@ -903,6 +908,41 @@ fn generate_node(
             out.push_str(content);
             out.push_str(ctx.nl());
         }
+    }
+}
+
+/// What goes between two things written one after the other in an element
+/// with this layout: text flows, so its lines and children are joined with
+/// a space; in HTML's own layout, two lines of text are separated by a line
+/// break (a space, except where whitespace is kept, as in `@pre`).
+fn separator(layout: Layout, previous_is_text: bool, next: &Node) -> Option<char> {
+    match layout {
+        Layout::Text => Some(' '),
+        Layout::Native if previous_is_text && matches!(next, Node::Text(_)) => Some('\n'),
+        _ => None,
+    }
+}
+
+/// Write the children of an element (or of a `@fragment`, which has no
+/// element of its own) laid out as `layout`. `after_text` says that text
+/// (the element's argument) was written just before them.
+fn generate_children(
+    children: &[Node],
+    layout: Layout,
+    after_text: bool,
+    out: &mut String,
+    styles: &mut StyleCollector,
+    ctx: &mut GenContext,
+) {
+    let mut previous: Option<bool> = after_text.then_some(true);
+    for child in children {
+        if let Some(previous_is_text) = previous
+            && let Some(sep) = separator(layout, previous_is_text, child)
+        {
+            out.push(sep);
+        }
+        generate_node(child, Some(layout), out, styles, ctx);
+        previous = Some(matches!(child, Node::Text(_)));
     }
 }
 
@@ -959,14 +999,14 @@ fn has_overlay_children(elem: &Element) -> bool {
 
 fn generate_element(
     elem: &Element,
-    parent_kind: Option<&ElementKind>,
+    parent: Option<Layout>,
     out: &mut String,
     styles: &mut StyleCollector,
     ctx: &mut GenContext,
 ) {
     // Self-closing elements
-    if elem.kind == ElementKind::Image || elem.kind.spec().is_some_and(|spec| spec.void) {
-        generate_self_closing(elem, parent_kind, out, styles, ctx);
+    if elem.kind.layout() == Layout::Void {
+        generate_self_closing(elem, parent, out, styles, ctx);
         return;
     }
     // @script renders as <script> with raw body content (no HTML escaping)
@@ -1008,13 +1048,20 @@ fn generate_element(
         return;
     }
     if elem.kind == ElementKind::Fragment {
-        // Render children without a wrapper element
-        for child in &elem.children {
-            generate_node(child, parent_kind, out, styles, ctx);
+        // Render children without a wrapper element, as if they were
+        // written where the fragment is
+        match parent {
+            Some(layout) => generate_children(&elem.children, layout, false, out, styles, ctx),
+            None => {
+                for child in &elem.children {
+                    generate_node(child, None, out, styles, ctx);
+                }
+            }
         }
         return;
     }
 
+    let site = Site::new(elem, parent);
     let tag = match &elem.kind {
         ElementKind::Row | ElementKind::El => "div",
         ElementKind::Text => "span",
@@ -1023,6 +1070,11 @@ fn generate_element(
         ElementKind::Tag(spec) => spec.html,
         _ => "",
     };
+    // Inside text, htmlang's own `<div>` is a `<span>`, which text can
+    // hold (directly in text, a row, column or grid is also laid out
+    // inline: see `Site::inline`)
+    let in_text = ctx.in_text || parent == Some(Layout::Text);
+    let tag = if in_text && tag == "div" { "span" } else { tag };
     let kind_label = elem.kind.name();
 
     // Track interactive elements for focus-visible CSS
@@ -1033,14 +1085,7 @@ fn generate_element(
     }
 
     // Compute CSS for each state and get a class name
-    let overlay_children = has_overlay_children(elem);
-    let gen_class = compute_class(
-        &elem.attrs,
-        &elem.kind,
-        parent_kind,
-        styles,
-        overlay_children,
-    );
+    let gen_class = compute_class(&elem.attrs, &site, styles);
     let (id, user_class) = extract_id_class(&elem.attrs);
 
     if ctx.dev && elem.line_num > 0 {
@@ -1085,23 +1130,26 @@ fn generate_element(
     out.push('>');
     out.push_str(ctx.nl());
 
-    // Inline text argument
-    if renders_argument_as_text(&elem.kind)
-        && let Some(text) = &elem.argument
-    {
-        out.push_str(&html_escape(text));
-    }
-
-    // Children
+    let layout = elem.kind.layout();
     ctx.depth += 1;
-    let is_paragraph =
-        elem.kind == ElementKind::Paragraph || elem.kind.spec().is_some_and(|spec| spec.inline);
-    for (i, child) in elem.children.iter().enumerate() {
-        generate_node(child, Some(&elem.kind), out, styles, ctx);
-        if is_paragraph && i < elem.children.len() - 1 {
-            out.push(' ');
-        }
+    let outer_in_text = ctx.in_text;
+    ctx.in_text = in_text || layout == Layout::Text;
+    // An argument printed as the element's text is its first line
+    let argument = elem
+        .argument
+        .as_deref()
+        .filter(|_| renders_argument_as_text(&elem.kind));
+    if let Some(text) = argument {
+        generate_node(
+            &Node::Text(vec![TextSegment::Plain(text.to_string())]),
+            Some(layout),
+            out,
+            styles,
+            ctx,
+        );
     }
+    generate_children(&elem.children, layout, argument.is_some(), out, styles, ctx);
+    ctx.in_text = outer_in_text;
     ctx.depth -= 1;
 
     out.push_str(&ctx.indent());
@@ -1113,12 +1161,12 @@ fn generate_element(
 
 fn generate_self_closing(
     elem: &Element,
-    parent_kind: Option<&ElementKind>,
+    parent: Option<Layout>,
     out: &mut String,
     styles: &mut StyleCollector,
     ctx: &mut GenContext,
 ) {
-    let gen_class = compute_class(&elem.attrs, &elem.kind, parent_kind, styles, false);
+    let gen_class = compute_class(&elem.attrs, &Site::new(elem, parent), styles);
     let (id, user_class) = extract_id_class(&elem.attrs);
 
     let (tag, kind_label) = match &elem.kind {
@@ -1209,7 +1257,8 @@ fn generate_text_segments(
             TextSegment::Plain(text) => out.push_str(&html_escape(text)),
             TextSegment::Inline(elem) => {
                 let mut buf = String::new();
-                generate_element(elem, None, &mut buf, styles, ctx);
+                // An element inside a line of text is in text
+                generate_element(elem, Some(Layout::Text), &mut buf, styles, ctx);
                 out.push_str(buf.trim_end());
             }
         }
@@ -1220,19 +1269,13 @@ fn generate_text_segments(
 // Style helpers
 // ---------------------------------------------------------------------------
 
-fn compute_class(
-    attrs: &[Attribute],
-    kind: &ElementKind,
-    parent_kind: Option<&ElementKind>,
-    styles: &mut StyleCollector,
-    has_overlay_children: bool,
-) -> Option<String> {
-    let base = attrs_to_css(attrs, "", kind, parent_kind, has_overlay_children);
+fn compute_class(attrs: &[Attribute], site: &Site, styles: &mut StyleCollector) -> Option<String> {
+    let base = attrs_to_css(attrs, "", site);
 
     // Collect pseudo-state overrides
     let mut pseudo = Vec::new();
     for &(prefix, selector) in crate::vocab::PSEUDO_PREFIXES {
-        let css = attrs_to_css(attrs, prefix, kind, parent_kind, has_overlay_children);
+        let css = attrs_to_css(attrs, prefix, site);
         if !css.is_empty() {
             pseudo.push((selector.to_string(), css));
         }
@@ -1254,7 +1297,7 @@ fn compute_class(
     for prefix in &nth_prefixes {
         let expr = &prefix[4..prefix.len() - 1];
         let selector = format!(":nth-child({})", expr);
-        let css = attrs_to_css(attrs, prefix, kind, parent_kind, has_overlay_children);
+        let css = attrs_to_css(attrs, prefix, site);
         if !css.is_empty() {
             pseudo.push((selector, css));
         }
@@ -1275,7 +1318,7 @@ fn compute_class(
     for prefix in &has_prefixes {
         let inner = &prefix[4..prefix.len() - 2]; // extract selector from has(selector):
         let selector = format!(":has({})", inner);
-        let css = attrs_to_css(attrs, prefix, kind, parent_kind, has_overlay_children);
+        let css = attrs_to_css(attrs, prefix, site);
         if !css.is_empty() {
             pseudo.push((selector, css));
         }
@@ -1285,7 +1328,7 @@ fn compute_class(
     let mut responsive = Vec::new();
     for &(bp_name, _) in BREAKPOINTS {
         let prefix = format!("{}:", bp_name);
-        let css = attrs_to_css(attrs, &prefix, kind, parent_kind, has_overlay_children);
+        let css = attrs_to_css(attrs, &prefix, site);
         if !css.is_empty() {
             responsive.push((bp_name.to_string(), css));
         }
@@ -1295,30 +1338,18 @@ fn compute_class(
     let mut container = Vec::new();
     for &(bp_name, _) in BREAKPOINTS {
         let prefix = format!("cq-{}:", bp_name);
-        let css = attrs_to_css(attrs, &prefix, kind, parent_kind, has_overlay_children);
+        let css = attrs_to_css(attrs, &prefix, site);
         if !css.is_empty() {
             container.push((bp_name.to_string(), css));
         }
     }
 
-    let dark = attrs_to_css(attrs, "dark:", kind, parent_kind, has_overlay_children);
-    let print = attrs_to_css(attrs, "print:", kind, parent_kind, has_overlay_children);
-    let motion_safe = attrs_to_css(
-        attrs,
-        "motion-safe:",
-        kind,
-        parent_kind,
-        has_overlay_children,
-    );
-    let motion_reduce = attrs_to_css(
-        attrs,
-        "motion-reduce:",
-        kind,
-        parent_kind,
-        has_overlay_children,
-    );
-    let landscape = attrs_to_css(attrs, "landscape:", kind, parent_kind, has_overlay_children);
-    let portrait = attrs_to_css(attrs, "portrait:", kind, parent_kind, has_overlay_children);
+    let dark = attrs_to_css(attrs, "dark:", site);
+    let print = attrs_to_css(attrs, "print:", site);
+    let motion_safe = attrs_to_css(attrs, "motion-safe:", site);
+    let motion_reduce = attrs_to_css(attrs, "motion-reduce:", site);
+    let landscape = attrs_to_css(attrs, "landscape:", site);
+    let portrait = attrs_to_css(attrs, "portrait:", site);
 
     // Dedupe: if a property is declared twice within a single rule, keep only
     // the last occurrence (element-kind defaults are written before
@@ -1478,36 +1509,71 @@ fn emit_class_attr(out: &mut String, gen_class: Option<&str>, user_class: Option
 // Attribute → CSS mapping
 // ---------------------------------------------------------------------------
 
-/// (htmlang prefix, CSS selector suffix)
-/// `display:flex;flex-direction:column;` — base layout for `@el` and every
-/// semantic wrapper that behaves like a column.
-const FLEX_COLUMN: &str = "display:flex;flex-direction:column;";
-
-fn attrs_to_css(
-    attrs: &[Attribute],
-    state_prefix: &str,
-    kind: &ElementKind,
-    parent_kind: Option<&ElementKind>,
+/// Where an element is written, which its CSS depends on.
+struct Site<'a> {
+    kind: &'a ElementKind,
+    /// The layout of what contains it: its children's `width fill`,
+    /// `center-x` and `align-*` compile against it. `None` at the top of
+    /// the page.
+    parent: Option<Layout>,
+    /// It has `@in-front` / `@behind` children.
     has_overlay_children: bool,
-) -> String {
+    /// A row, column or grid inside text, laid out inline.
+    inline: bool,
+}
+
+impl Site<'_> {
+    /// Where an element in `parent` is.
+    fn new<'a>(elem: &'a Element, parent: Option<Layout>) -> Site<'a> {
+        Site {
+            kind: &elem.kind,
+            parent,
+            has_overlay_children: has_overlay_children(elem),
+            inline: parent == Some(Layout::Text) && elem.kind.layout().is_container(),
+        }
+    }
+}
+
+/// The `display` of a layout (nothing for text, native and void elements,
+/// which keep HTML's own).
+fn layout_css(layout: Layout, inline: bool) -> &'static str {
+    match (layout, inline) {
+        (Layout::Column, false) => "display:flex;flex-direction:column;",
+        (Layout::Column, true) => "display:inline-flex;flex-direction:column;",
+        (Layout::Row, false) => "display:flex;flex-direction:row;",
+        (Layout::Row, true) => "display:inline-flex;flex-direction:row;",
+        (Layout::Grid, false) => "display:grid;",
+        (Layout::Grid, true) => "display:inline-grid;",
+        _ => "",
+    }
+}
+
+fn attrs_to_css(attrs: &[Attribute], state_prefix: &str, site: &Site) -> String {
     let mut css = String::new();
+    let kind = site.kind;
+    // `children:` styles go on the children, whose parent is this element
+    let parent = if state_prefix == "children:" {
+        Some(kind.layout())
+    } else {
+        site.parent
+    };
 
     // Base element styles only for the default (non-state) pass
     if state_prefix.is_empty() {
         // Elements with @in-front / @behind children become positioning
         // contexts. Pushed before user attrs so an explicit `position` wins
         // via dedupe (only the last declaration of a property is kept).
-        if has_overlay_children {
+        if site.has_overlay_children {
             css.push_str("position:relative;isolation:isolate;");
         }
-        match kind {
-            ElementKind::Row => css.push_str("display:flex;flex-direction:row;"),
-            ElementKind::El => css.push_str(FLEX_COLUMN),
-            ElementKind::Paragraph => css.push_str("margin:0;"),
-            ElementKind::Tag(spec) => css.push_str(spec.css),
-            _ => {}
-        }
+        css.push_str(layout_css(kind.layout(), site.inline));
+        css.push_str(kind.css());
     }
+    // htmlang's words for laying out children (`spacing`, `wrap`,
+    // `grid-cols`) mean nothing on an element that doesn't lay out its
+    // children, which the parser reports; they are left out. Under
+    // `children:` they go on the children, whose layout isn't known here.
+    let lays_out_children = kind.layout().is_container() || state_prefix == "children:";
 
     for attr in attrs {
         if attr.html {
@@ -1535,6 +1601,7 @@ fn attrs_to_css(
 
         match effective_key {
             // Layout
+            "spacing" if !lays_out_children => {}
             "spacing" | "gap" => {
                 if let Some(v) = val {
                     push_css(&mut css, "gap", &css_px(v));
@@ -1570,8 +1637,8 @@ fn attrs_to_css(
             "width" => {
                 if let Some(v) = val {
                     match v {
-                        "fill" => match parent_kind {
-                            Some(ElementKind::Row) => {
+                        "fill" => match parent {
+                            Some(Layout::Row) => {
                                 push_css(&mut css, "flex", "1");
                                 push_css(&mut css, "min-width", "0");
                             }
@@ -1585,8 +1652,8 @@ fn attrs_to_css(
             "height" => {
                 if let Some(v) = val {
                     match v {
-                        "fill" => match parent_kind {
-                            Some(parent) if parent.is_column() => {
+                        "fill" => match parent {
+                            Some(Layout::Column) => {
                                 push_css(&mut css, "flex", "1");
                                 push_css(&mut css, "min-height", "0");
                             }
@@ -1619,8 +1686,8 @@ fn attrs_to_css(
             }
 
             // Alignment
-            "center-x" => match parent_kind {
-                Some(parent) if parent.is_column() => {
+            "center-x" => match parent {
+                Some(Layout::Column) => {
                     push_css(&mut css, "align-self", "center");
                 }
                 _ => {
@@ -1628,31 +1695,31 @@ fn attrs_to_css(
                     push_css(&mut css, "margin-right", "auto");
                 }
             },
-            "center-y" => match parent_kind {
-                Some(ElementKind::Row) => push_css(&mut css, "align-self", "center"),
+            "center-y" => match parent {
+                Some(Layout::Row) => push_css(&mut css, "align-self", "center"),
                 _ => {
                     push_css(&mut css, "margin-top", "auto");
                     push_css(&mut css, "margin-bottom", "auto");
                 }
             },
-            "align-left" => match parent_kind {
-                Some(parent) if parent.is_column() => {
+            "align-left" => match parent {
+                Some(Layout::Column) => {
                     push_css(&mut css, "align-self", "flex-start");
                 }
                 _ => push_css(&mut css, "margin-right", "auto"),
             },
-            "align-right" => match parent_kind {
-                Some(parent) if parent.is_column() => {
+            "align-right" => match parent {
+                Some(Layout::Column) => {
                     push_css(&mut css, "align-self", "flex-end");
                 }
                 _ => push_css(&mut css, "margin-left", "auto"),
             },
-            "align-top" => match parent_kind {
-                Some(ElementKind::Row) => push_css(&mut css, "align-self", "flex-start"),
+            "align-top" => match parent {
+                Some(Layout::Row) => push_css(&mut css, "align-self", "flex-start"),
                 _ => push_css(&mut css, "margin-bottom", "auto"),
             },
-            "align-bottom" => match parent_kind {
-                Some(ElementKind::Row) => push_css(&mut css, "align-self", "flex-end"),
+            "align-bottom" => match parent {
+                Some(Layout::Row) => push_css(&mut css, "align-self", "flex-end"),
                 _ => push_css(&mut css, "margin-top", "auto"),
             },
 
@@ -1688,9 +1755,11 @@ fn attrs_to_css(
             // Effects
 
             // Flow
-            "wrap" => push_css(&mut css, "flex-wrap", "wrap"),
+            "wrap" if lays_out_children => push_css(&mut css, "flex-wrap", "wrap"),
+            "wrap" => {}
 
             // Grid
+            "grid-cols" | "grid-rows" if !lays_out_children => {}
             "grid-cols" => {
                 if let Some(v) = val {
                     if let Ok(n) = v.parse::<u32>() {

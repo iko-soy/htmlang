@@ -500,13 +500,14 @@ fn no_warning_used_define() {
 // --- Element-specific attribute validation ---
 
 #[test]
-fn warning_spacing_on_text() {
+fn spacing_on_text_is_an_error() {
+    // @text is text: its lines flow, so there is no gap for `spacing`
     let diags = parse_diagnostics("@text [spacing 10] hello");
     assert!(
-        diags
-            .iter()
-            .any(|d| d.message.contains("spacing") && d.message.contains("no effect")),
-        "expected spacing on @text warning, got: {:?}",
+        diags.iter().any(|d| d.code == "no-effect"
+            && d.severity == htmlang::diagnostic::Severity::Error
+            && d.message.contains("'spacing' can't go on @text")),
+        "expected an error for spacing on @text, got: {:?}",
         diags
     );
 }
@@ -1781,7 +1782,12 @@ fn element_definition_list() {
     assert!(output.contains("<dl"));
     assert!(output.contains("<dt>Term</dt>"));
     assert!(output.contains("<dd"));
-    assert!(output.contains(">Definition</dd>"));
+    // @dd is a column: its text is a child of its own
+    assert!(
+        output.contains("><span>Definition</span></dd>"),
+        "{}",
+        output
+    );
 }
 
 #[test]
@@ -3165,20 +3171,39 @@ fn script_element_inline() {
 #[test]
 fn noscript_element() {
     let output = compile("@noscript\n  @text Fallback");
-    assert!(output.contains("<noscript>"), "noscript open: {}", output);
+    assert!(
+        output.contains("<noscript class="),
+        "noscript open: {}",
+        output
+    );
+    assert!(
+        output.contains("display:flex;flex-direction:column"),
+        "{}",
+        output
+    );
     assert!(output.contains("</noscript>"), "noscript close: {}", output);
 }
 
 #[test]
 fn address_element() {
     let output = compile("@address\n  @text Contact");
-    assert!(output.contains("<address>"), "address: {}", output);
+    assert!(output.contains("<address class="), "address: {}", output);
+    assert!(
+        output.contains("display:flex;flex-direction:column"),
+        "{}",
+        output
+    );
 }
 
 #[test]
 fn search_element() {
     let output = compile("@search\n  @input [type=search]");
-    assert!(output.contains("<search>"), "search: {}", output);
+    assert!(output.contains("<search class="), "search: {}", output);
+    assert!(
+        output.contains("display:flex;flex-direction:column"),
+        "{}",
+        output
+    );
 }
 
 #[test]
@@ -5158,7 +5183,8 @@ fn a_function_is_called_inline_in_text() {
 #[test]
 fn an_inline_call_to_a_body_with_several_roots_is_a_fragment() {
     let out = compile("@let @pair\n  @text A\n  @text B\n@paragraph\n  x {@pair} y\n");
-    assert!(out.contains("x <span>A</span><span>B</span> y"), "{}", out);
+    // Text flows: the body's two lines are two words of the sentence
+    assert!(out.contains("x <span>A</span> <span>B</span> y"), "{}", out);
     // A text body is text in the sentence
     let out = compile("@let @intro\n  one\n  two\n@paragraph\n  x {@intro} y\n");
     assert!(out.contains("x one two y"), "{}", out);
@@ -5188,7 +5214,9 @@ fn a_function_in_its_own_callers_content_is_not_recursion() {
     let result = htmlang::parser::parse(src);
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     let out = htmlang::codegen::generate(&result.document);
-    assert_eq!(out.matches("<div").count(), 5, "{}", out);
+    // The two calls inside text are inline-flex spans
+    assert_eq!(out.matches("<div").count(), 3, "{}", out);
+    assert_eq!(out.matches("<span class=").count(), 2, "{}", out);
 }
 
 #[test]
@@ -6177,4 +6205,211 @@ fn a_record_written_where_text_goes_is_an_error() {
         "@data $p {\"title\": \"Hi\"}\n@let @card [post]\n  @text $post.title\n@card [post $p]\n@let q $p\n@text $q.title\n",
     );
     assert!(html.contains(">Hi<"), "{}", html);
+}
+
+// --- Layouts (P1): one layout per element ---
+
+#[test]
+fn snapshot_layout_modes() {
+    snapshot_test("layout_modes");
+}
+
+#[test]
+fn a_list_is_a_column_so_spacing_works() {
+    let out = compile("@ol [spacing 4]\n  @li First\n  @li Second\n");
+    assert!(
+        out.contains(
+            "{display:flex;flex-direction:column;margin:0;padding-left:0;list-style:none;gap:4px;}"
+        ),
+        "{}",
+        out
+    );
+    // Each item's text is a child of its own
+    assert!(out.contains("<span>First</span></li>"), "{}", out);
+    for name in ["ul", "dl", "search", "address", "noscript"] {
+        let out = compile(&format!("@{} [spacing 4]\n  @text x\n", name));
+        assert!(
+            out.contains("display:flex;flex-direction:column;"),
+            "@{}: {}",
+            name,
+            out
+        );
+        assert!(out.contains("gap:4px"), "@{}: {}", name, out);
+    }
+}
+
+#[test]
+fn text_elements_join_their_lines_with_a_space() {
+    let out = compile("@button [type=button]\n  Save\n  changes\n");
+    assert!(out.contains(">Save changes</button>"), "{}", out);
+    let out = compile("@h2 Meet\n  htmlang\n  today\n");
+    assert!(out.contains(">Meet htmlang today</h2>"), "{}", out);
+    let out = compile("@label\n  Name\n  @input [type=text, id=n]\n");
+    assert!(out.contains("<label>Name <input"), "{}", out);
+    let out = compile("@td\n  a\n  b\n");
+    assert!(out.contains("<td>a b</td>"), "{}", out);
+}
+
+#[test]
+fn a_layout_element_in_text_is_an_inline_flex_span() {
+    let out = compile("@paragraph\n  Price: {@el [padding 2] 9}\n");
+    assert!(!out.contains("<div"), "{}", out);
+    assert!(
+        out.contains("Price: <span class=\"b\"><span>9</span></span></p>"),
+        "{}",
+        out
+    );
+    assert!(
+        out.contains(".b{display:inline-flex;flex-direction:column;padding:2px;}"),
+        "{}",
+        out
+    );
+    // As a child of a text element, a row or a grid too
+    let out = compile("@text\n  @row [spacing 4]\n    @text a\n  @grid > @text b\n");
+    assert!(!out.contains("<div"), "{}", out);
+    assert!(
+        out.contains("display:inline-flex;flex-direction:row;gap:4px;"),
+        "{}",
+        out
+    );
+    assert!(out.contains("display:inline-grid;"), "{}", out);
+    // In a line of text in a column, too
+    let out = compile("@el\n  See {@row {@text x}}\n");
+    assert!(out.contains("<span>See <span class="), "{}", out);
+    // Its own children are laid out in it as usual
+    let out = compile("@paragraph\n  {@el [spacing 2] {@text x}}\n");
+    assert!(
+        out.contains("<span class=\"b\"><span><span>x</span></span></span>"),
+        "{}",
+        out
+    );
+    // Deeper inside text, htmlang's own elements are still spans
+    let out = compile("@paragraph\n  @el [padding 2]\n    @el x\n    @row y\n");
+    assert!(!out.contains("<div"), "{}", out);
+    assert!(
+        out.contains("<span class=\"c\"><span>x</span></span>"),
+        "{}",
+        out
+    );
+    assert!(
+        out.contains(".c{display:flex;flex-direction:column;}"),
+        "{}",
+        out
+    );
+    // Outside text it stays a <div>
+    let out = compile("@el\n  @el [padding 2] 9\n");
+    assert_eq!(out.matches("<div").count(), 2, "{}", out);
+}
+
+#[test]
+fn a_semantic_container_in_a_paragraph_is_a_warning() {
+    let diags = parse_diagnostics("@paragraph\n  Hi\n  @section x\n");
+    let found = coded(&diags, "block-in-paragraph");
+    assert_eq!(found.len(), 1, "{:?}", diags);
+    assert_eq!(found[0].line, 3);
+    assert!(found[0].message.contains("<section>"), "{:?}", found);
+    // Deeper, and inline
+    let diags = parse_diagnostics("@paragraph\n  @text\n    {@ul {@li x}}\n");
+    assert_eq!(coded(&diags, "block-in-paragraph").len(), 2, "{:?}", diags);
+    // htmlang's own layout elements are spans there, and a button keeps
+    // what is inside it
+    let diags = parse_diagnostics(
+        "@paragraph\n  {@el x} {@row y} {@grid z}\n  @button [type=button]\n    @ul > @li x\n",
+    );
+    assert!(
+        coded(&diags, "block-in-paragraph").is_empty(),
+        "{:?}",
+        diags
+    );
+    // Other text elements aren't paragraphs
+    let diags = parse_diagnostics("@td\n  @ul > @li x\n");
+    assert!(
+        coded(&diags, "block-in-paragraph").is_empty(),
+        "{:?}",
+        diags
+    );
+}
+
+#[test]
+fn spacing_goes_only_on_a_row_column_or_grid() {
+    for (src, name) in [
+        ("@h2 [spacing 4] Title", "@h2"),
+        ("@button [type=button, spacing 4] Go", "@button"),
+        ("@paragraph [md:spacing 4] Text", "@paragraph"),
+        ("@table [spacing 4]\n  @tr > @td x", "@table"),
+        ("@input [type=text, id=a, wrap]", "@input"),
+        ("@text [grid-cols 2] x", "@text"),
+    ] {
+        let result = htmlang::parser::parse(src);
+        let errors = coded(&result.diagnostics, "no-effect");
+        assert_eq!(errors.len(), 1, "{}: {:?}", src, result.diagnostics);
+        assert_eq!(
+            errors[0].severity,
+            htmlang::parser::Severity::Error,
+            "{}",
+            src
+        );
+        assert!(errors[0].message.contains(name), "{}: {:?}", src, errors);
+        // Left out of the page
+        let out = htmlang::codegen::generate(&result.document);
+        assert!(!out.contains("gap:"), "{}: {}", src, out);
+        assert!(!out.contains("flex-wrap"), "{}: {}", src, out);
+        assert!(!out.contains("grid-template"), "{}: {}", src, out);
+    }
+    // Any row, column or grid takes them, and `children:` styles go on the
+    // children
+    for src in [
+        "@el [spacing 4, wrap] x",
+        "@row [spacing 4] x",
+        "@grid [grid-cols 2, spacing 4] x",
+        "@li [spacing 4] x",
+        "@form [spacing 4] /go\n  @button [type=submit] Go",
+        "@paragraph [children:spacing 4] x",
+    ] {
+        let diags = parse_diagnostics(src);
+        assert!(
+            coded(&diags, "no-effect").is_empty(),
+            "{}: {:?}",
+            src,
+            diags
+        );
+    }
+    // CSS's own `gap` is plain CSS
+    let out = compile("@label [display flex, gap 8]\n  Name\n  @input [type=text, id=n]\n");
+    assert!(out.contains("display:flex;gap:8px;"), "{}", out);
+}
+
+#[test]
+fn fill_and_center_compile_against_the_parent_s_layout() {
+    // A list is a column: center-x is align-self, height fill is flex
+    let out = compile("@ul [height 200]\n  @li [center-x] a\n  @li [height fill] b\n");
+    assert!(out.contains("align-self:center;"), "{}", out);
+    assert!(out.contains("flex:1;min-height:0;"), "{}", out);
+    // `children:` styles go on the children, whose parent is the element
+    let out = compile("@row [children:width fill]\n  @el A\n  @el B\n");
+    assert!(out.contains(" > *{flex:1;min-width:0;}"), "{}", out);
+}
+
+#[test]
+fn native_elements_keep_html_s_own_layout() {
+    let out = compile("@pre\n  line one\n  line two\n");
+    assert!(out.contains(">line one\nline two</pre>"), "{}", out);
+    assert!(!out.contains("<span>line"), "{}", out);
+    let out = compile("@table\n  @tr > @td x\n");
+    assert!(!out.contains("display"), "{}", out);
+}
+
+#[test]
+fn an_empty_container_is_linted_by_its_layout() {
+    let lint = |src: &str| {
+        let result = htmlang::parser::parse(src);
+        htmlang::parser::lint(&result.document.nodes)
+            .into_iter()
+            .filter(|d| d.code == "empty-container")
+            .count()
+    };
+    assert_eq!(lint("@section\n"), 1);
+    assert_eq!(lint("@grid\n"), 1);
+    assert_eq!(lint("@li First\n"), 0);
+    assert_eq!(lint("@h2\n"), 0);
 }

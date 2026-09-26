@@ -16,6 +16,10 @@ pub const HTMLANG_ATTRIBUTES: &[&str] = &[
     "spacing", "wrap",
 ];
 
+/// htmlang's own attributes about how an element lays out its children:
+/// they work on a row, column or grid (`ast::Layout::is_container`).
+pub const CONTAINER_ATTRIBUTES: &[&str] = &["spacing", "wrap", "grid-cols", "grid-rows"];
+
 /// htmlang's own attributes that are flags, written without a value
 /// (`center-x`); the others take one (`spacing 8`).
 pub const HTMLANG_FLAGS: &[&str] = &[

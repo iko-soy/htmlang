@@ -1,0 +1,44 @@
+-- Every element has one layout. In a row, column or grid each line of
+-- text is a child; in a text element the lines flow.
+
+-- A list is a column: `spacing` is the gap between its items
+@ol [spacing 4]
+  @li First
+  @li Second
+    and more
+
+-- Text: the lines join with a space
+@button [type=button]
+  Save
+  changes
+@h2 Meet
+  htmlang
+@td
+  a
+  b
+
+-- A layout element inside text is laid out inline, in a <span>
+@paragraph
+  Price: {@el [padding 2, background #fef3c7] $9} a month.
+@h3
+  Plans
+  @row [spacing 4] > @text New
+@paragraph Grid: {@grid [grid-cols 2] {@text a} {@text b}}
+
+-- A semantic container in text keeps its element
+@label
+  Name
+  @search [padding 2] > @input [type=search, aria-label=Name]
+
+-- Children compile against their parent's layout
+@ul [spacing 2]
+  @li [center-x] Centered in a column
+  @li [width fill] Full width
+@row [children:width fill]
+  @el A
+  @el B
+
+-- Native: HTML's own layout; lines are separated by a line break
+@pre
+  line one
+  line two

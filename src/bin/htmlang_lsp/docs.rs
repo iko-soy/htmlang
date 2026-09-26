@@ -5,7 +5,7 @@
 //! without an entry here still gets a summary derived from the compiler's
 //! tables, so new elements and attributes are never missing from the editor.
 
-use htmlang::ast::{ElementKind, TagArg};
+use htmlang::ast::{ElementKind, Layout, TagArg};
 use htmlang::vocab;
 
 pub(crate) struct Doc {
@@ -117,7 +117,7 @@ pub(crate) const DIRECTIVES: &[Doc] = &[
 /// htmlang's own attributes, plus CSS properties htmlang treats specially.
 #[rustfmt::skip]
 pub(crate) const ATTRIBUTES: &[Doc] = &[
-    doc("spacing", "Gap between children.", "spacing 20"),
+    doc("spacing", "Gap between children, on a row, column or grid.", "spacing 20"),
     doc("padding", "Inner space: 1 to 4 values; bare numbers are px.", "padding 12 24"),
     doc("margin", "Outer space: 1 to 4 values; bare numbers are px.", "margin 0 auto"),
     doc("width", "`fill` takes the remaining space, `shrink` fits the content, or a size.", "width fill"),
@@ -169,24 +169,51 @@ pub(crate) fn bundle(name: &str) -> Option<&'static Doc> {
     find(BUNDLES, name)
 }
 
+/// What an element's layout means for what is written inside it, for
+/// hover: the rule that decides text lines, `spacing` and children.
+pub(crate) fn layout_summary(layout: Layout) -> &'static str {
+    match layout {
+        Layout::Column => {
+            "Layout: column. Each line of text is a child of its own, and `spacing` is the gap \
+             between the children."
+        }
+        Layout::Row => {
+            "Layout: row. Each line of text is a child of its own, and `spacing` is the gap \
+             between the children."
+        }
+        Layout::Grid => "Layout: grid. Each line of text is a cell, and `spacing` is the gap.",
+        Layout::Text => {
+            "Layout: text. Its lines and children flow together, joined with spaces, so it \
+             takes no `spacing`; an `@el`, `@row` or `@grid` inside it is laid out inline."
+        }
+        Layout::Native => "Layout: HTML's own, which htmlang leaves alone; it takes no `spacing`.",
+        Layout::Void => "It takes no content.",
+    }
+}
+
 /// One-line summary of an element: from `ELEMENTS`, or derived from its
-/// row in `TAGS`.
+/// row in `TAGS`, followed by what its layout means.
 pub(crate) fn element_summary(name: &str) -> Option<String> {
-    if let Some(doc) = find(ELEMENTS, name) {
-        return Some(doc.summary.to_string());
-    }
-    let spec = ElementKind::from_name(name)?.spec()?;
-    let mut summary = format!("Renders `<{}>`", spec.html);
-    if spec.css.contains("flex-direction:column") {
-        summary.push_str(", laid out as a column");
-    }
-    if spec.void {
-        summary.push_str(" (void element)");
-    }
-    summary.push('.');
-    match spec.arg {
-        TagArg::Attr(attr) => summary.push_str(&format!(" The argument is its `{}`.", attr)),
-        TagArg::Text | TagArg::Child => summary.push_str(" Text after it is its content."),
+    let kind = ElementKind::from_name(name)?;
+    let mut summary = if let Some(doc) = find(ELEMENTS, name) {
+        doc.summary.to_string()
+    } else {
+        let spec = kind.spec()?;
+        let mut summary = format!("Renders `<{}>`.", spec.html);
+        match spec.arg {
+            TagArg::Attr(attr) => summary.push_str(&format!(" The argument is its `{}`.", attr)),
+            TagArg::Text | TagArg::Child => summary.push_str(" Text after it is its content."),
+        }
+        summary
+    };
+    // @fragment, @children, @slot and @script have no layout of their own
+    let placeholder = matches!(
+        kind,
+        ElementKind::Fragment | ElementKind::Children | ElementKind::Slot(_) | ElementKind::Script
+    );
+    if !placeholder {
+        summary.push(' ');
+        summary.push_str(layout_summary(kind.layout()));
     }
     Some(summary)
 }
@@ -345,6 +372,18 @@ mod tests {
                 name
             );
         }
+    }
+
+    #[test]
+    fn an_element_s_hover_says_its_layout() {
+        let says = |name: &str, text: &str| hover(name).is_some_and(|h| h.contains(text));
+        assert!(says("@ol", "Layout: column"));
+        assert!(says("@el", "Layout: column"));
+        assert!(says("@row", "Layout: row"));
+        assert!(says("@button", "Layout: text"));
+        assert!(says("@table", "HTML's own"));
+        assert!(says("@hr", "takes no content"));
+        assert!(!says("@fragment", "Layout"));
     }
 
     #[test]

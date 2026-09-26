@@ -141,7 +141,12 @@ pub mod code {
     pub const UNSET_ENVIRONMENT: &str = "unset-environment";
 
     // Context: an attribute or element where it has no effect
+    /// An attribute the element ignores (a warning), or a layout word such
+    /// as `spacing` on an element that doesn't lay out its children (an
+    /// error: it is left out).
     pub const NO_EFFECT: &str = "no-effect";
+    /// An element whose HTML ends a `<p>`, written inside a `@paragraph`.
+    pub const BLOCK_IN_PARAGRAPH: &str = "block-in-paragraph";
 
     // Accessibility
     pub const MISSING_ALT: &str = "missing-alt";
@@ -201,6 +206,7 @@ pub mod code {
         CIRCULAR_INCLUDE,
         UNSET_ENVIRONMENT,
         NO_EFFECT,
+        BLOCK_IN_PARAGRAPH,
         MISSING_ALT,
         MISSING_INPUT_TYPE,
         MISSING_LINK_TEXT,

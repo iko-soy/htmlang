@@ -29,7 +29,9 @@ Linux, macOS, and Windows. Your change should pass all three.
     its block and a function keeps the frames of its definition.
   - `diagnostic.rs` — `Diagnostic` and the stable diagnostic codes.
   - `ast.rs` — the element kinds; every plain HTML element is one row in
-    `TAGS`, and every directive one row in `DIRECTIVES` (its argument, its
+    `TAGS` with its one `Layout` (column, row, grid, text, native or void,
+    which decides its text lines, `spacing` and its children's layout
+    words), and every directive one row in `DIRECTIVES` (its argument, its
     kind of body, and whether it takes the rest of the line).
   - `vocab.rs` — the attribute vocabulary (htmlang attributes, CSS properties,
     HTML attributes) and the state/media prefixes.
@@ -68,7 +70,8 @@ Linux, macOS, and Windows. Your change should pass all three.
    parser-to-HTML pipeline. Pure parser / codegen helpers can live as unit
    tests alongside the code.
 2. Prefer the smallest mechanism: a component belongs in `std.hl`, an HTML
-   element is a row in `TAGS`, and a CSS property needs no code at all. Only
+   element is a row in `TAGS` (and a line in DESIGN.md's table of layouts,
+   which a test checks), and a CSS property needs no code at all. Only
    thread a feature through the parser and codegen when it needs to be, and
    describe it in the LSP's `docs.rs`.
 3. Document it in `DESIGN.md` (the examples there are compiled by the tests).

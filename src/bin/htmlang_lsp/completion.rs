@@ -809,7 +809,15 @@ fn attr_completions(range: Range, element: Option<&str>) -> Vec<CompletionItem> 
         completion.sort_text = Some(format!("{}_{}", rank, label));
         items.push(completion);
     };
+    // `spacing`, `wrap` and `grid-cols` only on a row, column or grid (a
+    // function's root isn't known, so a call gets them all)
+    let lays_out_children = element
+        .and_then(htmlang::ast::ElementKind::from_name)
+        .is_none_or(|kind| kind.layout().is_container());
     for name in vocab::HTMLANG_ATTRIBUTES {
+        if !lays_out_children && vocab::CONTAINER_ATTRIBUTES.contains(name) {
+            continue;
+        }
         let doc = docs::attribute(name);
         let insert = if !vocab::HTMLANG_FLAGS.contains(name) {
             format!("{} ", name)
@@ -1254,14 +1262,40 @@ mod tests {
                 _ => panic!("no edit for {}", label),
             }
         };
-        assert_eq!(insert("spacing"), "spacing ");
-        assert_eq!(insert("wrap"), "wrap");
         assert_eq!(insert("opacity"), "opacity ");
         assert_eq!(insert("type="), "type=");
         assert_eq!(insert("required"), "required");
         assert_eq!(insert("hover:"), "hover:");
         let boosted = items.iter().find(|i| i.label == "type=").unwrap();
         assert!(boosted.sort_text.as_deref().unwrap().starts_with("0_"));
+        let column = attr_completions(Range::default(), Some("ul"));
+        let insert =
+            |label: &str| match &column.iter().find(|i| i.label == label).unwrap().text_edit {
+                Some(CompletionTextEdit::Edit(edit)) => edit.new_text.clone(),
+                _ => panic!("no edit for {}", label),
+            };
+        assert_eq!(insert("spacing"), "spacing ");
+        assert_eq!(insert("wrap"), "wrap");
+    }
+
+    #[test]
+    fn spacing_is_offered_only_where_children_are_laid_out() {
+        let offers = |element: Option<&str>, name: &str| {
+            attr_completions(Range::default(), element)
+                .iter()
+                .any(|i| i.label == name)
+        };
+        for container in ["el", "row", "grid", "section", "ol", "li"] {
+            assert!(offers(Some(container), "spacing"), "{}", container);
+        }
+        for other in ["h2", "button", "paragraph", "table", "input", "image"] {
+            assert!(!offers(Some(other), "spacing"), "{}", other);
+            assert!(!offers(Some(other), "grid-cols"), "{}", other);
+            assert!(offers(Some(other), "padding"), "{}", other);
+        }
+        // A function's root isn't known
+        assert!(offers(Some("card"), "spacing"));
+        assert!(offers(None, "spacing"));
     }
 
     #[test]
