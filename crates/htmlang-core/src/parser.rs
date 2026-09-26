@@ -5260,8 +5260,9 @@ fn contrast_ratio(c1: (u8, u8, u8), c2: (u8, u8, u8)) -> f64 {
 }
 
 /// `@image [inline] icon.svg` becomes the SVG's markup, with `width`,
-/// `height`, `color` / `fill`, `class=` and `id=` applied to the `<svg>`
-/// tag. Other nodes are returned unchanged.
+/// `height`, `color` / `fill` and the HTML attributes (`class=`, `id=`,
+/// `aria-label=`, ...) applied to the `<svg>` tag; any other attribute is
+/// an error. Other nodes are returned unchanged.
 fn inline_svg(node: Node, line_num: usize, ctx: &mut ParseContext) -> Node {
     let Node::Element(elem) = &node else {
         return node;
@@ -5296,20 +5297,27 @@ fn inline_svg(node: Node, line_num: usize, ctx: &mut ParseContext) -> Node {
     // The file's markup has no class of its own, so a style reaches it only
     // as one of the root's attributes: anything else is reported, never
     // left out silently
-    let mut left_out: Vec<&str> = Vec::new();
+    let mut left_out: Vec<String> = Vec::new();
     for attr in &elem.attrs {
         let target = match (attr.key.as_str(), attr.html, &attr.value) {
             ("inline", false, None) | ("src", true, _) => continue,
+            // `fill` and `shrink` are layout words, which need a class
+            ("width" | "height", false, Some(value))
+                if matches!(value.as_str(), "fill" | "shrink") =>
+            {
+                left_out.push(format!("{} {}", attr.key, value));
+                continue;
+            }
             ("width" | "height", false, Some(_)) => attr.key.as_str(),
             ("color" | "fill", false, Some(_)) => "fill",
             ("alt", true, _) => {
-                left_out.push(attr.key.as_str());
+                left_out.push("alt".to_string());
                 continue;
             }
             (key, true, Some(_)) => key,
             (key, false, None) if crate::vocab::BOOLEAN_HTML_ATTRS.contains(&key) => key,
             _ => {
-                left_out.push(attr.key.as_str());
+                left_out.push(attr.key.clone());
                 continue;
             }
         };
@@ -5317,14 +5325,14 @@ fn inline_svg(node: Node, line_num: usize, ctx: &mut ParseContext) -> Node {
         svg = set_svg_attr(&svg, target, &html_escape_md(value));
     }
     if !left_out.is_empty() {
-        let alt = left_out.contains(&"alt");
+        let alt = left_out.iter().any(|name| name == "alt");
         let names = left_out
             .iter()
             .map(|name| format!("'{}'", name))
             .collect::<Vec<_>>()
             .join(", ");
         let mut message = format!(
-            "{} can't go on an inline SVG: `@image [inline]` puts the file's own markup into the page, which takes `width`, `height`, `color` (as its fill) and HTML attributes (`class=`, `aria-label=`, ...)",
+            "{} can't go on an inline SVG: `@image [inline]` puts the file's own markup into the page, which takes `width` and `height` as lengths, `color` or `fill` (as its fill) and HTML attributes (`class=`, `aria-label=`, ...)",
             names
         );
         if alt {

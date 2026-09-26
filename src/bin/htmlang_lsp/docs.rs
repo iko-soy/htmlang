@@ -360,7 +360,7 @@ fn attribute_hover(name: &str) -> Option<String> {
     }
     if vocab::is_custom_property(name) {
         return Some(format!(
-            "**{name}** \u{2014} Custom property: sets `{name}` on this element and everything inside it, read with `var({name})`. Its value is written to the CSS as it is (no px), so a length takes its unit: `{name} 8px`. `@let {name} VALUE` declares it for the whole page, on `:root`."
+            "**{name}** \u{2014} Custom property. As an attribute (`[{name} VALUE]`) it is set on the element and everything inside it, where `var({name})` reads it. Its value is written to the CSS as it is (no px), so a length takes its unit: `{name} 8px`. `@let {name} VALUE` declares it for the whole page, on `:root`."
         ));
     }
     if vocab::is_vendor_property(name) {

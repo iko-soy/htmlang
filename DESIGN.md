@@ -171,7 +171,8 @@ A line whose first word is `--` is a comment: `--` followed by a space, or
 alone on its line. A comment must be on its own line, because `--` later in
 a line is ordinary text. A comment may sit between the lines of an attribute
 list, and `--name` with no space is not a comment but a
-[custom property](#custom-properties), so it can start a line of a list.
+[custom property](#custom-properties), so it can start a line of a list
+(anywhere else, a line starting `--name` or `---` is text).
 
 ```
 -- this is a comment
@@ -1209,7 +1210,7 @@ the content to show when the list is empty.
 | `@data $name env:NAME [default]` | An environment variable |
 | `@include file.hl` | Insert another file: its content and its definitions. A file that holds only `@let`s outputs nothing (a [library](#layouts)) |
 | `@markdown` / `@markdown file.md` | Markdown (an indented body or a file), converted to HTML |
-| `@image [inline] file.svg` | Put the file inside the page: SVG as markup, other images as base64. The SVG's root gets `width`, `height`, `color` (as its `fill`) and the HTML attributes (`class=`, `aria-label=`, ...); any other style, and `alt=`, is an error, since the markup has no generated class. `inline` goes only on `@image`, without a prefix |
+| `@image [inline] file.svg` | Put the file inside the page: SVG as markup, other images as base64. The SVG's root gets `width` and `height` (lengths, not `fill` or `shrink`), `color` or `fill` (as its `fill`) and the HTML attributes (`class=`, `aria-label=`, ...); any other style, and `alt=`, is an error, since the markup has no generated class. `inline` goes only on `@image`, without a prefix |
 
 Records keep their values whole, even when a value contains spaces or
 commas:

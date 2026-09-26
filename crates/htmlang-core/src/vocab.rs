@@ -186,8 +186,9 @@ pub const HTML_ATTRIBUTES: &[&str] = &[
 #[rustfmt::skip]
 pub const LENGTH_PROPERTIES: &[&str] = &[
     "background-position", "background-position-x", "background-position-y", "background-size",
-    "baseline-shift", "block-size", "border", "border-block", "border-block-end", "border-block-end-width",
-    "border-block-start", "border-block-start-width", "border-block-width", "border-bottom",
+    "baseline-shift", "block-size", "border", "border-block", "border-block-end",
+    "border-block-end-width", "border-block-start", "border-block-start-width",
+    "border-block-width", "border-bottom",
     "border-bottom-left-radius", "border-bottom-right-radius", "border-bottom-width",
     "border-end-end-radius", "border-end-start-radius", "border-inline", "border-inline-end",
     "border-inline-end-width", "border-inline-start", "border-inline-start-width",

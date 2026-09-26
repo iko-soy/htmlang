@@ -7844,6 +7844,24 @@ fn a_custom_property_is_a_style_on_any_element_under_any_prefix() {
 }
 
 #[test]
+fn a_vendor_prefixed_property_is_a_style_under_any_prefix() {
+    let result = htmlang::parser::parse(
+        "@el [-webkit-text-stroke 1px red, hover:-webkit-text-stroke 2px red, dark:-webkit-tap-highlight-color transparent, -moz-osx-font-smoothing grayscale, -ms-overflow-style none]\n  x\n",
+    );
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    let html = htmlang::codegen::generate(&result.document);
+    for declaration in [
+        "-webkit-text-stroke:1px red;",
+        ":hover{-webkit-text-stroke:2px red;}",
+        "@media(prefers-color-scheme:dark){.hl-a{-webkit-tap-highlight-color:transparent;}}",
+        "-moz-osx-font-smoothing:grayscale;",
+        "-ms-overflow-style:none;",
+    ] {
+        assert!(html.contains(declaration), "{declaration}: {html}");
+    }
+}
+
+#[test]
 fn a_custom_property_s_value_is_written_as_it_is() {
     // No px: a custom property has no type to go by
     let html = compile(
@@ -7920,5 +7938,22 @@ fn a_style_an_inline_svg_can_t_take_is_an_error() {
         "{}",
         errors[0].message
     );
+    // `width fill` is a layout word, which needs a class: not an SVG width
+    let result = htmlang::parser::parse_with_base(
+        "@image [inline, width fill, height 2em] i.svg\n",
+        Some(&dir),
+    );
+    let errors = coded(&result.diagnostics, "unexpected-argument");
+    assert_eq!(errors.len(), 1, "{:?}", result.diagnostics);
+    assert!(
+        errors[0]
+            .message
+            .starts_with("'width fill' can't go on an inline SVG"),
+        "{}",
+        errors[0].message
+    );
+    let html = htmlang::codegen::generate(&result.document);
+    assert!(!html.contains("width=\"fill\""), "{}", html);
+    assert!(html.contains("height=\"2em\""), "{}", html);
     let _ = fs::remove_dir_all(&dir);
 }

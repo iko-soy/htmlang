@@ -34,7 +34,7 @@ fn code_blocks(markdown: &str) -> Vec<String> {
 fn is_htmlang(block: &str) -> bool {
     let first = block
         .lines()
-        .find(|l| !l.trim().is_empty() && !l.trim_start().starts_with("--"))
+        .find(|l| !l.trim().is_empty() && !htmlang::syntax::is_comment(l.trim()))
         .unwrap_or("");
     !(first.starts_with("htmlang ")
         || first.starts_with("cargo ")
