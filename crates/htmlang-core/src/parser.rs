@@ -229,20 +229,6 @@ impl Evaluator {
     fn eval(&mut self, node: &Syntax, ctx: &mut ParseContext) -> Result<Option<Vec<Node>>, ParseError> {
         let line_num = node.line();
         ctx.current_line = line_num;
-        if !matches!(node, Syntax::Raw { .. })
-            && let Some(filter) = old_filter_syntax(&node.source())
-        {
-            ctx.diagnostics.push(Diagnostic {
-                line: line_num,
-                column: None,
-                message: format!(
-                    "`${}|{}` filters are functions now: write `${{{}(${})}}` (run `htmlang upgrade`)",
-                    filter.0, filter.1, filter.1, filter.0
-                ),
-                severity: Severity::Warning,
-                source_line: Some(node.source()),
-            });
-        }
         let (content, current_indent, children) = match node {
             Syntax::Raw { text, .. } => return Ok(Some(vec![Node::Raw(text.clone())])),
             Syntax::Function { name, params, defaults, body, .. } => {
@@ -271,18 +257,6 @@ impl Evaluator {
         };
 
         // --- Directives ---
-
-        // Removed syntax gets a pointer to its replacement — unless the
-        // name is a user function (e.g. `@let divider`).
-        if content.starts_with('@')
-            && !ctx.functions.contains_key(extract_element_name(&content))
-            && let Some(hint) = removed_syntax_hint(&content)
-        {
-            return Err(ParseError {
-                line: line_num,
-                message: hint,
-            });
-        }
 
         // @page [lang en, favicon /f.png] Title
         if let Some(rest) = content.strip_prefix("@page ") {
@@ -446,17 +420,6 @@ impl Evaluator {
 
         if let Some(rest) = content.strip_prefix("@include ") {
             let rest = rest.trim();
-            if let Some((file, alias)) = rest.rsplit_once(" as ") {
-                return Err(ParseError {
-                    line: line_num,
-                    message: format!(
-                        "`@include ... as` was removed: write `@include {}` and drop the `{}.` \
-                         prefix (run `htmlang upgrade`)",
-                        file.trim(),
-                        alias.trim()
-                    ),
-                });
-            }
             let filename = rest
                 .strip_prefix('"')
                 .and_then(|f| f.strip_suffix('"'))
@@ -656,26 +619,6 @@ impl Evaluator {
 
         // --- Bare text ---
 
-        // `[attrs]` alone on a line used to be an anonymous @el
-        if let Some(list) = content.strip_prefix('[')
-            && (list.is_empty()
-                || list
-                    .split([',', ']'])
-                    .next()
-                    .and_then(|first| first.split_whitespace().next())
-                    .is_some_and(crate::vocab::is_style_attribute))
-        {
-            ctx.diagnostics.push(Diagnostic {
-                line: line_num,
-                column: None,
-                message: "a line starting with `[` is text: for an element, write `@el [...]` \
-                          (run `htmlang upgrade`)"
-                    .to_string(),
-                severity: Severity::Warning,
-                source_line: Some(content.clone()),
-            });
-        }
-
         let var_warnings = check_undefined_vars(
             &protect_escapes(&content),
             &ctx.variables,
@@ -805,14 +748,6 @@ impl Evaluator {
         }
         let (item, index) = (names[0], names.get(1).copied());
         let list_src = list_src.trim();
-        if list_src.ends_with(']') && list_src.contains("[page ") {
-            return Err(ParseError {
-                line: line_num,
-                message: "@each pagination (`[page N]`) was removed: split the list or \
-                          filter it with @if"
-                    .to_string(),
-            });
-        }
         track_var_refs(list_src, &mut ctx.used_variables);
 
         // A list loaded from JSON, by name
@@ -1314,12 +1249,6 @@ fn parse_element_kind(s: &str, line_num: usize) -> Result<ElementKind, ParseErro
     if let Some(kind) = ElementKind::from_name(s) {
         return Ok(kind);
     }
-    if let Some(hint) = removed_syntax_hint(&format!("@{}", s)) {
-        return Err(ParseError {
-            line: line_num,
-            message: hint,
-        });
-    }
     let all_known: Vec<&str> = ElementKind::all_names()
         .chain(KNOWN_DIRECTIVES.iter().copied())
         .collect();
@@ -1330,137 +1259,6 @@ fn parse_element_kind(s: &str, line_num: usize) -> Result<ElementKind, ParseErro
     Err(ParseError {
         line: line_num,
         message,
-    })
-}
-
-/// Directives and element names removed when the language was simplified,
-/// with what replaces each. `htmlang upgrade` rewrites all of them.
-const REMOVED_SYNTAX: &[(&str, &str)] = &[
-    ("@fn", "use `@let name $param` with an indented body"),
-    ("@define", "use `@let name [attributes]`"),
-    ("@mixin", "use `@let name [attributes]`"),
-    ("@unless", "use `@if not <condition>`"),
-    ("@for", "use `@each $i in 1..10`"),
-    ("@repeat", "use `@each $_ in 1..N`"),
-    (
-        "@switch",
-        "use `@match`, with `@let __switch [...]` inside a case for its attributes",
-    ),
-    ("@use", "use `@include`"),
-    (
-        "@import",
-        "use `@include` (a file with only definitions emits no content)",
-    ),
-    ("@with", "use `@let alias $source`"),
-    (
-        "@layout",
-        "make the layout a function (`@let layout` with `@children`) and call it",
-    ),
-    (
-        "@extends",
-        "make the layout a function (`@let layout` with `@children` and `@slot`), \
-         `@include` its file and call it",
-    ),
-    ("@scope", "write the `@scope` rule in an `@style` block"),
-    (
-        "@starting-style",
-        "write the `@starting-style` rule in an `@style` block",
-    ),
-    ("@css-property", "write an `@property` rule in an `@style` block"),
-    ("@lang", "use `@page [lang ...] Title`"),
-    ("@favicon", "use `@page [favicon ...] Title`"),
-    ("@canonical", "write `<link rel=\"canonical\" href=\"...\">` in `@head`"),
-    ("@base", "write `<base href=\"...\">` in `@head`"),
-    ("@og", "use `@meta og:NAME VALUE`"),
-    ("@debug", "removed: a layout needs no compile-time messages"),
-    ("@svg", "use `@image [inline] file.svg`"),
-    ("@match", "use `@if $x == a` / `@else if $x == b` / `@else`"),
-    ("@case", "use `@if $x == a` / `@else if $x == b` / `@else`"),
-    ("@default", "use `@else` in an `@if` chain"),
-    ("@theme", "use a `@let --name value` line per token"),
-    (
-        "@json-ld",
-        "put a `<script type=\"application/ld+json\">` in `@head`",
-    ),
-    ("@font-face", "write the `@font-face` rule in an `@style` block"),
-    (
-        "@manifest",
-        "write a manifest.json file and link it from `@head`",
-    ),
-    ("@breakpoint", "write the media query in an `@style` block"),
-    ("@deprecated", "remove it"),
-    (
-        "@collection",
-        "use `@data $name dir/*.json` (each file becomes `$name.STEM.key`)",
-    ),
-    ("@env", "use `@data $name env:NAME [default]`"),
-    (
-        "@fetch",
-        "download the data before building and use `@data $name file.json`",
-    ),
-    (
-        "@translations",
-        "put each locale's strings in a JSON file and use `@data $t locales/$lang.json`",
-    ),
-    ("@defer", "remove it: the content is already in the page"),
-    ("@keyframes", "write the CSS `@keyframes` rule in `@style`"),
-    ("@log", "removed: a layout needs no compile-time messages"),
-    ("@warn", "removed: a layout needs no compile-time messages"),
-    ("@assert", "removed: a layout needs no compile-time checks"),
-    (
-        "@component",
-        "use `@let`: an `@style` block in a function body is scoped to it",
-    ),
-    ("@col", "use `@el`"),
-    ("@p", "use `@paragraph`"),
-    ("@img", "use `@image`"),
-    ("@btn", "use `@button`"),
-    ("@divider", "use `@hr`"),
-    ("@opt", "use `@option`"),
-];
-
-/// Attributes that became standard-library bundles or plain CSS.
-fn removed_attribute_hint(name: &str) -> Option<&'static str> {
-    match name {
-        "skeleton" => Some("write the animation in `@style`"),
-        "no-scrollbar" => Some("use `scrollbar-width none`"),
-        "gradient" => Some("use `background linear-gradient(...)`"),
-        "animate" => Some("use `animation`"),
-        "inset-area" => Some("use `position-area`"),
-        "gap-x" => Some("use `column-gap`"),
-        "gap-y" => Some("use `row-gap`"),
-        "shadow" => Some("use `box-shadow`"),
-        "blur" => Some("use `filter blur(...)`"),
-        "backdrop-blur" => Some("use `backdrop-filter blur(...)`"),
-        "truncate" => Some("use the `$truncate` bundle"),
-        "critical" => Some("remove it"),
-        "grid" => Some("use `@grid`, or `display grid`"),
-        "bold" => Some("use `font-weight bold`"),
-        "italic" => Some("use `font-style italic`"),
-        "underline" => Some("use `text-decoration underline`"),
-        "size" => Some("use `font-size`"),
-        "rounded" => Some("use `border-radius`"),
-        "hidden" => Some("use `display none`"),
-        "padding-x" => Some("use `padding-inline`"),
-        "padding-y" => Some("use `padding-block`"),
-        "margin-x" => Some("use `margin-inline`"),
-        "margin-y" => Some("use `margin-block`"),
-        _ => None,
-    }
-}
-
-/// If `content` starts with removed syntax, the error message for it.
-fn removed_syntax_hint(content: &str) -> Option<String> {
-    let trimmed = content.trim_start();
-    REMOVED_SYNTAX.iter().find_map(|(name, replacement)| {
-        let rest = trimmed.strip_prefix(name)?;
-        if !(rest.is_empty() || rest.starts_with([' ', '['])) {
-            return None;
-        }
-        Some(format!(
-            "`{}` was removed: {} (run `htmlang upgrade` to rewrite it automatically)",
-            name, replacement
-        ))
     })
 }
 
@@ -2092,19 +1890,6 @@ fn parse_attr_list(
 
         track_var_refs(part, &mut ctx.used_variables);
 
-        if let Some((attr, condition)) = split_trailing_if(part) {
-            ctx.diagnostics.push(Diagnostic {
-                line: line_num,
-                column: None,
-                message: format!(
-                    "`KEY if CONDITION` was removed: write `if({}, {})`",
-                    condition, attr
-                ),
-                severity: Severity::Error,
-                source_line: None,
-            });
-            continue;
-        }
         // A value `if(cond, a, b)` picks `a` or `b` (free text) by `cond`;
         // an empty choice leaves the attribute out.
         let Some(part) = choose_if_value(part, ctx, line_num) else {
@@ -2171,22 +1956,7 @@ fn parse_attr_list(
             let base_key = crate::vocab::base_attribute(attr.key.as_str());
             let is_boolean_html =
                 attr.value.is_none() && crate::vocab::BOOLEAN_HTML_ATTRS.contains(&base_key);
-            // A removed attribute that shares its name with a CSS property
-            // (bare `grid`) still gets its hint.
-            let removed = removed_attribute_hint(base_key)
-                .filter(|_| attr.value.is_none() || !crate::vocab::is_css_property(base_key));
-            if let Some(hint) = removed {
-                ctx.diagnostics.push(Diagnostic {
-                    line: line_num,
-                    column: None,
-                    message: format!(
-                        "attribute '{}' was removed: {} (run `htmlang upgrade`)",
-                        base_key, hint
-                    ),
-                    severity: Severity::Warning,
-                    source_line: None,
-                });
-            } else if is_boolean_html || crate::vocab::is_style_attribute(base_key) {
+            if is_boolean_html || crate::vocab::is_style_attribute(base_key) {
                 validate_attr_value(&attr, line_num, ctx);
             } else if crate::vocab::HTML_ATTRIBUTES.contains(&base_key)
                 || base_key.starts_with("aria-")
@@ -2196,7 +1966,7 @@ fn parse_attr_list(
                     line: line_num,
                     column: None,
                     message: format!(
-                        "'{}' is an HTML attribute: write `{}={}` (run `htmlang upgrade`)",
+                        "'{}' is an HTML attribute: write `{}={}`",
                         attr.key,
                         attr.key,
                         attr.value.as_deref().unwrap_or("")
@@ -2480,27 +2250,6 @@ fn numeric_range(start: i64, end: i64, step: i64) -> Vec<String> {
 }
 
 
-
-/// Find a leftover `key if condition` (ignoring ` if ` inside parentheses
-/// or quotes), to point at `if()`.
-fn split_trailing_if(part: &str) -> Option<(&str, &str)> {
-    let mut depth = 0;
-    let mut quote = None;
-    for (i, c) in part.char_indices() {
-        match c {
-            '"' | '\'' if quote == Some(c) => quote = None,
-            '"' | '\'' if quote.is_none() => quote = Some(c),
-            _ if quote.is_some() => {}
-            '(' => depth += 1,
-            ')' => depth -= 1,
-            _ if depth == 0 && part[i..].starts_with(" if ") => {
-                return Some((&part[..i], part[i + 4..].trim()));
-            }
-            _ => {}
-        }
-    }
-    None
-}
 
 /// Evaluate `if(cond, a)` or `if(cond, a, b)` when it is all of `text`,
 /// returning the chosen branch (empty when `cond` fails and there is no `b`).
@@ -3041,29 +2790,6 @@ fn inline_svg(node: Node, line_num: usize, ctx: &mut ParseContext) -> Node {
         svg = set_svg_attr(&svg, target, value);
     }
     Node::Raw(svg)
-}
-
-/// The first `$name|filter` (old filter syntax) in `text`, as (name, filter).
-fn old_filter_syntax(text: &str) -> Option<(String, String)> {
-    const FILTERS: &[&str] = &[
-        "uppercase", "lowercase", "capitalize", "trim", "length", "reverse", "truncate",
-        "replace", "default", "lighten", "darken", "alpha", "mix",
-    ];
-    let mut rest = text;
-    while let Some(pos) = rest.find('$') {
-        let after = &rest[pos + 1..];
-        let end = after
-            .find(|c: char| !(c.is_alphanumeric() || matches!(c, '_' | '-' | '.')))
-            .unwrap_or(after.len());
-        if let Some(filter) = after[end..].strip_prefix('|') {
-            let name_end = filter.find(|c: char| !c.is_ascii_alphabetic()).unwrap_or(filter.len());
-            if end > 0 && FILTERS.contains(&&filter[..name_end]) {
-                return Some((after[..end].to_string(), filter[..name_end].to_string()));
-            }
-        }
-        rest = &after[end..];
-    }
-    None
 }
 
 /// Index of the `}` matching the `{` that `s` starts with (skipping

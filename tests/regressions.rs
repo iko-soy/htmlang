@@ -423,12 +423,7 @@ fn raw_takes_an_indented_body() {
 }
 
 #[test]
-fn style_aliases_point_to_css() {
-    let result = parser::parse("@el [bold, size 18, font-weight bold]\n  x");
-    let messages: Vec<&str> = result.diagnostics.iter().map(|d| d.message.as_str()).collect();
-    assert!(messages.iter().any(|m| m.contains("`font-weight bold`")), "{:?}", messages);
-    assert!(messages.iter().any(|m| m.contains("`font-size`")), "{:?}", messages);
-    // Border shorthands get px like other lengths
+fn border_shorthands_get_px() {
     let out = compile("@el [border 1 solid red, border-radius 4 4 0 0] x");
     assert!(out.contains("border:1px solid red"), "{}", out);
     assert!(out.contains("border-radius:4px 4px 0 0"), "{}", out);

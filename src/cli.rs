@@ -3,7 +3,7 @@ use std::process;
 
 /// Subcommands understood by the CLI.
 pub const COMMANDS: &[&str] = &[
-    "build", "serve", "watch", "check", "lint", "fmt", "upgrade", "lsp",
+    "build", "serve", "watch", "check", "lint", "fmt", "lsp",
 ];
 
 pub fn print_help() {
@@ -26,7 +26,6 @@ Commands:
   lint <file.hl | dir> [--format json]
                         Stricter checks (accessibility, nesting)
   fmt <file.hl>         Format a file in place
-  upgrade [dir|file]    Rewrite removed or renamed syntax
   lsp                   Start the language server (stdio)
 
 Options:

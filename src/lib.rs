@@ -4,4 +4,3 @@ pub use htmlang_core::parser;
 pub use htmlang_core::vocab;
 pub mod fmt;
 pub mod serve;
-pub mod upgrade;

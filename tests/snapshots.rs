@@ -725,59 +725,6 @@ fn ol_renders_ol() {
     assert!(output.contains("<li"));
 }
 
-#[test]
-fn removed_aliases_point_to_upgrade() {
-    for (src, replacement) in [
-        ("@divider", "@hr"),
-        ("@el > @col x", "@el"),
-        ("Say {@img a.png}", "@image"),
-    ] {
-        let diags = parse_diagnostics(src);
-        assert!(
-            diags.iter().any(|d| d.message.contains(replacement)
-                && d.message.contains("htmlang upgrade")),
-            "{:?} should point to {}: {:?}",
-            src,
-            replacement,
-            diags
-        );
-    }
-}
-
-#[test]
-fn removed_directives_point_to_upgrade() {
-    for src in [
-        "@unless $x\n  hi",
-        "@for $i in 1..2\n  $i",
-        "@repeat 2\n  hi",
-        "@switch $v\n  @case a\n    hi",
-        "@use \"a.hl\" x",
-        "@import a.hl",
-        "@with $a as b\n  hi",
-        "@layout base.hl\n  hi",
-        "@scope .c\n  .t {}",
-        "@starting-style\n  .t {}",
-        "@css-property --x\n  syntax \"*\"",
-        "@fn card $t\n  @text $t",
-        "@define c [bold]",
-    ] {
-        let diags = parse_diagnostics(src);
-        assert!(
-            diags.iter().any(|d| d.message.contains("was removed")
-                && d.message.contains("htmlang upgrade")),
-            "{:?} should report removed syntax: {:?}",
-            src,
-            diags
-        );
-    }
-}
-
-#[test]
-fn user_function_may_reuse_a_removed_name() {
-    let output = compile("@page T\n@let divider\n  @hr\n@divider");
-    assert!(output.contains("<hr"), "{}", output);
-}
-
 // ---------------------------------------------------------------------------
 // Feature tests: table elements
 // ---------------------------------------------------------------------------
@@ -1029,16 +976,6 @@ fn theme_color_meta_from_theme() {
 fn aria_live_passthrough() {
     let output = compile("@page T\n@el [aria-live=polite]\n  updating");
     assert!(output.contains("aria-live=\"polite\""));
-}
-
-#[test]
-fn defer_directive_was_removed() {
-    let diags = parse_diagnostics("@page T\n@defer\n  @el\n    Lazy content");
-    assert!(
-        diags.iter().any(|d| d.message.contains("`@defer` was removed")),
-        "{:?}",
-        diags
-    );
 }
 
 #[test]
@@ -2789,17 +2726,6 @@ fn test_css_shorthands_output() {
         "backdrop-blur should work, got: {}",
         html
     );
-
-    // `gradient` became plain CSS: the compiler points to the replacement.
-    let result = htmlang::parser::parse("@el [gradient #fff #000] Content");
-    assert!(
-        result
-            .diagnostics
-            .iter()
-            .any(|d| d.message.contains("linear-gradient") && d.message.contains("upgrade")),
-        "gradient should point to linear-gradient: {:?}",
-        result.diagnostics
-    );
 }
 
 #[test]
@@ -2814,16 +2740,6 @@ fn test_import_missing_file() {
         has_use_error,
         "@include should report error for missing file, got: {:?}",
         result.diagnostics
-    );
-}
-
-#[test]
-fn keyframes_was_removed() {
-    let diags = parse_diagnostics("@keyframes fade\n  from [opacity 0]\n");
-    assert!(
-        diags.iter().any(|d| d.message.contains("`@keyframes` rule in `@style`")),
-        "{:?}",
-        diags
     );
 }
 
@@ -2856,27 +2772,6 @@ fn test_theme_directive() {
     // Values are written as given: a matching literal is not turned into
     // `var(--primary)`
     assert!(html.contains("background:#3b82f6"), "{}", html);
-}
-
-#[test]
-fn deprecated_was_removed() {
-    let diags = parse_diagnostics("@deprecated old\n@let card\n  @text x");
-    assert!(diags.iter().any(|d| d.message.contains("`@deprecated` was removed")), "{:?}", diags);
-}
-
-#[test]
-fn test_extends_was_removed() {
-    let result = htmlang::parser::parse("@extends layout.hl\n@slot content\n  Hello");
-    let has_error = result.diagnostics.iter().any(|d| {
-        d.message.contains("was removed")
-            && d.message.contains("function")
-            && d.severity == htmlang::parser::Severity::Error
-    });
-    assert!(
-        has_error,
-        "@extends should point at layout functions, got: {:?}",
-        result.diagnostics
-    );
 }
 
 #[test]
@@ -3533,19 +3428,6 @@ fn conditional_attribute_can_pick_a_bundle() {
     assert!(!html.contains("bold"), "{}", html);
 }
 
-#[test]
-fn key_if_condition_was_removed() {
-    let result = htmlang::parser::parse("@let on true\n@el [bold if $on]\n  test\n");
-    assert!(
-        result
-            .diagnostics
-            .iter()
-            .any(|d| d.message.contains("was removed") && d.message.contains("if($on, bold)")),
-        "{:?}",
-        result.diagnostics
-    );
-}
-
 // -----------------------------------------------------------------------
 // @component tests
 // -----------------------------------------------------------------------
@@ -3632,20 +3514,6 @@ fn minified_strips_comments() {
     // Dev mode has comments, minified should not
     assert!(dev.contains("<!--"));
     assert!(!minified.contains("<!--"));
-}
-
-// -----------------------------------------------------------------------
-// Critical CSS test
-// -----------------------------------------------------------------------
-
-#[test]
-fn critical_attr_was_removed() {
-    let diags = parse_diagnostics("@el [critical, padding 20]\n  test\n");
-    assert!(
-        diags.iter().any(|d| d.message.contains("'critical' was removed")),
-        "{:?}",
-        diags
-    );
 }
 
 // -----------------------------------------------------------------------
@@ -4070,12 +3938,6 @@ fn starting_style_generates_css() {
 }
 
 #[test]
-fn manifest_was_removed() {
-    let diags = parse_diagnostics("@page App\n@manifest My App\n  display standalone\n@text hi");
-    assert!(diags.iter().any(|d| d.message.contains("`@manifest` was removed")), "{:?}", diags);
-}
-
-#[test]
 fn subgrid_support() {
     let output = compile("@el [grid-template-columns subgrid]");
     assert!(
@@ -4128,12 +3990,6 @@ fn snapshot_translations_i18n() {
 }
 
 #[test]
-fn each_pagination_was_removed() {
-    let diags = parse_diagnostics("@each $item in a,b,c [page 2]\n  @text $item");
-    assert!(diags.iter().any(|d| d.message.contains("pagination")), "{:?}", diags);
-}
-
-#[test]
 fn snapshot_env_directive() {
     snapshot_test("env_directive");
 }
@@ -4149,16 +4005,6 @@ fn snapshot_responsive_images() {
 }
 
 // --- Inline tests for batch 2 ---
-
-#[test]
-fn translations_point_to_data_files() {
-    let diags = parse_diagnostics("@translations\n  en:\n    hello Hi");
-    assert!(
-        diags.iter().any(|d| d.message.contains("@data $t locales/$lang.json")),
-        "{:?}",
-        diags
-    );
-}
 
 #[test]
 fn source_map_generation() {
@@ -4235,16 +4081,6 @@ fn env_directive_warning_when_missing() {
         !warnings.is_empty(),
         "env: data should warn when unset, got: {:?}",
         result.diagnostics
-    );
-}
-
-#[test]
-fn fetch_was_removed() {
-    let diags = parse_diagnostics("@fetch $data https://example.com/api");
-    assert!(
-        diags.iter().any(|d| d.message.contains("`@fetch` was removed")),
-        "{:?}",
-        diags
     );
 }
 

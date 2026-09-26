@@ -310,14 +310,6 @@ h1{{color:#ff6b6b;margin-bottom:1rem;font-size:1.5rem}}
     )
 }
 
-/// Whether two paths name the same file (by canonical path when both exist).
-fn same_file(a: &Path, b: &Path) -> bool {
-    match (a.canonicalize(), b.canonicalize()) {
-        (Ok(a), Ok(b)) => a == b,
-        _ => a == b,
-    }
-}
-
 fn collect_hl_files_recursive(dir: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     collect_hl_recursive_inner(dir, &mut files);
@@ -1001,104 +993,6 @@ fn main() {
                     ..Default::default()
                 },
             );
-        }
-        return;
-    }
-
-
-    // Handle "upgrade" subcommand: rewrite removed or renamed syntax to its
-    // current form.
-    if args.len() >= 2 && args[1] == "upgrade" {
-        let target = if args.len() >= 3 { &args[2] } else { "." };
-        let path = Path::new(target);
-        let hl_files = if path.is_dir() {
-            collect_hl_files_recursive(path)
-        } else {
-            vec![PathBuf::from(target)]
-        };
-        if hl_files.is_empty() {
-            eprintln!("no .hl files found in {}", target);
-            process::exit(1);
-        }
-        // Layouts used with `@extends` (or the older `@layout file.hl`)
-        // become functions; find them before the pages are rewritten.
-        let mut layouts: Vec<(PathBuf, String)> = Vec::new();
-        for file in &hl_files {
-            let Ok(input) = fs::read_to_string(file) else {
-                continue;
-            };
-            for line in input.lines() {
-                let trimmed = line.trim();
-                let Some(arg) = trimmed
-                    .strip_prefix("@extends ")
-                    .or_else(|| trimmed.strip_prefix("@layout "))
-                    .map(|a| a.trim().trim_matches('"'))
-                    .filter(|a| a.ends_with(".hl"))
-                else {
-                    continue;
-                };
-                let layout = file.parent().unwrap_or(Path::new(".")).join(arg);
-                if !layouts.iter().any(|(p, _)| same_file(p, &layout)) {
-                    layouts.push((layout, htmlang::upgrade::layout_function_name(arg)));
-                }
-            }
-        }
-        let mut total_changes = 0usize;
-        let mut needs_manual = false;
-        let outside: Vec<PathBuf> = layouts
-            .iter()
-            .map(|(p, _)| p.clone())
-            .filter(|p| !hl_files.iter().any(|f| same_file(f, p)))
-            .collect();
-        for file in hl_files.iter().chain(&outside) {
-            let input = match fs::read_to_string(file) {
-                Ok(s) => s,
-                Err(_) => continue,
-            };
-            let result = htmlang::upgrade::upgrade(&input);
-            for (line, message) in &result.manual {
-                eprintln!("{}:{}: manual change needed: {}", file.display(), line, message);
-                needs_manual = true;
-            }
-            if result.changes > 0 {
-                match fs::write(file, &result.output) {
-                    Ok(()) => {
-                        eprintln!(
-                            "upgraded {} ({} change{})",
-                            file.display(),
-                            result.changes,
-                            if result.changes == 1 { "" } else { "s" }
-                        );
-                        total_changes += result.changes;
-                    }
-                    Err(e) => eprintln!("error: {}: {}", file.display(), e),
-                }
-            }
-        }
-        for (layout, name) in &layouts {
-            let Ok(input) = fs::read_to_string(layout) else {
-                eprintln!("{}: layout not found, convert it by hand", layout.display());
-                needs_manual = true;
-                continue;
-            };
-            let Some(output) = htmlang::upgrade::convert_layout(&input, name) else {
-                continue;
-            };
-            match fs::write(layout, output) {
-                Ok(()) => {
-                    eprintln!("upgraded {} (layout is now `@let {}`)", layout.display(), name);
-                    total_changes += 1;
-                }
-                Err(e) => eprintln!("error: {}: {}", layout.display(), e),
-            }
-        }
-        if total_changes == 0 && !needs_manual {
-            eprintln!("no upgrades needed — all files are up to date");
-        } else if total_changes > 0 {
-            eprintln!("\n{} total change(s) applied", total_changes);
-        }
-        if needs_manual {
-            process::exit(1);
         }
         return;
     }

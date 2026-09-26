@@ -26,7 +26,7 @@ Linux, macOS, and Windows. Your change should pass all three.
   - `std.hl` — the standard library, written in htmlang and loaded before
     every file.
 - `crates/htmlang-wasm/` — thin wrapper exposing `compile` to the web playground.
-- `src/` — CLI, dev server, formatter, and `upgrade` (syntax migrations).
+- `src/` — CLI, dev server and formatter.
 - `src/bin/htmlang_lsp/` — language server binary (`htmlang-lsp`). Its
   completions come from the compiler's tables; hover and completion text live
   in `docs.rs`.
@@ -48,9 +48,7 @@ Linux, macOS, and Windows. Your change should pass all three.
    describe it in the LSP's `docs.rs`.
 3. Document it in `DESIGN.md` (the examples there are compiled by the tests).
    If it's user-facing, also update `README.md`.
-4. If it removes or renames syntax, add a rewrite to `src/upgrade.rs` and a
-   hint to `REMOVED_SYNTAX` in the parser.
-5. If it changes the CLI surface, update the `--help` output.
+4. If it changes the CLI surface, update the `--help` output.
 
 ## Style
 

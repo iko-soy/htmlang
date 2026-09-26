@@ -54,7 +54,6 @@ htmlang serve .              # dev server with live reload
 | `check <file\|dir> [--format json]` | Report diagnostics without writing output |
 | `lint <file\|dir> [--format json]` | Stricter checks (accessibility, nesting) |
 | `fmt <file.hl>` | Format a file in place |
-| `upgrade [dir\|file]` | Rewrite syntax from older versions of the language |
 | `lsp` | Run the language server over stdio |
 
 Compiling directly also takes `--dev`, `--strict`, `--partial`,
