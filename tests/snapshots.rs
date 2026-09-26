@@ -3750,11 +3750,14 @@ fn key_if_condition_was_removed() {
 
 #[test]
 fn function_with_style_is_scoped() {
+    // The scope class goes on the root element: no wrapper
     let html = compile(
-        "@let card $title\n  @style\n    .t { color: red; }\n  @text [class=t] $title\n@card [title Hello]\n",
+        "@let card $title\n  @style\n    & { padding: 4px; }\n    .t { color: red; }\n  @el [class=box]\n    @text [class=t] $title\n@card [title Hello]\n",
     );
-    assert!(html.contains("hl-card\"><span class=\"t\">Hello"), "{}", html);
-    assert!(html.contains(".hl-card {.t { color: red; }}"), "{}", html);
+    assert!(html.contains("<div class=\"a box hl-card\"><span class=\"t\">Hello"), "{}", html);
+    assert!(html.contains(".hl-card {& { padding: 4px; }.t { color: red; }}"), "{}", html);
+    let diags = parse_diagnostics("@let pair\n  @style\n    p { color: red; }\n  @text A\n  @text B\n@pair\n");
+    assert!(diags.iter().any(|d| d.message.contains("no single root element to scope it to")), "{:?}", diags);
 }
 
 #[test]

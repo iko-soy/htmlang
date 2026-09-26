@@ -294,7 +294,8 @@ A function is called like an element:
   caller's `@slot name` block replaces `@slot name` (the slot's own children are
   the default).
 - An `@style` block at the top of the body is scoped to the function: its rules
-  only apply inside the function's output.
+  apply inside the function's root element (`&` is the root itself). The
+  body needs a single root element.
 
 ```
 @let note $kind=info

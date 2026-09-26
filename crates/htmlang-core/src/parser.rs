@@ -1144,46 +1144,67 @@ impl Evaluator {
         let mut result_nodes =
             replace_children_and_slots(body_nodes, &caller_children, &slot_contents);
 
-        if !forwarded.is_empty() {
+        // Attributes that aren't parameters style the function's root
+        // element, and a scoped @style's class goes on it too.
+        let scope_class = ctx.scoped_functions.contains(name).then(|| format!("hl-{}", name));
+        if !forwarded.is_empty() || scope_class.is_some() {
             let mut roots = result_nodes.iter_mut().filter_map(|n| match n {
                 Node::Element(e) => Some(e),
                 _ => None,
             });
-            match (roots.next(), roots.next()) {
-                (Some(root), None) => root.attrs.extend(forwarded),
-                _ => ctx.diagnostics.push(Diagnostic {
+            let root = match (roots.next(), roots.next()) {
+                (Some(root), None) => Some(root),
+                _ => None,
+            };
+            let mut problems = Vec::new();
+            match root {
+                Some(root) => {
+                    root.attrs.extend(forwarded);
+                    if let Some(class) = scope_class {
+                        match root.attrs.iter_mut().find(|a| a.html && a.key == "class") {
+                            Some(attr) => {
+                                let existing = attr.value.take().unwrap_or_default();
+                                attr.value = Some(format!("{} {}", existing, class).trim().to_string());
+                            }
+                            None => root.attrs.push(Attribute {
+                                key: "class".to_string(),
+                                value: Some(class),
+                                html: true,
+                            }),
+                        }
+                    }
+                }
+                None => {
+                    if !forwarded.is_empty() {
+                        problems.push(format!(
+                            "attributes {} on @{} are not parameters, and its body has no single \
+                             root element to receive them",
+                            forwarded
+                                .iter()
+                                .map(|a| format!("'{}'", a.key))
+                                .collect::<Vec<_>>()
+                                .join(", "),
+                            name
+                        ));
+                    }
+                    if scope_class.is_some() {
+                        problems.push(format!(
+                            "@{} has a scoped @style, but its body has no single root element \
+                             to scope it to",
+                            name
+                        ));
+                    }
+                }
+            }
+            for message in problems {
+                ctx.diagnostics.push(Diagnostic {
                     line: line_num,
                     column: None,
-                    message: format!(
-                        "attributes {} on @{} are not parameters, and its body has no single \
-                         root element to receive them",
-                        forwarded
-                            .iter()
-                            .map(|a| format!("'{}'", a.key))
-                            .collect::<Vec<_>>()
-                            .join(", "),
-                        name
-                    ),
+                    message,
                     severity: Severity::Warning,
                     source_line: Some(content.to_string()),
-                }),
+                });
             }
-        }
-
-        // A function with a scoped @style wraps its output in the scope class
-        if ctx.scoped_functions.contains(name) {
-            let wrapper = Element {
-                kind: ElementKind::El,
-                attrs: vec![Attribute {
-                    key: "class".to_string(),
-                    value: Some(format!("hl-{}", name)),
-                    html: true,
-                }],
-                argument: None,
-                children: result_nodes,
-                line_num,
-            };
-            result_nodes = vec![Node::Element(wrapper)];
         }
 
         Ok(result_nodes)
