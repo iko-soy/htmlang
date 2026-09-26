@@ -10,8 +10,7 @@
 //! or      := and ("or" and)*
 //! and     := not ("and" not)*
 //! not     := "not" not | compare
-//! compare := sum (("==" | "!=" | "<" | ">" | "<=" | ">=" | "contains"
-//!                  | "starts-with" | "ends-with") sum)?
+//! compare := sum (("==" | "!=" | "<" | ">" | "<=" | ">=") sum)?
 //! sum     := product (("+" | "-") product)*
 //! product := unary (("*" | "/" | "%") unary)*
 //! unary   := "-" unary | primary
@@ -22,7 +21,8 @@
 //! A bare word (`dark`, `red`, `#3b82f6`, `10px`) is a string. A variable
 //! loaded from a JSON array is a list: `length` counts its items and
 //! `contains` tests membership. Functions:
-//! `if(cond, a, b)`, text (`uppercase`, `lowercase`, `capitalize`, `trim`,
+//! `if(cond, a, b)`, tests (`contains(s, x)`, `starts-with(s, x)`,
+//! `ends-with(s, x)`), text (`uppercase`, `lowercase`, `capitalize`, `trim`,
 //! `length`, `reverse`, `truncate(s, n)`, `replace(s, old, new)`,
 //! `default(s, fallback)`) and colors (`lighten(c, pct)`, `darken(c, pct)`,
 //! `alpha(c, a)`, `mix(c1, c2, pct)`). In text, `${expr}` interpolates an
@@ -255,15 +255,7 @@ impl Parser<'_> {
 
     fn compare(&mut self) -> Result<Value, String> {
         let left = self.sum()?;
-        let op = if let Some(op) = self.eat_op(&["==", "!=", "<=", ">=", "<", ">"]) {
-            op
-        } else if self.eat_word("contains") {
-            "contains"
-        } else if self.eat_word("starts-with") {
-            "starts-with"
-        } else if self.eat_word("ends-with") {
-            "ends-with"
-        } else {
+        let Some(op) = self.eat_op(&["==", "!=", "<=", ">=", "<", ">"]) else {
             return Ok(left);
         };
         let right = self.sum()?;
@@ -282,12 +274,6 @@ impl Parser<'_> {
             (">", None) => l > r,
             ("<=", None) => l <= r,
             (">=", None) => l >= r,
-            ("contains", _) => match &left {
-                Value::List(items) => items.contains(&r),
-                _ => l.contains(&r),
-            },
-            ("starts-with", _) => l.starts_with(&r),
-            ("ends-with", _) => l.ends_with(&r),
             _ => unreachable!(),
         }))
     }
@@ -401,6 +387,15 @@ fn call(name: &str, args: Vec<Value>) -> Result<Value, String> {
             let then = args.pop().unwrap();
             if args[0].truthy() { then } else { otherwise }
         }
+        "contains" => {
+            arity(2)?;
+            Value::Bool(match &args[0] {
+                Value::List(items) => items.contains(&text(1)),
+                other => other.to_string().contains(&text(1)),
+            })
+        }
+        "starts-with" => { arity(2)?; Value::Bool(text(0).starts_with(&text(1))) }
+        "ends-with" => { arity(2)?; Value::Bool(text(0).ends_with(&text(1))) }
         "uppercase" => { arity(1)?; Value::Str(text(0).to_uppercase()) }
         "lowercase" => { arity(1)?; Value::Str(text(0).to_lowercase()) }
         "capitalize" => {
@@ -561,7 +556,8 @@ mod tests {
         assert!(ev("$theme == dark").truthy());
         assert!(ev("$theme != light and not $empty").truthy());
         assert!(!ev("$count < 2 or $empty").truthy());
-        assert!(ev("$name contains or").truthy());
+        assert!(ev("contains($name, or)").truthy());
+        assert!(ev("starts-with($name, Wo) and ends-with($name, ld)").truthy());
         assert!(ev("uppercase($name) == WORLD").truthy());
         assert!(ev("#3b82f6 != red").truthy());
     }
@@ -595,8 +591,8 @@ mod tests {
     #[test]
     fn lists() {
         assert_eq!(ev("length($tags)").to_string(), "2");
-        assert!(ev("$tags contains \"web dev\"").truthy());
-        assert!(!ev("$tags contains web").truthy());
+        assert!(ev("contains($tags, \"web dev\")").truthy());
+        assert!(!ev("contains($tags, web)").truthy());
         assert_eq!(ev("$tags").to_string(), "rust, web dev");
     }
 

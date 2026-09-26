@@ -346,9 +346,10 @@ Conditions and computed values (`@let x = ...`) are expressions:
 |---|---|
 | Values | numbers, `"strings"` (with `$var` interpolation), `$variables`, `true`, `false`, and bare words (`dark`, `#fff`) as strings |
 | Arithmetic | `+ - * / %` with the usual precedence, unary `-`, `( )` |
-| Comparison | `== != < > <= >=` (numeric when both sides are numbers), `contains` (in text, or as an item of a list), `starts-with`, `ends-with` |
+| Comparison | `== != < > <= >=` (numeric when both sides are numbers) |
 | Logic | `and`, `or`, `not`; empty, `false` and `0` are false |
 | Choice | `if(CONDITION, A, B)` |
+| Tests | `contains(s, x)` (in text, or as an item of a list), `starts-with(s, x)`, `ends-with(s, x)` |
 | Text functions | `uppercase(s)`, `lowercase(s)`, `capitalize(s)`, `trim(s)`, `length(s)` (a list's items, or a text's characters), `reverse(s)`, `truncate(s, n)`, `replace(s, old, new)`, `default(s, fallback)` |
 | Color functions | `lighten(c, pct)`, `darken(c, pct)`, `alpha(c, a)`, `mix(c1, c2, pct)` |
 

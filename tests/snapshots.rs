@@ -955,14 +955,14 @@ fn comparison_operators_lt() {
 
 #[test]
 fn comparison_operators_contains() {
-    let output = compile("@page T\n@let name hello world\n@if $name contains world\n  @text found");
+    let output = compile("@page T\n@let name hello world\n@if contains($name, world)\n  @text found");
     assert!(output.contains("found"));
 }
 
 #[test]
 fn comparison_operators_starts_with() {
     let output = compile(
-        "@page T\n@let url https://example.com\n@if $url starts-with https\n  @text secure",
+        "@page T\n@let url https://example.com\n@if starts-with($url, https)\n  @text secure",
     );
     assert!(output.contains("secure"));
 }
@@ -1050,7 +1050,7 @@ fn comparison_gte_lte() {
 
 #[test]
 fn comparison_ends_with() {
-    let output = compile("@page T\n@let file photo.jpg\n@if $file ends-with .jpg\n  @text image");
+    let output = compile("@page T\n@let file photo.jpg\n@if ends-with($file, .jpg)\n  @text image");
     assert!(output.contains("image"));
 }
 
