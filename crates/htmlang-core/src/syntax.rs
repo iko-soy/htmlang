@@ -105,7 +105,7 @@ pub(crate) fn parse(input: &str) -> Vec<Syntax> {
 }
 
 /// Build the nodes for the lines from `pos` indented deeper than `parent`.
-/// A `plain` block is text (the body of `@style`, `@head` or `@keyframes`),
+/// A `plain` block is text (the body of `@style` or `@head`),
 /// so no directive in it is given structure.
 fn build(lines: &[Line], pos: &mut usize, parent: Option<usize>, plain: bool) -> Vec<Syntax> {
     let mut nodes = Vec::new();
@@ -137,8 +137,7 @@ fn build(lines: &[Line], pos: &mut usize, parent: Option<usize>, plain: bool) ->
         let text_body = plain
             || text == "@style"
             || text == "@head"
-            || text.starts_with("@head ")
-            || text.starts_with("@keyframes ");
+            || text.starts_with("@head ");
         let children = build(lines, pos, Some(line.indent), text_body);
         if plain {
             nodes.push(Syntax::Line {

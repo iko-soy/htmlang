@@ -3011,28 +3011,12 @@ fn test_import_missing_file() {
 }
 
 #[test]
-fn test_enhanced_keyframes() {
-    let result = htmlang::parser::parse(
-        "@keyframes fade-in\n  from [opacity 0]\n  to [opacity 1]\n@el [animation fade-in 0.3s] Content",
-    );
-    let html = htmlang::codegen::generate(&result.document);
+fn keyframes_was_removed() {
+    let diags = parse_diagnostics("@keyframes fade\n  from [opacity 0]\n");
     assert!(
-        html.contains("@keyframes fade-in{from{opacity:0;}to{opacity:1;}}"),
-        "keyframes should parse htmlang syntax, got: {}",
-        html
-    );
-}
-
-#[test]
-fn test_keyframes_percentage() {
-    let result = htmlang::parser::parse(
-        "@keyframes slide\n  0% [transform translateX(-100%)]\n  100% [transform translateX(0)]",
-    );
-    let html = htmlang::codegen::generate(&result.document);
-    assert!(
-        html.contains("0%{transform:translateX(-100%);}"),
-        "keyframe percentage should work, got: {}",
-        html
+        diags.iter().any(|d| d.message.contains("`@keyframes` rule in `@style`")),
+        "{:?}",
+        diags
     );
 }
 
@@ -3260,7 +3244,7 @@ fn view_transition_name_passthrough() {
 #[test]
 fn animate_generates_animation_css() {
     let output = compile(
-        "@page T\n@keyframes fade\n  from [opacity 0]\n  to [opacity 1]\n@el [animation fade 0.3s ease]\n  Content",
+        "@page T\n@el [animation fade 0.3s ease]\n  Content",
     );
     assert!(
         output.contains("animation:fade 0.3s ease"),

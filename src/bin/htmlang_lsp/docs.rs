@@ -98,7 +98,6 @@ pub(crate) const DIRECTIVES: &[Doc] = &[
     doc("raw", "Pastes HTML into the output verbatim.", "@raw \"\"\"<div></div>\"\"\""),
     doc("markdown", "Markdown (indented body or file), converted to HTML.", "@markdown\n  # Title"),
     doc("style", "Raw CSS; overrides generated styles.", "@style\n  .note { color: gray; }"),
-    doc("keyframes", "CSS animation, in attribute syntax or raw CSS.", "@keyframes fade\n  from [opacity 0]\n  to [opacity 1]"),
     doc("head", "Raw HTML added to `<head>`.", "@head\n  <link rel=\"icon\" href=\"f.ico\">"),
     doc("meta", "A `<meta>` tag; `og:` names become Open Graph tags.", "@meta description A small site"),
     doc("if", "Renders its body when the condition holds; `@else if` / `@else` follow.", "@if $count > 2 and not $hidden\n  @text Many"),

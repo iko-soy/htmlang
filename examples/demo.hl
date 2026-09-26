@@ -36,10 +36,12 @@
   transition all 0.2s ease
 ]
 
--- Keyframes using attribute syntax
-@keyframes fade-up
-  from [opacity 0, transform translateY(8px)]
-  to [opacity 1, transform translateY(0)]
+-- Keyframes and other CSS go in @style
+@style
+  @keyframes fade-up {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
 
 -- Raw HTML escape hatch
 @raw """

@@ -115,7 +115,7 @@ fn css_vars_are_not_substituted_into_media_queries() {
 #[test]
 fn partial_output_includes_style_and_keyframes() {
     let result = parser::parse(
-        "@style\n  @scope (.card) { .title { font-weight: bold; } }\n@keyframes k\n  from [opacity 0]\n@text hi",
+        "@style\n  @scope (.card) { .title { font-weight: bold; } }\n  @keyframes k { from { opacity: 0 } }\n@text hi",
     );
     let out = codegen::generate_partial(&result.document);
     assert!(out.contains(".title"), "{}", out);
@@ -194,12 +194,6 @@ fn named_argument_is_not_used_positionally_for_another_param() {
     );
     assert!(out.contains("v=danger"), "{}", out);
     assert!(!out.contains("t=danger"), "{}", out);
-}
-
-#[test]
-fn keyframe_values_keep_commas_inside_parens() {
-    let out = compile("@keyframes k\n  from [transform translate(0, 0)]\n  to [opacity 1]\n@text x");
-    assert!(out.contains("transform:translate(0, 0)"), "{}", out);
 }
 
 #[test]

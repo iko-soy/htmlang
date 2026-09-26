@@ -87,9 +87,9 @@ pub(crate) fn document_symbols(text: &str) -> Vec<SymbolInformation> {
             }
         }
 
-        // @keyframes definitions
+        // @keyframes rules (in @style blocks)
         if let Some(rest) = trimmed.strip_prefix("@keyframes ") {
-            let name = rest.trim();
+            let name = rest.split(['{', ' ']).next().unwrap_or("");
             if !name.is_empty() {
                 symbols.push(SymbolInformation {
                     name: format!("@keyframes {}", name),
@@ -866,16 +866,14 @@ pub(crate) fn folding_ranges(text: &str) -> Vec<FoldingRange> {
     let mut i = 0;
     while i < lines.len() {
         let trimmed = lines[i].trim();
-        // Fold blocks that start with @let (with body), @if, @else, @each, @match, @style, @head, @keyframes
+        // Fold blocks that start with @let (with body), @if, @else, @each, @style, @head
         if trimmed.starts_with("@let ")
             || trimmed.starts_with("@if ")
             || trimmed == "@else"
             || trimmed.starts_with("@else if ")
             || trimmed.starts_with("@each ")
-            || trimmed.starts_with("@match ")
             || trimmed == "@style"
             || trimmed == "@head"
-            || trimmed.starts_with("@keyframes ")
         {
             let start_indent = lines[i].len() - lines[i].trim_start().len();
             let start_line = i;

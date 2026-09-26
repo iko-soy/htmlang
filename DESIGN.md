@@ -433,18 +433,17 @@ link). Translations are a JSON file per locale: `@data $t locales/$lang.json`.
 
 ## CSS
 
-- `@style` holds raw CSS, including at-rules such as `@scope`, `@property` and
-  `@starting-style`.
-- `@keyframes name` takes htmlang attribute syntax (`from [opacity 0]`) or raw
-  CSS.
+- `@style` holds raw CSS, including at-rules such as `@keyframes`, `@scope`,
+  `@property` and `@starting-style`.
 - Generated rules live in `@layer htmlang` (after a `hl-reset` layer), so any
   CSS in `@style` or `@raw` overrides them.
 
 ```
-@keyframes fade-in
-  from [opacity 0]
-  to [opacity 1]
 @style
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
   .note { color: gray; }
 @el [animation fade-in 0.3s ease, class=note] Fades in
 ```
@@ -485,6 +484,7 @@ removed form with its replacement.
 | `$a ~ " " ~ $b` | `"$a $b"` |
 | `@each $x in LIST [page N]` | Split the list, or filter it with `@if` |
 | `...$bundle` | `$bundle` |
+| `@keyframes NAME` with `from [opacity 0]` | The `@keyframes` rule in `@style` |
 | `@include lib.hl as ui` | `@include lib.hl`, without the `ui.` prefix |
 | `@data file.json` (keys as `$key`) | `@data $name file.json` (keys as `$name.key`) |
 | `[attrs]` alone on a line | `@el [attrs]` |

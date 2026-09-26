@@ -889,14 +889,6 @@ fn build_element_css(doc: &Document, styles: &StyleCollector, dev: bool) -> Stri
 
     element_css.push_str(&styles_css);
 
-    // @keyframes
-    for (name, kf_body) in &doc.keyframes {
-        if dev {
-            element_css.push_str(&format!("@keyframes {} {{\n{}\n}}\n", name, kf_body));
-        } else {
-            element_css.push_str(&format!("@keyframes {}{{{}}}", name, kf_body));
-        }
-    }
 
     // Keyframes for the standard library's `$skeleton` bundle, when used
     if element_css.contains("hl-skeleton") {

@@ -293,6 +293,19 @@ fn rewrite_block(
     let end = block_end(lines, i);
     let body = &lines[i + 1..end];
 
+    // @keyframes NAME with `from [opacity 0]` lines → the CSS rule in @style
+    if let Some(name) = trimmed.strip_prefix("@keyframes ") {
+        let mut out = vec![
+            format!("{pad}@style"),
+            format!("{pad}  @keyframes {} {{", name.trim()),
+        ];
+        for line in body.iter().filter(|l| !l.trim().is_empty()) {
+            out.push(format!("{pad}    {}", keyframe_css(line.trim())));
+        }
+        out.push(format!("{pad}  }}"));
+        return Some(Block { lines: out, end });
+    }
+
     // @tooltip TEXT (text shown and used as the hover tip) →
     // @tooltip [tip TEXT] TEXT
     if let Some(rest) = trimmed.strip_prefix("@tooltip ")
@@ -702,6 +715,23 @@ fn fold_head_directives(input: &str, manual: &mut Vec<(usize, String)>) -> (Stri
         text.push('\n');
     }
     (text, attrs.len())
+}
+
+/// `from [opacity 0, transform none]` → `from { opacity: 0; transform: none; }`;
+/// raw CSS is returned unchanged.
+fn keyframe_css(line: &str) -> String {
+    let Some((selector, list)) = line.split_once('[') else {
+        return line.to_string();
+    };
+    let Some(list) = list.trim_end().strip_suffix(']') else {
+        return line.to_string();
+    };
+    let declarations: Vec<String> = split_top_level_commas(list)
+        .into_iter()
+        .filter_map(|part| part.trim().split_once(' '))
+        .map(|(key, value)| format!("{}: {};", key.trim(), value.trim()))
+        .collect();
+    format!("{} {{ {} }}", selector.trim(), declarations.join(" "))
 }
 
 /// Single-line directive rewrites.
@@ -1615,6 +1645,14 @@ mod tests {
         assert_eq!(
             up("@svg [width 24, color red, class icon] a.svg"),
             "@image [inline, width 24, color red, class=icon] a.svg"
+        );
+    }
+
+    #[test]
+    fn keyframes_move_into_style() {
+        assert_eq!(
+            up("@keyframes fade\n  from [opacity 0, transform translate(0, 4px)]\n  50% { opacity: 0.5; }\n  to [opacity 1]\n@text x\n"),
+            "@style\n  @keyframes fade {\n    from { opacity: 0; transform: translate(0, 4px); }\n    50% { opacity: 0.5; }\n    to { opacity: 1; }\n  }\n@text x\n"
         );
     }
 

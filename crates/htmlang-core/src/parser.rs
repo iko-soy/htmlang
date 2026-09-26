@@ -69,7 +69,6 @@ struct ParseContext {
     variables: HashMap<String, String>,
     defines: HashMap<String, Vec<Attribute>>,
     functions: HashMap<String, FnDef>,
-    keyframes: Vec<(String, String)>,
     css_vars: Vec<(String, String)>,
     custom_css: Vec<String>,
     og_tags: Vec<(String, String)>,
@@ -157,7 +156,6 @@ pub fn parse_with_base(input: &str, base_path: Option<&Path>) -> ParseResult {
         variables: HashMap::new(),
         defines: HashMap::new(),
         functions: HashMap::new(),
-        keyframes: Vec::new(),
         css_vars: Vec::new(),
         custom_css: Vec::new(),
         og_tags: Vec::new(),
@@ -189,7 +187,6 @@ pub fn parse_with_base(input: &str, base_path: Option<&Path>) -> ParseResult {
             head_blocks: ctx.head_blocks,
             variables: ctx.variables,
             defines: ctx.defines,
-            keyframes: ctx.keyframes,
             css_vars: ctx.css_vars,
             custom_css: ctx.custom_css,
             og_tags: ctx.og_tags,
@@ -750,34 +747,6 @@ impl Evaluator {
         }
 
         // --- @each loop ---
-
-        // --- @keyframes directive ---
-
-        if let Some(rest) = content.strip_prefix("@keyframes ") {
-            let name = rest.trim().to_string();
-            if name.is_empty() {
-                return Err(ParseError {
-                    line: line_num,
-                    message: "@keyframes requires a name".to_string(),
-                });
-            }
-            let mut body = String::new();
-            for_each_line(children, &mut |node| {
-                if let Syntax::Line { text, .. } = node {
-                    let trimmed = text.trim();
-                    // Support htmlang-style: from [opacity 0] / to [opacity 1] / 50% [transform scale(1.5)]
-                    if let Some(kf_css) = parse_keyframe_line(trimmed) {
-                        body.push_str(&kf_css);
-                    } else {
-                        body.push_str(trimmed);
-                    }
-                }
-            });
-            ctx.keyframes.push((name, body));
-            return Ok(None);
-        }
-
-
 
         // --- Function call ---
 
@@ -1421,7 +1390,6 @@ const KNOWN_DIRECTIVES: &[&str] = &[
     "let",
     "include",
     "raw",
-    "keyframes",
     "if",
     "else",
     "each",
@@ -1525,6 +1493,7 @@ const REMOVED_SYNTAX: &[(&str, &str)] = &[
         "put each locale's strings in a JSON file and use `@data $t locales/$lang.json`",
     ),
     ("@defer", "remove it: the content is already in the page"),
+    ("@keyframes", "write the CSS `@keyframes` rule in `@style`"),
     ("@log", "removed: a layout needs no compile-time messages"),
     ("@warn", "removed: a layout needs no compile-time messages"),
     ("@assert", "removed: a layout needs no compile-time checks"),
@@ -3159,47 +3128,6 @@ fn matching_brace(s: &str) -> Option<usize> {
         }
     }
     None
-}
-
-/// Parse a keyframe line in htmlang syntax: `from [opacity 0]` / `50% [transform scale(1.5)]`
-fn parse_keyframe_line(line: &str) -> Option<String> {
-    let (selector, rest) = if let Some(rest) = line.strip_prefix("from") {
-        ("from", rest.trim())
-    } else if let Some(rest) = line.strip_prefix("to") {
-        ("to", rest.trim())
-    } else if let Some(pct_end) = line.find('%') {
-        let rest = line[pct_end + 1..].trim();
-        let selector = &line[..pct_end + 1];
-        (selector, rest)
-    } else {
-        return None;
-    };
-
-    if !rest.starts_with('[') || !rest.ends_with(']') {
-        return None;
-    }
-
-    let inner = &rest[1..rest.len() - 1];
-    // Parse comma-separated key-value pairs into CSS
-    let mut css = String::new();
-    for part in split_commas(inner) {
-        let part = part.trim();
-        if part.is_empty() {
-            continue;
-        }
-        if let Some((key, value)) = part.split_once(' ') {
-            css.push_str(key.trim());
-            css.push(':');
-            css.push_str(value.trim());
-            css.push(';');
-        }
-    }
-
-    if css.is_empty() {
-        return None;
-    }
-
-    Some(format!("{}{{{}}}", selector, css))
 }
 
 // ---------------------------------------------------------------------------

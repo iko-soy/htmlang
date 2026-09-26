@@ -10,7 +10,6 @@ pub struct Document {
     pub head_blocks: Vec<String>,
     pub variables: HashMap<String, String>,
     pub defines: HashMap<String, Vec<Attribute>>,
-    pub keyframes: Vec<(String, String)>,
     pub css_vars: Vec<(String, String)>,
     pub custom_css: Vec<String>,
     pub og_tags: Vec<(String, String)>,
