@@ -7477,3 +7477,59 @@ fn a_library_s_definitions_are_not_reported_unused() {
     let d = parse_diagnostics("@page T\n@let gap 8\n");
     assert_eq!(coded(&d, "unused-variable").len(), 1, "{:?}", d);
 }
+
+#[test]
+fn page_words_are_checked_where_the_page_does_not_run() {
+    // A layout's @page in a library: `favicon=`, a favicon without its
+    // file and `inline` are reported without a call
+    let d = parse_diagnostics(
+        "@let @layout\n  @page [favicon=x.png, inline, favicon] Home\n  @children\n",
+    );
+    assert_eq!(coded(&d, "parameter-form").len(), 1, "{:?}", d);
+    assert_eq!(coded(&d, "unexpected-argument").len(), 1, "{:?}", d);
+    assert_eq!(coded(&d, "missing-value").len(), 1, "{:?}", d);
+    // A file made from a parameter is given
+    let d =
+        parse_diagnostics("@let @layout [icon a.png]\n  @page [favicon $icon] Home\n  @children\n");
+    assert!(d.is_empty(), "{:?}", d);
+}
+
+#[test]
+fn page_diagnostics_point_at_their_attribute() {
+    let src = "@page [favicon a.png, inline, favicon b.png] T\n";
+    let d = parse_diagnostics(src);
+    let inline = coded(&d, "unexpected-argument");
+    assert_eq!(inline.len(), 1, "{:?}", d);
+    assert_eq!(inline[0].column, src.find("inline"), "{:?}", d);
+    // The second favicon is the one that repeats
+    let twice = coded(&d, "duplicate-attribute");
+    assert_eq!(twice.len(), 1, "{:?}", d);
+    assert_eq!(twice[0].column, src.rfind("favicon"), "{:?}", d);
+}
+
+#[test]
+fn an_included_library_s_unused_definitions_are_not_reported() {
+    let dir = std::env::temp_dir().join(format!("htmlang_test_library_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("layout.hl"),
+        "@let @layout [title]\n  @page $title\n  @children\n@let @card\n  @children\n@let gap 8\n@let box [padding 8]\n",
+    )
+    .unwrap();
+    let result = htmlang::parser::parse_with_base(
+        "@include layout.hl\n@let mine 4\n@layout [title Home]\n  x\n",
+        Some(&dir),
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+    let unused: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.code.starts_with("unused-"))
+        .collect();
+    // Only the page's own definition is reported
+    assert!(
+        unused.len() == 1 && unused[0].message.contains("'$mine'"),
+        "{:?}",
+        result.diagnostics
+    );
+}

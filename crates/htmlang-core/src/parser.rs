@@ -854,6 +854,7 @@ fn check_unevaluated_node(node: &syntax::Node, ctx: &mut ParseContext) {
                 ctx.in_page = true;
                 check_attrs(&list.attrs, line, ctx, &words);
                 ctx.in_page = false;
+                check_page_tokens(&list.attrs, line, ctx);
             }
             _ => {}
         }
@@ -933,6 +934,36 @@ fn check_head(head: &syntax::Head, line: usize, ctx: &mut ParseContext) {
 /// together: not bundles or `if()`s. Names are checked; a value with a
 /// variable in it depends on what the variable holds, so only a literal
 /// value is (the other is checked as an empty value).
+/// `@page`'s own rules (see `check_page_attr`) for a list that isn't
+/// evaluated, as written: a value made from a variable counts as given.
+fn check_page_tokens(tokens: &[syntax::Attr], line: usize, ctx: &mut ParseContext) {
+    for token in tokens {
+        match &token.choice {
+            Some(choice) => {
+                for branch in &choice.branches {
+                    check_page_tokens(branch.attrs(), line, ctx);
+                }
+            }
+            None if token.key.starts_with('$') => {}
+            None => {
+                let value = token.value.as_deref().map(|v| v.trim_matches('"'));
+                let value = match value {
+                    Some(v) if v.contains('$') => Some("$"),
+                    other => other,
+                };
+                check_page_attr(
+                    &token.key,
+                    token.html,
+                    value,
+                    line,
+                    Some(token.span.column),
+                    ctx,
+                );
+            }
+        }
+    }
+}
+
 fn literal_attrs(tokens: &[syntax::Attr]) -> Vec<syntax::Attr> {
     tokens
         .iter()
@@ -1425,8 +1456,23 @@ impl Evaluator {
             files.push((tree.clone(), import_chain.clone()));
         }
         let saved_file = ctx.current_file.replace(import_chain.clone());
+        let defined_before: HashSet<String> = ctx
+            .let_lines
+            .keys()
+            .chain(ctx.define_lines.keys())
+            .chain(ctx.fn_lines.keys())
+            .cloned()
+            .collect();
         let included_nodes = self.eval_block(&tree.nodes, ctx);
         ctx.current_file = saved_file;
+        // A library's definitions are there to be picked from: the ones a
+        // page doesn't use aren't reported (their lines aren't this file's)
+        if tree.is_library() {
+            let keep = |name: &String, _: &mut usize| defined_before.contains(name);
+            ctx.let_lines.retain(keep);
+            ctx.define_lines.retain(keep);
+            ctx.fn_lines.retain(keep);
+        }
 
         // Annotate new diagnostics with import chain
         for d in &mut ctx.diagnostics[diag_count_before..] {
@@ -2304,62 +2350,42 @@ fn read_page(
         ctx.in_page = true;
         let read = parse_attr_list(&list.attrs, line, ctx, true, &words);
         ctx.in_page = false;
+        // How many of each name have been read, to find where the next
+        // one is written
+        let mut seen: HashMap<String, usize> = HashMap::new();
         for attr in read {
             let boolean = attr.value.is_none()
                 && crate::vocab::BOOLEAN_HTML_ATTRS.contains(&attr.key.as_str());
+            // Where it is written, when it is written in the list itself
+            let nth = seen.entry(attr.key.clone()).or_default();
+            let column = list
+                .attrs
+                .iter()
+                .filter(|token| token.key == attr.key)
+                .nth(*nth)
+                .map(|token| token.span.column);
+            *nth += 1;
+            let value = attr
+                .quoted
+                .as_ref()
+                .map(|q| q.text.clone())
+                .or(attr.value.clone());
+            if !check_page_attr(&attr.key, attr.html, value.as_deref(), line, column, ctx) {
+                continue;
+            }
             if words.contains(&attr.key) {
-                if attr.html {
-                    ctx.diagnostics.push(
-                        Diagnostic::error(
-                            code::PARAMETER_FORM,
-                            line,
-                            format!(
-                                "'{0}' is @page's own word, not an HTML attribute: write `{0} {1}`",
-                                attr.key,
-                                attr.value.as_deref().unwrap_or("FILE")
-                            ),
-                        )
-                        .subject(format!("{}=", attr.key))
-                        .suggest(Some(format!("{} ", attr.key))),
-                    );
+                if page.favicon.is_some() {
+                    let diagnostic = Diagnostic::warning(
+                        code::DUPLICATE_ATTRIBUTE,
+                        line,
+                        "duplicate attribute 'favicon': the later one wins".to_string(),
+                    )
+                    .subject("favicon");
+                    ctx.diagnostics.push(at_attribute(diagnostic, column, ctx));
                 }
-                let value = attr.quoted.map(|q| q.text).or(attr.value);
-                match value.filter(|v| !v.trim().is_empty()) {
-                    Some(file) => {
-                        if page.favicon.is_some() {
-                            ctx.diagnostics.push(
-                                Diagnostic::warning(
-                                    code::DUPLICATE_ATTRIBUTE,
-                                    line,
-                                    "duplicate attribute 'favicon': the later one wins".to_string(),
-                                )
-                                .subject("favicon"),
-                            );
-                        }
-                        page.favicon = Some(file);
-                    }
-                    None => ctx.diagnostics.push(
-                        Diagnostic::error(
-                            code::MISSING_VALUE,
-                            line,
-                            "'favicon' needs its file: `favicon favicon.png`".to_string(),
-                        )
-                        .subject("favicon"),
-                    ),
-                }
+                page.favicon = value;
             } else if attr.html || boolean {
                 page.html_attrs.push(attr);
-            } else if crate::vocab::base_attribute(&attr.key) == "inline" {
-                ctx.diagnostics.push(
-                    Diagnostic::error(
-                        code::UNEXPECTED_ARGUMENT,
-                        line,
-                        "`inline` puts an image's file into the page, and @page has none: it \
-                         only goes on @image"
-                            .to_string(),
-                    )
-                    .subject("inline"),
-                );
             } else {
                 page.styles.push(attr);
             }
@@ -2370,6 +2396,71 @@ fn read_page(
         None => String::new(),
     };
     page
+}
+
+/// `@page`'s own rules for one of its attributes, checked where the
+/// `@page` runs and where it doesn't (a layout that isn't called): its
+/// word is written `favicon FILE`, and `inline` belongs to `@image`.
+/// Returns whether the attribute can be used (a `favicon` with its file,
+/// or any other attribute but `inline`).
+fn check_page_attr(
+    key: &str,
+    html: bool,
+    value: Option<&str>,
+    line: usize,
+    column: Option<usize>,
+    ctx: &mut ParseContext,
+) -> bool {
+    let report = |ctx: &mut ParseContext, diagnostic: Diagnostic| {
+        let diagnostic = at_attribute(diagnostic, column, ctx);
+        ctx.diagnostics.push(diagnostic);
+    };
+    if crate::vocab::PAGE_WORDS.contains(&key) {
+        if html {
+            report(
+                ctx,
+                Diagnostic::error(
+                    code::PARAMETER_FORM,
+                    line,
+                    format!(
+                        "'{0}' is @page's own word, not an HTML attribute: write `{0} {1}`",
+                        key,
+                        value.filter(|v| !v.is_empty()).unwrap_or("FILE")
+                    ),
+                )
+                .subject(format!("{}=", key))
+                .suggest(Some(format!("{} ", key))),
+            );
+        }
+        if value.is_none_or(|v| v.trim().is_empty()) {
+            report(
+                ctx,
+                Diagnostic::error(
+                    code::MISSING_VALUE,
+                    line,
+                    format!("'{0}' needs its file: `{0} favicon.png`", key),
+                )
+                .subject(key),
+            );
+            return false;
+        }
+        return true;
+    }
+    if !html && crate::vocab::base_attribute(key) == "inline" {
+        report(
+            ctx,
+            Diagnostic::error(
+                code::UNEXPECTED_ARGUMENT,
+                line,
+                "`inline` puts an image's file into the page, and @page has none: it only \
+                 goes on @image"
+                    .to_string(),
+            )
+            .subject("inline"),
+        );
+        return false;
+    }
+    true
 }
 
 /// A parameter passed `name=value`, the form of an HTML attribute.

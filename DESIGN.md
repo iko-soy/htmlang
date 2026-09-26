@@ -1176,8 +1176,9 @@ parameters (`@page [background $bg] $title`). A page has one `@page`, so a
 second one is an error (`duplicate-page`): the page's own next to its
 layout's, or a layout called twice. The same `@meta` tag twice is written
 once. A file that holds only `@let`s, such as `layout.hl`, is a library:
-its definitions aren't reported unused, and `htmlang build` and `htmlang
-serve` don't build it into a page of its own.
+its definitions aren't reported unused, in it or in a page that includes
+it and uses only some of them, and `htmlang build`, `serve` and `watch`
+don't build it into a page of its own.
 
 ## Page and head
 
