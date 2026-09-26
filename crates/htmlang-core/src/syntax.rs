@@ -1056,10 +1056,15 @@ fn check_body(node: &mut Node, diagnostics: &mut Vec<Diagnostic>) {
         }
         (DirectiveArgs::Text(Some(_)), BodyKind::Verbatim) if has_verbatim => problem(
             (line, source),
-            format!(
-                "@{} takes its content either on its own line or in an indented block, not both",
-                name
-            ),
+            match name {
+                "markdown" => "@markdown reads either a file named on its line or the Markdown \
+                     in its indented block, not both"
+                    .to_string(),
+                _ => format!(
+                    "@{} takes its content either on its own line or in an indented block, not both",
+                    name
+                ),
+            },
         ),
         _ => {}
     }
@@ -2541,6 +2546,16 @@ mod tests {
             };
             assert_eq!(arg.raw, "rest");
         }
+        // A line and a block together: @markdown's line is a file
+        let tree = parse("@markdown notes.md\n  # Title\n");
+        assert_eq!(codes(&tree), [code::UNEXPECTED_BODY]);
+        assert!(
+            tree.diagnostics[0]
+                .message
+                .contains("a file named on its line"),
+            "{}",
+            tree.diagnostics[0].message
+        );
         // In the indented block, `[` is content
         assert!(
             parse("@style\n  [hidden] { display: none }\n")

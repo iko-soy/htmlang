@@ -345,8 +345,12 @@ pub(crate) fn find_references_for_symbol(text: &str, symbol: &str, uri: &Url) ->
     if let Some(name) = symbol.strip_prefix('$') {
         return variable_locations(text, name, uri);
     }
+    let verbatim = tree::verbatim_lines(&htmlang::syntax::parse(text));
     let mut out = Vec::new();
     for (line_idx, line) in text.lines().enumerate() {
+        if verbatim.contains(&(line_idx as u32)) {
+            continue;
+        }
         let mut offset = 0;
         while let Some(pos) = line[offset..].find(symbol) {
             let abs_pos = offset + pos;
@@ -376,10 +380,15 @@ pub(crate) fn find_references_for_symbol(text: &str, symbol: &str, uri: &Url) ->
 }
 
 /// Every reference to the variable `name`: `$name`, `${name}`, and
-/// `$name` inside `${...}`.
+/// `$name` inside `${...}`, outside verbatim bodies (where rename leaves
+/// them too).
 fn variable_locations(text: &str, name: &str, uri: &Url) -> Vec<Location> {
+    let verbatim = tree::verbatim_lines(&htmlang::syntax::parse(text));
     let mut out = Vec::new();
     for (line_idx, line) in text.lines().enumerate() {
+        if verbatim.contains(&(line_idx as u32)) {
+            continue;
+        }
         for span in variable_refs_named(line, name) {
             out.push(Location {
                 uri: uri.clone(),
@@ -434,8 +443,13 @@ pub(crate) fn find_references(text: &str, position: Position, uri: &Url) -> Vec<
         return vec![];
     };
 
+    // Outside verbatim bodies, like rename: nothing in them is htmlang
+    let verbatim = tree::verbatim_lines(&htmlang::syntax::parse(text));
     let mut locations = Vec::new();
     for (line_idx, line_text) in text.lines().enumerate() {
+        if verbatim.contains(&(line_idx as u32)) {
+            continue;
+        }
         let mut offset = 0;
         while let Some(pos) = line_text[offset..].find(&search) {
             let abs_pos = offset + pos;
@@ -468,6 +482,27 @@ pub(crate) fn find_references(text: &str, position: Position, uri: &Url) -> Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn references_leave_out_verbatim_bodies_like_rename() {
+        // A code sample, a one-line @raw and a @style block mention `$x`
+        // and `@card` as text: they aren't references
+        let text = "@let x 1\n@let @card\n  @el $x\n@pre > @code\n  @card $x\n@raw <b>$x</b>\n@style\n  .a { content: \"$x\" }\n@card\n";
+        let uri = Url::parse("file:///tmp/none/page.hl").unwrap();
+        let lines = |found: Vec<Location>| -> Vec<u32> {
+            found.iter().map(|l| l.range.start.line).collect()
+        };
+        assert_eq!(lines(find_references(text, Position::new(2, 7), &uri)), [2]);
+        assert_eq!(
+            lines(find_references(text, Position::new(8, 2), &uri)),
+            [1, 8]
+        );
+        assert_eq!(lines(find_references_for_symbol(text, "$x", &uri)), [2]);
+        assert_eq!(
+            lines(find_references_for_symbol(text, "@card", &uri)),
+            [1, 8]
+        );
+    }
 
     #[test]
     fn rename_edits_definitions_and_references_once() {

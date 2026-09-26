@@ -87,19 +87,56 @@ pub(crate) fn definitions(text: &str) -> Vec<Def> {
         .collect()
 }
 
-/// The 0-based lines of verbatim bodies (CSS, JavaScript, HTML, Markdown),
-/// in which nothing is htmlang.
+/// The 0-based lines of verbatim bodies (CSS, JavaScript, HTML, Markdown,
+/// a code sample under `@code`), in which nothing is htmlang: the lines of
+/// an indented body, and the line of `@raw`, `@style` or `@head` whose rest
+/// is a one-line body (`@style .a { color: red }`).
 pub(crate) fn verbatim_lines(tree: &syntax::Tree) -> std::collections::HashSet<u32> {
+    verbatim_lines_where(tree, |_| true)
+}
+
+/// The 0-based lines of `@style`'s CSS, on its line or in its block.
+pub(crate) fn style_lines(tree: &syntax::Tree) -> std::collections::HashSet<u32> {
+    verbatim_lines_where(tree, |node| node.is_directive("style"))
+}
+
+/// The verbatim lines of the nodes `owner` accepts (a verbatim body's
+/// lines count as its parent's).
+fn verbatim_lines_where(
+    tree: &syntax::Tree,
+    owner: impl Fn(&Node) -> bool,
+) -> std::collections::HashSet<u32> {
     let mut lines = std::collections::HashSet::new();
     tree.walk(&mut |node| {
-        if matches!(node.kind, NodeKind::Verbatim(_)) {
-            let first = node.span.line.saturating_sub(1) as u32;
-            for line in first..first + node.line_count as u32 {
+        if !owner(node) {
+            return;
+        }
+        if has_one_line_body(node) {
+            lines.insert(node.span.line.saturating_sub(1) as u32);
+        }
+        for body in node
+            .children
+            .iter()
+            .filter(|child| matches!(child.kind, NodeKind::Verbatim(_)))
+        {
+            let first = body.span.line.saturating_sub(1) as u32;
+            for line in first..first + body.line_count as u32 {
                 lines.insert(line);
             }
         }
     });
     lines
+}
+
+/// Whether `node` is `@raw`, `@style` or `@head` with its body on its own
+/// line (`@raw <hr>`). The compiler reads that text as written, like an
+/// indented body: no `$names`. (`@markdown`'s line is a file.)
+fn has_one_line_body(node: &Node) -> bool {
+    node.directive().is_some_and(|directive| {
+        directive.spec.body == htmlang::ast::BodyKind::Verbatim
+            && directive.spec.name != "markdown"
+            && matches!(directive.args, syntax::DirectiveArgs::Text(Some(_)))
+    })
 }
 
 /// The node whose own lines include the 0-based `line`.

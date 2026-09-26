@@ -63,14 +63,18 @@ pub(crate) fn document_symbols(text: &str) -> Vec<SymbolInformation> {
         }
     }
 
-    // @keyframes rules, in @style bodies
+    // @keyframes rules, in @style's CSS (not in a code sample that shows
+    // some)
     let tree = syntax::parse(text);
-    let verbatim = lsp_tree::verbatim_lines(&tree);
+    let css = lsp_tree::style_lines(&tree);
     for (i, line) in lines.iter().enumerate() {
-        if !verbatim.contains(&(i as u32)) {
+        if !css.contains(&(i as u32)) {
             continue;
         }
-        if let Some(rest) = line.trim().strip_prefix("@keyframes ") {
+        let line = line.trim();
+        // `@style @keyframes spin { ... }` on one line
+        let line = line.strip_prefix("@style").map_or(line, str::trim_start);
+        if let Some(rest) = line.strip_prefix("@keyframes ") {
             let name = rest.split(['{', ' ']).next().unwrap_or("");
             if !name.is_empty() {
                 symbols.push(symbol(
@@ -1275,6 +1279,29 @@ mod tests {
         // `@let`, `gap`, `@style`, `@el`, `$gap`, `@card` (a call)
         assert_eq!(tokens.len(), 6, "{:?}", tokens);
         assert_eq!(tokens[5].token_type, TOKEN_FUNCTION);
+    }
+
+    #[test]
+    fn one_line_verbatim_bodies_and_code_samples_are_not_htmlang() {
+        // The rest of `@raw`'s and `@style`'s line is kept as written, and so
+        // are the lines of a code sample: no `$name` tokens there
+        let text = "@let x 1\n@raw <b>$x</b>\n@style .a { content: \"$x\" }\n@pre > @code\n  @el $x\n@markdown $x.md\n";
+        let tokens = semantic_tokens(text, &syntax::parse(text), &htmlang::parser::parse(text));
+        let mut line = 0;
+        let mut variables = Vec::new();
+        for t in &tokens {
+            line += t.delta_line;
+            if t.token_type == TOKEN_VARIABLE {
+                variables.push(line);
+            }
+        }
+        // The definition, and @markdown's file, which is read with its `$name`
+        assert_eq!(variables, [0, 5], "{:?}", tokens);
+        // @keyframes symbols come from @style's CSS, on its line or in its
+        // block, not from a code sample that shows one
+        let text = "@style @keyframes spin { to { rotate: 1turn } }\n@style\n  @keyframes fade {}\n@pre > @code\n  @keyframes shown {}\n";
+        let names: Vec<String> = document_symbols(text).into_iter().map(|s| s.name).collect();
+        assert_eq!(names, ["@keyframes spin", "@keyframes fade"]);
     }
 
     #[test]
