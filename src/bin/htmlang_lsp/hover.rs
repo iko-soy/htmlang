@@ -10,8 +10,13 @@ pub(crate) fn hover_at(text: &str, position: Position) -> Option<Hover> {
     let col = (position.character as usize).min(line.len());
     let word = word_at(line, col)?;
 
-    let doc = if word == "if" && is_if_attribute(text, position.line, line, col) {
+    // `if`, also after prefixes (`hover:if(...)`)
+    let base = htmlang::vocab::base_attribute(&word);
+    let prefix = &word[..word.len() - base.len()];
+    let doc = if base == "if" && is_if_attribute(text, position.line, line, col) {
         Some(docs::if_attribute())
+    } else if base == "if" && !prefix.is_empty() {
+        docs::hover(prefix)
     } else if let Some(var_name) = word.strip_prefix('$') {
         hover_variable(text, var_name, position.line).or_else(|| docs::hover(&word))
     } else if let Some(fn_name) = word.strip_prefix('@') {
@@ -37,18 +42,24 @@ pub(crate) fn hover_at(text: &str, position: Position) -> Option<Hover> {
 fn is_if_attribute(text: &str, line_idx: u32, line: &str, col: usize) -> bool {
     fn starts_choice(attrs: &[htmlang::syntax::Attr], at: Position) -> bool {
         attrs.iter().any(|attr| {
-            attr.choice.as_ref().is_some_and(|choice| {
-                tree::range(attr.span).start == at
-                    || choice
-                        .branches
-                        .iter()
-                        .any(|branch| starts_choice(branch.attrs(), at))
-            })
+            let prefixed = attr
+                .prefixed
+                .as_ref()
+                .is_some_and(|p| starts_choice(p.target.attrs(), at));
+            prefixed
+                || attr.choice.as_ref().is_some_and(|choice| {
+                    tree::range(attr.span).start == at
+                        || choice
+                            .branches
+                            .iter()
+                            .any(|branch| starts_choice(branch.attrs(), at))
+                })
         })
     }
+    // The word's start, after any prefixes (`hover:if`)
     let bytes = line.as_bytes();
     let mut start = col.min(bytes.len());
-    while start > 0 && is_word_byte(bytes[start - 1]) {
+    while start > 0 && is_word_byte(bytes[start - 1]) && bytes[start - 1] != b':' {
         start -= 1;
     }
     if !line[start..].starts_with("if(") {
@@ -242,6 +253,12 @@ mod tests {
         let text = "@el [\n  padding 4,\n  if($on, [if($b, gap 1)])\n]\n  x\n";
         assert!(hover_text(text, 2, 3).contains("Attributes chosen by a condition"));
         assert!(hover_text(text, 2, 12).contains("Attributes chosen by a condition"));
+        // After prefixes, and inside a prefixed group
+        let text = "@el [hover:if($on, color red), md:[if($b, gap 1)]] x
+";
+        assert!(hover_text(text, 0, 12).contains("Attributes chosen by a condition"));
+        assert!(hover_text(text, 0, 36).contains("Attributes chosen by a condition"));
+        assert!(hover_text(text, 0, 6).contains(":hover"));
     }
 
     #[test]

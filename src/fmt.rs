@@ -55,9 +55,23 @@ impl Header {
 }
 
 /// An attribute as printed: as written, except that a whole-attribute
-/// `if(CONDITION, A, B)` prints its groups like any list (`[a, b]`, on
-/// one line). A misshapen `if()` is kept as written.
+/// `if(CONDITION, A, B)` and a prefixed group (`md:[a, b]`) print their
+/// groups like any list (`[a, b]`, on one line). A misshapen `if()` or
+/// group is kept as written.
 fn attr_text(attr: &syntax::Attr) -> String {
+    if let Some(prefixed) = &attr.prefixed {
+        return match &prefixed.target {
+            syntax::Branch::Group {
+                list,
+                trailing: None,
+            } if list.closed => {
+                let attrs: Vec<String> = list.attrs.iter().map(attr_text).collect();
+                format!("{}[{}]", prefixed.prefix, attrs.join(", "))
+            }
+            syntax::Branch::Attr(target) => format!("{}{}", prefixed.prefix, attr_text(target)),
+            _ => attr.raw.clone(),
+        };
+    }
     let Some(choice) = &attr.choice else {
         return attr.raw.clone();
     };
@@ -344,6 +358,20 @@ mod tests {
         assert_eq!(format(&out), out);
         // A misshapen if() is kept as written
         let src = "@el [if($on, [padding 4] junk), if($on)]\n  a\n";
+        assert_eq!(format(src), src);
+    }
+
+    #[test]
+    fn a_prefixed_group_prints_like_a_list() {
+        let src = "@el [dark:[background   #111827,\n    border-color #1f2937], md:$card, hover:if($on,   color red)]\n  a\n";
+        let out = format(src);
+        assert_eq!(
+            out,
+            "@el [\n  dark:[background   #111827, border-color #1f2937],\n  md:$card,\n  hover:if($on, color red)\n]\n  a\n"
+        );
+        assert_eq!(format(&out), out);
+        // Text after the group's `]` is kept as written
+        let src = "@el [md:[padding 4] junk]\n  a\n";
         assert_eq!(format(src), src);
     }
 

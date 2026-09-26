@@ -46,23 +46,186 @@ pub(crate) fn short_class_name(idx: usize) -> String {
     name
 }
 
+/// When a style applies: the at-rule prefixes it is under (their ranks,
+/// see [`crate::vocab::at_rule_rank`], sorted, so `dark:md:` and `md:dark:`
+/// are one condition) and its selector prefixes, left to right as the
+/// selector reads (`hover:children:` is `.a:hover > *`).
+#[derive(Clone, Default, PartialEq, Eq, Hash, Debug)]
+struct Condition {
+    at: Vec<usize>,
+    selector: Vec<String>,
+}
+
+impl Condition {
+    /// The condition of an attribute's key, and the name after its
+    /// prefixes.
+    fn of(key: &str) -> (Condition, &str) {
+        let (prefixes, name) = crate::vocab::split_prefixes(key);
+        let mut condition = Condition::default();
+        for prefix in prefixes {
+            match crate::vocab::at_rule_rank(prefix) {
+                Some(rank) => condition.at.push(rank),
+                None => condition.selector.push(prefix.to_string()),
+            }
+        }
+        condition.at.sort_unstable();
+        condition.at.dedup();
+        (condition, name)
+    }
+
+    /// Only the at-rule part: a direction under `hover:` is the one without
+    /// it.
+    fn at_only(at: &[usize]) -> Condition {
+        Condition {
+            at: at.to_vec(),
+            selector: Vec::new(),
+        }
+    }
+
+    /// The styles go on the element's children (`children:`).
+    fn on_children(&self) -> bool {
+        self.selector.iter().any(|p| p == "children:")
+    }
+
+    /// Whether this condition holds wherever `other` does: its at-rules
+    /// are implied by `other`'s, and it has no selector or `other`'s.
+    fn holds_at(&self, other: &Condition) -> bool {
+        (self.selector.is_empty() || self.selector == other.selector)
+            && self.at.iter().all(|&a| {
+                other
+                    .at
+                    .iter()
+                    .any(|&b| crate::vocab::at_rule_implied(a, b))
+            })
+    }
+
+    /// The order the rules of each condition are written in, which the
+    /// cascade follows: no prefix, then selectors, then each at-rule
+    /// block (see [`at_order`]), with its selectors inside it.
+    fn order(&self) -> (AtOrder, SelectorOrder) {
+        (at_order(&self.at), selector_order(&self.selector))
+    }
+}
+
+/// Where a block of at-rules is written: after the rules without one; by
+/// its last (innermost) prefix in the order of
+/// [`crate::vocab::at_rule_prefixes`] (widths, media, container widths), so
+/// `md:dark:` comes with `dark:`, after it; then by length.
+type AtOrder = (bool, usize, usize, Vec<usize>);
+
+fn at_order(at: &[usize]) -> AtOrder {
+    (
+        !at.is_empty(),
+        at.last().copied().unwrap_or(0),
+        at.len(),
+        at.to_vec(),
+    )
+}
+
+/// Selector chains in the order of the prefix table (`hover:` before
+/// `active:` before `focus:` ...), then `nth:` and `has()` by their text;
+/// a chain before the longer ones it starts. A chain through `children:`
+/// comes after the others, ordered by what follows its last `children:`
+/// and then by what comes before it: only that tail counts toward its
+/// specificity (see [`selector`]), so `hover:children:` follows
+/// `children:` and wins over it on hover.
+type SelectorOrder = (bool, Vec<(usize, String)>, Vec<(usize, String)>);
+
+fn selector_order(selector: &[String]) -> SelectorOrder {
+    let table = crate::vocab::PSEUDO_PREFIXES;
+    let ranked = |chain: &[String]| -> Vec<(usize, String)> {
+        chain
+            .iter()
+            .map(|p| {
+                let rank = match table.iter().position(|(q, _)| q == p) {
+                    Some(rank) => rank,
+                    None if p.starts_with("nth:") => table.len(),
+                    None => table.len() + 1,
+                };
+                (rank, p.clone())
+            })
+            .collect()
+    };
+    match selector.iter().rposition(|p| p == "children:") {
+        None => (false, ranked(selector), Vec::new()),
+        Some(i) => (true, ranked(&selector[i + 1..]), ranked(&selector[..i])),
+    }
+}
+
+/// The selector for `class` under a chain of selector prefixes, read left
+/// to right. Everything before the last `children:` goes in `:where()`, so
+/// a parent's `children:` styles have no specificity, and a child's own
+/// attributes win over them: `children:hover:` is `:where(.a)>*:hover`,
+/// `hover:children:` is `:where(.a:hover)>*`.
+fn selector(class: &str, chain: &[String]) -> String {
+    let last_children = chain.iter().rposition(|p| p == "children:");
+    let mut out = format!(".{}", class);
+    for (i, prefix) in chain.iter().enumerate() {
+        if prefix == "children:" {
+            if Some(i) == last_children {
+                out = format!(":where({})>*", out);
+            } else {
+                out.push_str(">*");
+            }
+        } else if let Some((_, pseudo)) = crate::vocab::PSEUDO_PREFIXES
+            .iter()
+            .find(|(p, _)| p == prefix)
+        {
+            out.push_str(pseudo);
+        } else if let Some(expr) = prefix
+            .strip_prefix("nth:")
+            .and_then(|p| p.strip_suffix(':'))
+        {
+            out.push_str(&format!(":nth-child({})", expr));
+        } else if let Some(inner) = prefix
+            .strip_prefix("has(")
+            .and_then(|p| p.strip_suffix("):"))
+        {
+            out.push_str(&format!(":has({})", inner));
+        }
+    }
+    out
+}
+
+/// The `@media` or `@container` rule an at-rule prefix stands for, as
+/// written in readable and in compact output.
+fn at_rule(rank: usize, dev: bool) -> String {
+    let prefix = crate::vocab::at_rule_prefixes()
+        .nth(rank)
+        .unwrap_or_default();
+    let name = prefix.trim_end_matches(':');
+    let width = |name: &str| {
+        BREAKPOINTS
+            .iter()
+            .find(|(n, _)| *n == name)
+            .map_or("0", |(_, w)| *w)
+    };
+    let (kind, feature, value) = if let Some(size) = name.strip_prefix("cq-") {
+        ("@container", "min-width", width(size))
+    } else {
+        match name {
+            "print" => {
+                return "@media print".to_string();
+            }
+            "dark" => ("@media", "prefers-color-scheme", "dark"),
+            "motion-safe" => ("@media", "prefers-reduced-motion", "no-preference"),
+            "motion-reduce" => ("@media", "prefers-reduced-motion", "reduce"),
+            "landscape" | "portrait" => ("@media", "orientation", name),
+            _ => ("@media", "min-width", width(name)),
+        }
+    };
+    if dev {
+        format!("{} ({}: {})", kind, feature, value)
+    } else {
+        format!("{}({}:{})", kind, feature, value)
+    }
+}
+
 struct StyleEntry {
     class_name: String,
-    base: String,
-    /// (CSS selector suffix, css_rules) — e.g. (":hover", "color:red;")
-    pseudo: Vec<(String, String)>,
-    /// Responsive overrides: (breakpoint_prefix, css)
-    responsive: Vec<(String, String)>,
-    /// Dark mode overrides
-    dark: String,
-    /// Print overrides
-    print: String,
-    motion_safe: String,
-    motion_reduce: String,
-    landscape: String,
-    portrait: String,
-    /// Container query overrides: (breakpoint_prefix, css)
-    container: Vec<(String, String)>,
+    /// The element's rules: under each condition, its declarations, in the
+    /// order they are written
+    rules: Vec<(Condition, String)>,
     /// What else tells two elements with the same CSS apart: the rules
     /// keyed on this class (see [`StyleCollector::keyed`]). Not written.
     distinct: String,
@@ -75,11 +238,11 @@ struct StyleCollector {
     /// a hash collision we fall back to a full equality check against the entry.
     index: HashMap<u64, Vec<usize>>,
     /// Rules for an element's children, keyed on its class and written in
-    /// the block of a condition: `(prefix, selector, body)`, e.g.
-    /// `("md:", ":where(.a)>.b", "flex:1;")` (see [`Flow`]).
-    keyed: Vec<(&'static str, String, String)>,
+    /// the block of an at-rule condition: `(at-rules, selector, body)`, e.g.
+    /// `([md], ":where(.a)>.b", "flex:1;")` (see [`Flow`]).
+    keyed: Vec<(Vec<usize>, String, String)>,
     /// The keyed rules already added
-    keyed_seen: std::collections::HashSet<(&'static str, String, String)>,
+    keyed_seen: std::collections::HashSet<(Vec<usize>, String, String)>,
 }
 
 impl StyleCollector {
@@ -92,82 +255,35 @@ impl StyleCollector {
         }
     }
 
-    /// Add a rule for `selector` under the condition `prefix`, once.
-    fn add_keyed(&mut self, prefix: &'static str, selector: String, body: String) {
-        let rule = (prefix, selector, body);
+    /// Add a rule for `selector` under the at-rules `at`, once.
+    fn add_keyed(&mut self, at: Vec<usize>, selector: String, body: String) {
+        let rule = (at, selector, body);
         if self.keyed_seen.insert(rule.clone()) {
             self.keyed.push(rule);
         }
     }
 
-    /// The keyed rules under `prefix`, as `(selector, body)`.
-    fn keyed_under(&self, prefix: &str) -> Vec<(&str, &str)> {
-        self.keyed
-            .iter()
-            .filter(|(p, _, _)| *p == prefix)
-            .map(|(_, selector, body)| (selector.as_str(), body.as_str()))
-            .collect()
-    }
-
     /// Returns a class name for this style combination, or None if all empty.
-    #[allow(clippy::too_many_arguments)]
     fn get_class(
         &mut self,
-        base: String,
-        pseudo: Vec<(String, String)>,
-        responsive: Vec<(String, String)>,
-        dark: String,
-        print: String,
-        motion_safe: String,
-        motion_reduce: String,
-        landscape: String,
-        portrait: String,
-        container: Vec<(String, String)>,
+        mut rules: Vec<(Condition, String)>,
         distinct: String,
     ) -> Option<String> {
-        if base.is_empty()
-            && pseudo.is_empty()
-            && responsive.is_empty()
-            && dark.is_empty()
-            && print.is_empty()
-            && motion_safe.is_empty()
-            && motion_reduce.is_empty()
-            && landscape.is_empty()
-            && portrait.is_empty()
-            && container.is_empty()
-        {
+        rules.retain(|(_, body)| !body.is_empty());
+        if rules.is_empty() {
             return None;
         }
+        rules.sort_by_cached_key(|(condition, _)| condition.order());
         use std::collections::hash_map::DefaultHasher;
         let mut h = DefaultHasher::new();
-        base.hash(&mut h);
-        pseudo.hash(&mut h);
-        responsive.hash(&mut h);
-        dark.hash(&mut h);
-        print.hash(&mut h);
-        motion_safe.hash(&mut h);
-        motion_reduce.hash(&mut h);
-        landscape.hash(&mut h);
-        portrait.hash(&mut h);
-        container.hash(&mut h);
+        rules.hash(&mut h);
         distinct.hash(&mut h);
         let sig = h.finish();
 
         if let Some(indices) = self.index.get(&sig) {
             for &idx in indices {
                 let e = &self.entries[idx];
-                if e.base == base
-                    && e.pseudo == pseudo
-                    && e.responsive == responsive
-                    && e.dark == dark
-                    && e.print == print
-                    && e.motion_safe == motion_safe
-                    && e.motion_reduce == motion_reduce
-                    && e.landscape == landscape
-                    && e.portrait == portrait
-                    && e.container == container
-                    && e.distinct == distinct
-                {
+                if e.rules == rules && e.distinct == distinct {
                     return Some(e.class_name.clone());
                 }
             }
@@ -176,207 +292,104 @@ impl StyleCollector {
         let name = format!("{}{}", CLASS_PREFIX, short_class_name(idx));
         self.entries.push(StyleEntry {
             class_name: name.clone(),
-            base,
-            pseudo,
-            responsive,
-            dark,
-            print,
-            motion_safe,
-            motion_reduce,
-            landscape,
-            portrait,
-            container,
+            rules,
             distinct,
         });
         self.index.entry(sig).or_default().push(idx);
         Some(name)
     }
 
-    /// All generated rules, wrapped in `@layer htmlang`.
+    /// All generated rules, wrapped in `@layer htmlang`. They are written
+    /// in a fixed order, so which rule wins never depends on where in the
+    /// page an element is: the rules without a prefix, then those under
+    /// selector prefixes, then each block of at-rules (see [`at_order`]),
+    /// in which the rules keyed on a parent come first, then the element's
+    /// own, then its selectors (see [`selector_order`]).
     fn to_css_formatted(&self, dev: bool) -> String {
         let mut css = String::new();
         if self.entries.is_empty() {
             return css;
         }
-        let inner_indent = if dev { "  " } else { "" };
         css.push_str(if dev {
             "@layer htmlang {\n"
         } else {
             "@layer htmlang{"
         });
 
-        // Non-responsive rules. Base and pseudo rules are merged separately by
-        // identical body so that e.g. `.a,.b{display:flex;flex-direction:column;}`
-        // replaces two identical rules. Pseudo variants are grouped per selector
-        // suffix (`:hover` with `:hover`, etc.) to keep each pseudo's cascade
-        // position independent of others.
-        let mut base_pairs: Vec<(&str, &str)> = Vec::with_capacity(self.entries.len());
-        for e in &self.entries {
-            if !e.base.is_empty() {
-                base_pairs.push((e.class_name.as_str(), e.base.as_str()));
+        // Every block of at-rules, in order
+        let mut blocks: Vec<&[usize]> = vec![&[]];
+        let every = self
+            .entries
+            .iter()
+            .flat_map(|e| e.rules.iter().map(|(c, _)| c.at.as_slice()))
+            .chain(self.keyed.iter().map(|(at, _, _)| at.as_slice()));
+        for at in every {
+            if !blocks.contains(&at) {
+                blocks.push(at);
             }
         }
-        emit_grouped_rules(&mut css, &base_pairs, "", inner_indent, dev);
+        blocks.sort_by_key(|at| at_order(at));
 
-        // Collect pseudo rules grouped by selector suffix, preserving the order
-        // in which suffixes first appear across entries.
-        let mut pseudo_order: Vec<&str> = Vec::new();
-        let mut pseudo_buckets: HashMap<&str, Vec<(&str, &str)>> = HashMap::new();
-        for e in &self.entries {
-            for (selector, body) in &e.pseudo {
-                if body.is_empty() {
-                    continue;
-                }
-                let key = selector.as_str();
-                if !pseudo_buckets.contains_key(key) {
-                    pseudo_order.push(key);
-                }
-                pseudo_buckets
-                    .entry(key)
-                    .or_default()
-                    .push((e.class_name.as_str(), body.as_str()));
-            }
-        }
-        for selector in &pseudo_order {
-            if let Some(pairs) = pseudo_buckets.get(selector) {
-                emit_grouped_rules(&mut css, pairs, selector, inner_indent, dev);
-            }
-        }
-
-        // Responsive rules grouped by breakpoint
-        for &(bp_name, bp_width) in BREAKPOINTS {
-            let mut bp_pairs: Vec<(&str, &str)> = Vec::new();
+        for at in blocks {
+            let depth = at.len();
+            // Readable output indents a rule inside `@layer` and inside
+            // each at-rule but the first
+            let indent = if dev {
+                "  ".repeat(depth.max(1))
+            } else {
+                String::new()
+            };
+            let mut inner = String::new();
+            // Rules keyed on a parent's class come first: they have the
+            // specificity of one class, like a class rule, so the child's
+            // own rules in the block still win
+            let keyed: Vec<(&str, &str)> = self
+                .keyed
+                .iter()
+                .filter(|(a, _, _)| a.as_slice() == at)
+                .map(|(_, selector, body)| (selector.as_str(), body.as_str()))
+                .collect();
+            emit_selector_rules(&mut inner, &keyed, &indent, dev);
+            // The selector chains of this block, in order
+            let mut chains: Vec<&[String]> = Vec::new();
             for e in &self.entries {
-                for (bp, rule_css) in &e.responsive {
-                    if bp == bp_name && !rule_css.is_empty() {
-                        bp_pairs.push((e.class_name.as_str(), rule_css.as_str()));
+                for (condition, _) in &e.rules {
+                    if condition.at == at && !chains.contains(&condition.selector.as_slice()) {
+                        chains.push(&condition.selector);
                     }
                 }
             }
-            emit_media_block(
-                &mut css,
-                &format!("@media (min-width: {})", bp_width),
-                &format!("@media(min-width:{})", bp_width),
-                &self.keyed_under(&format!("{}:", bp_name)),
-                &bp_pairs,
-                dev,
-            );
-        }
-
-        // Dark mode rules
-        let dark_pairs: Vec<(&str, &str)> = self
-            .entries
-            .iter()
-            .filter(|e| !e.dark.is_empty())
-            .map(|e| (e.class_name.as_str(), e.dark.as_str()))
-            .collect();
-        emit_media_block(
-            &mut css,
-            "@media (prefers-color-scheme: dark)",
-            "@media(prefers-color-scheme:dark)",
-            &self.keyed_under("dark:"),
-            &dark_pairs,
-            dev,
-        );
-
-        // Print rules
-        let print_pairs: Vec<(&str, &str)> = self
-            .entries
-            .iter()
-            .filter(|e| !e.print.is_empty())
-            .map(|e| (e.class_name.as_str(), e.print.as_str()))
-            .collect();
-        emit_media_block(
-            &mut css,
-            "@media print",
-            "@media print",
-            &self.keyed_under("print:"),
-            &print_pairs,
-            dev,
-        );
-
-        // Motion safe rules
-        let motion_safe_pairs: Vec<(&str, &str)> = self
-            .entries
-            .iter()
-            .filter(|e| !e.motion_safe.is_empty())
-            .map(|e| (e.class_name.as_str(), e.motion_safe.as_str()))
-            .collect();
-        emit_media_block(
-            &mut css,
-            "@media (prefers-reduced-motion: no-preference)",
-            "@media(prefers-reduced-motion:no-preference)",
-            &self.keyed_under("motion-safe:"),
-            &motion_safe_pairs,
-            dev,
-        );
-
-        // Motion reduce rules
-        let motion_reduce_pairs: Vec<(&str, &str)> = self
-            .entries
-            .iter()
-            .filter(|e| !e.motion_reduce.is_empty())
-            .map(|e| (e.class_name.as_str(), e.motion_reduce.as_str()))
-            .collect();
-        emit_media_block(
-            &mut css,
-            "@media (prefers-reduced-motion: reduce)",
-            "@media(prefers-reduced-motion:reduce)",
-            &self.keyed_under("motion-reduce:"),
-            &motion_reduce_pairs,
-            dev,
-        );
-
-        // Landscape rules
-        let landscape_pairs: Vec<(&str, &str)> = self
-            .entries
-            .iter()
-            .filter(|e| !e.landscape.is_empty())
-            .map(|e| (e.class_name.as_str(), e.landscape.as_str()))
-            .collect();
-        emit_media_block(
-            &mut css,
-            "@media (orientation: landscape)",
-            "@media(orientation:landscape)",
-            &self.keyed_under("landscape:"),
-            &landscape_pairs,
-            dev,
-        );
-
-        // Portrait rules
-        let portrait_pairs: Vec<(&str, &str)> = self
-            .entries
-            .iter()
-            .filter(|e| !e.portrait.is_empty())
-            .map(|e| (e.class_name.as_str(), e.portrait.as_str()))
-            .collect();
-        emit_media_block(
-            &mut css,
-            "@media (orientation: portrait)",
-            "@media(orientation:portrait)",
-            &self.keyed_under("portrait:"),
-            &portrait_pairs,
-            dev,
-        );
-
-        // Container query rules grouped by breakpoint
-        for &(bp_name, bp_width) in BREAKPOINTS {
-            let mut cq_pairs: Vec<(&str, &str)> = Vec::new();
-            for e in &self.entries {
-                for (bp, rule_css) in &e.container {
-                    if bp == bp_name && !rule_css.is_empty() {
-                        cq_pairs.push((e.class_name.as_str(), rule_css.as_str()));
-                    }
-                }
+            chains.sort_by_cached_key(|chain| selector_order(chain));
+            for chain in chains {
+                let pairs: Vec<(String, &str)> = self
+                    .entries
+                    .iter()
+                    .flat_map(|e| {
+                        e.rules
+                            .iter()
+                            .filter(|(c, _)| c.at == at && c.selector == chain)
+                            .map(|(_, body)| (selector(&e.class_name, chain), body.as_str()))
+                    })
+                    .collect();
+                emit_grouped_rules(&mut inner, &pairs, &indent, dev);
             }
-            emit_media_block(
-                &mut css,
-                &format!("@container (min-width: {})", bp_width),
-                &format!("@container(min-width:{})", bp_width),
-                &self.keyed_under(&format!("cq-{}:", bp_name)),
-                &cq_pairs,
-                dev,
-            );
+            if inner.is_empty() {
+                continue;
+            }
+            // Each at-rule wraps the next, outermost first
+            for (level, &rank) in at.iter().enumerate().rev() {
+                let pad = if dev {
+                    "  ".repeat(level)
+                } else {
+                    String::new()
+                };
+                inner = if dev {
+                    format!("{pad}{} {{\n{inner}{pad}}}\n", at_rule(rank, true))
+                } else {
+                    format!("{}{{{inner}}}", at_rule(rank, false))
+                };
+            }
+            css.push_str(&inner);
         }
 
         css.push_str(if dev { "}\n" } else { "}" });
@@ -384,46 +397,31 @@ impl StyleCollector {
     }
 }
 
-/// Emit CSS rules from `(class_name, body)` pairs, merging identical bodies
+/// Emit CSS rules from `(selector, body)` pairs, merging identical bodies
 /// into a single selector-list rule (e.g. `.a,.b{body}`). The first occurrence
 /// of each distinct body determines ordering, so output stays deterministic
-/// across runs. `selector_suffix` is appended to each class (e.g. `":hover"`,
-/// or `""` for plain class rules). `indent` is prepended to each rule line.
-fn emit_grouped_rules(
-    out: &mut String,
-    pairs: &[(&str, &str)],
-    selector_suffix: &str,
-    indent: &str,
-    dev: bool,
-) {
+/// across runs. `indent` is prepended to each rule line.
+fn emit_grouped_rules(out: &mut String, pairs: &[(String, &str)], indent: &str, dev: bool) {
     if pairs.is_empty() {
         return;
     }
     // Group in first-occurrence order.
     let mut order: Vec<&str> = Vec::new();
     let mut groups: HashMap<&str, Vec<&str>> = HashMap::new();
-    for &(name, body) in pairs {
+    for (selector, body) in pairs {
         if body.is_empty() {
             continue;
         }
         if !groups.contains_key(body) {
             order.push(body);
         }
-        groups.entry(body).or_default().push(name);
+        groups.entry(body).or_default().push(selector);
     }
     let sp = if dev { " " } else { "" };
     let nl = if dev { "\n" } else { "" };
     for body in &order {
-        let names = &groups[body];
         out.push_str(indent);
-        for (i, n) in names.iter().enumerate() {
-            if i > 0 {
-                out.push(',');
-            }
-            out.push('.');
-            out.push_str(n);
-            out.push_str(selector_suffix);
-        }
+        out.push_str(&groups[body].join(","));
         out.push_str(sp);
         out.push('{');
         out.push_str(body);
@@ -455,36 +453,6 @@ fn emit_selector_rules(out: &mut String, rules: &[(&str, &str)], indent: &str, d
             }
         }
         i += run;
-    }
-}
-
-/// Emit an `@media` / `@container` block containing the rules keyed on a
-/// parent's class (`(selector, body)`), then grouped class rules. Skips the
-/// block entirely if no non-empty bodies are present.
-fn emit_media_block(
-    out: &mut String,
-    header_dev: &str,
-    header_min: &str,
-    keyed: &[(&str, &str)],
-    pairs: &[(&str, &str)],
-    dev: bool,
-) {
-    if keyed.is_empty() && pairs.iter().all(|(_, body)| body.is_empty()) {
-        return;
-    }
-    let mut inner = String::new();
-    let inner_indent = if dev { "  " } else { "" };
-    // Keyed rules come first: they have the specificity of one class, like
-    // a class rule, so the child's own rules in the block still win
-    emit_selector_rules(&mut inner, keyed, inner_indent, dev);
-    emit_grouped_rules(&mut inner, pairs, "", inner_indent, dev);
-    if inner.is_empty() {
-        return;
-    }
-    if dev {
-        out.push_str(&format!("{} {{\n{}}}\n", header_dev, inner));
-    } else {
-        out.push_str(&format!("{}{{{}}}", header_min, inner));
     }
 }
 
@@ -694,7 +662,6 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
     let site = Site {
         kind: &root.kind,
         parent: &top,
-        own: &own,
         has_overlay_children: holds_overlays(&doc.nodes),
         inline: false,
         root: true,
@@ -1223,7 +1190,7 @@ fn generate_element(
     }
 
     // Compute CSS for each state and get a class name
-    let gen_class = element_class(elem, &Site::new(elem, parent, &ctx.flow, &own), styles);
+    let gen_class = element_class(elem, &Site::new(elem, parent, &ctx.flow), styles);
     own.class = gen_class.clone();
     let (id, user_class) = extract_id_class(&elem.attrs);
 
@@ -1293,8 +1260,7 @@ fn generate_self_closing(
     styles: &mut StyleCollector,
     ctx: &mut GenContext,
 ) {
-    let own = Flow::default();
-    let gen_class = element_class(elem, &Site::new(elem, parent, &ctx.flow, &own), styles);
+    let gen_class = element_class(elem, &Site::new(elem, parent, &ctx.flow), styles);
     let (id, user_class) = extract_id_class(&elem.attrs);
 
     let (tag, kind_label) = match &elem.kind {
@@ -1368,124 +1334,27 @@ fn compute_class(
     styles: &mut StyleCollector,
     distinct: String,
 ) -> Option<String> {
-    let base = attrs_to_css(attrs, "", site);
-
-    // Collect pseudo-state overrides
-    let mut pseudo = Vec::new();
-    for &(prefix, selector) in crate::vocab::PSEUDO_PREFIXES {
-        let css = attrs_to_css(attrs, prefix, site);
-        if !css.is_empty() {
-            pseudo.push((selector.to_string(), css));
+    // Every condition an attribute is under, and none (the element's own
+    // defaults)
+    let mut conditions = vec![Condition::default()];
+    for attr in attrs.iter().filter(|a| !a.html) {
+        let (condition, _) = Condition::of(&attr.key);
+        if !conditions.contains(&condition) {
+            conditions.push(condition);
         }
     }
-
-    // Collect nth:EXPR: dynamic pseudo selectors
-    let mut nth_prefixes: Vec<String> = Vec::new();
-    for attr in attrs {
-        if attr.key.starts_with("nth:") {
-            let rest = &attr.key[4..];
-            if let Some(colon_pos) = rest.find(':') {
-                let prefix = format!("nth:{}:", &rest[..colon_pos]);
-                if !nth_prefixes.contains(&prefix) {
-                    nth_prefixes.push(prefix);
-                }
-            }
-        }
-    }
-    for prefix in &nth_prefixes {
-        let expr = &prefix[4..prefix.len() - 1];
-        let selector = format!(":nth-child({})", expr);
-        let css = attrs_to_css(attrs, prefix, site);
-        if !css.is_empty() {
-            pseudo.push((selector, css));
-        }
-    }
-
-    // Collect has(...): dynamic pseudo selectors
-    let mut has_prefixes: Vec<String> = Vec::new();
-    for attr in attrs {
-        if attr.key.starts_with("has(")
-            && let Some(close) = attr.key.find("):")
-        {
-            let prefix = format!("{}:", &attr.key[..close + 1]);
-            if !has_prefixes.contains(&prefix) {
-                has_prefixes.push(prefix);
-            }
-        }
-    }
-    for prefix in &has_prefixes {
-        let inner = &prefix[4..prefix.len() - 2]; // extract selector from has(selector):
-        let selector = format!(":has({})", inner);
-        let css = attrs_to_css(attrs, prefix, site);
-        if !css.is_empty() {
-            pseudo.push((selector, css));
-        }
-    }
-
-    // Collect responsive overrides
-    let mut responsive = Vec::new();
-    for &(bp_name, _) in BREAKPOINTS {
-        let prefix = format!("{}:", bp_name);
-        let css = attrs_to_css(attrs, &prefix, site);
-        if !css.is_empty() {
-            responsive.push((bp_name.to_string(), css));
-        }
-    }
-
-    // Collect container query overrides
-    let mut container = Vec::new();
-    for &(bp_name, _) in BREAKPOINTS {
-        let prefix = format!("cq-{}:", bp_name);
-        let css = attrs_to_css(attrs, &prefix, site);
-        if !css.is_empty() {
-            container.push((bp_name.to_string(), css));
-        }
-    }
-
-    let dark = attrs_to_css(attrs, "dark:", site);
-    let print = attrs_to_css(attrs, "print:", site);
-    let motion_safe = attrs_to_css(attrs, "motion-safe:", site);
-    let motion_reduce = attrs_to_css(attrs, "motion-reduce:", site);
-    let landscape = attrs_to_css(attrs, "landscape:", site);
-    let portrait = attrs_to_css(attrs, "portrait:", site);
-
     // Dedupe: if a property is declared twice within a single rule, keep only
     // the last occurrence (element-kind defaults are written before
     // user attributes, so a user [list-style disc] correctly overrides the
     // default list-style:none, and we don't need to ship both).
-    let base = dedupe_declarations(&base);
-    let pseudo: Vec<(String, String)> = pseudo
+    let rules = conditions
         .into_iter()
-        .map(|(sel, css)| (sel, dedupe_declarations(&css)))
+        .map(|condition| {
+            let css = dedupe_declarations(&attrs_to_css(attrs, &condition, site));
+            (condition, css)
+        })
         .collect();
-    let responsive: Vec<(String, String)> = responsive
-        .into_iter()
-        .map(|(bp, css)| (bp, dedupe_declarations(&css)))
-        .collect();
-    let dark = dedupe_declarations(&dark);
-    let print = dedupe_declarations(&print);
-    let motion_safe = dedupe_declarations(&motion_safe);
-    let motion_reduce = dedupe_declarations(&motion_reduce);
-    let landscape = dedupe_declarations(&landscape);
-    let portrait = dedupe_declarations(&portrait);
-    let container: Vec<(String, String)> = container
-        .into_iter()
-        .map(|(bp, css)| (bp, dedupe_declarations(&css)))
-        .collect();
-
-    styles.get_class(
-        base,
-        pseudo,
-        responsive,
-        dark,
-        print,
-        motion_safe,
-        motion_reduce,
-        landscape,
-        portrait,
-        container,
-        distinct,
-    )
+    styles.get_class(rules, distinct)
 }
 
 /// Dedupe CSS declarations within a single rule body: for any property
@@ -1614,8 +1483,6 @@ struct Site<'a> {
     /// How its parent lays out its children: its `width fill`, `height
     /// fill` and `shrink` compile against it.
     parent: &'a Flow,
-    /// How it lays out its own children, for its `children:` styles.
-    own: &'a Flow,
     /// It has `@in-front` / `@behind` children.
     has_overlay_children: bool,
     /// A row, column or grid inside text, laid out inline.
@@ -1627,16 +1494,10 @@ struct Site<'a> {
 impl Site<'_> {
     /// Where an element in a parent with the layout `layout` and the flow
     /// `parent` is.
-    fn new<'a>(
-        elem: &'a Element,
-        layout: Option<Layout>,
-        parent: &'a Flow,
-        own: &'a Flow,
-    ) -> Site<'a> {
+    fn new<'a>(elem: &'a Element, layout: Option<Layout>, parent: &'a Flow) -> Site<'a> {
         Site {
             kind: &elem.kind,
             parent,
-            own,
             has_overlay_children: has_overlay_children(elem),
             inline: layout == Some(Layout::Text) && elem.kind.layout().is_container(),
             root: false,
@@ -1667,55 +1528,11 @@ impl Axis {
     }
 }
 
-/// The prefixes whose styles are written in a block of their own (`@media`
-/// or `@container`), in the order the blocks are written. A parent's
-/// `flex-direction` under one of them changes its children's layout words
-/// in that block.
-fn block_prefixes() -> impl Iterator<Item = &'static str> {
-    crate::vocab::RESPONSIVE_PREFIXES
-        .iter()
-        .chain(crate::vocab::MEDIA_PREFIXES)
-        .chain(crate::vocab::CONTAINER_QUERY_PREFIXES)
-        .copied()
-}
-
-/// The prefixes whose styles apply whenever `prefix`'s do, in the order
-/// the cascade applies them: no prefix, the smaller widths of the same kind
-/// (`md:` holds from 768px up, so `sm:` holds there too), then `prefix`.
-fn in_effect(prefix: &str) -> Vec<&str> {
-    if prefix.is_empty() {
-        return vec![""];
-    }
-    // `children:` styles are another element's
-    if prefix == "children:" {
-        return vec![prefix];
-    }
-    let mut prefixes = vec![""];
-    for widths in [
-        crate::vocab::RESPONSIVE_PREFIXES,
-        crate::vocab::CONTAINER_QUERY_PREFIXES,
-    ] {
-        if let Some(i) = widths.iter().position(|p| *p == prefix) {
-            prefixes.extend_from_slice(&widths[..i]);
-        }
-    }
-    prefixes.push(prefix);
-    prefixes
-}
-
-/// An attribute's prefix (`""` for none) and the rest of its key.
-fn split_prefix(key: &str) -> (&str, &str) {
-    match crate::vocab::prefix_len(key) {
-        Some(len) => key.split_at(len),
-        None => ("", key),
-    }
-}
-
 /// How an element lays out its children, as its CSS sets it: the
 /// direction its children's `width`/`height` `fill` and `shrink` compile
 /// against. That is the direction of `@row` or of a column, or the one its
-/// own `flex-direction` (or `flex-flow`) sets, with or without a media or
-/// container prefix. Like elm-ui's `.r > .wf`, the rules for a direction
+/// own `flex-direction` (or `flex-flow`) sets, with or without media or
+/// container prefixes. Like elm-ui's `.r > .wf`, the rules for a direction
 /// set under a prefix are keyed on the element's class: `@media (...) {
 /// :where(.a)>.b {...} }`.
 #[derive(Clone, Default)]
@@ -1723,8 +1540,9 @@ struct Flow {
     /// Without a prefix; `None` when the element isn't a flex row or column
     /// (a grid, text, HTML's own layout, the top of the page)
     base: Option<Axis>,
-    /// The direction under each block prefix that sets one, in block order
-    changes: Vec<(&'static str, Axis)>,
+    /// The direction under each chain of at-rule prefixes that sets one, in
+    /// the order their blocks are written
+    changes: Vec<(Vec<usize>, Axis)>,
     /// The element's generated class, which the rules for the changes are
     /// keyed on
     class: Option<String>,
@@ -1737,24 +1555,24 @@ impl Flow {
             Layout::Column => Axis::Column,
             _ => return Flow::default(),
         };
-        let mut changes: Vec<(&'static str, Axis)> = Vec::new();
+        let mut changes: Vec<(Vec<usize>, Axis)> = Vec::new();
         for attr in elem.attrs.iter().filter(|a| !a.html) {
-            let (prefix, name) = split_prefix(&attr.key);
-            if !matches!(name, "flex-direction" | "flex-flow") {
+            let (condition, name) = Condition::of(&attr.key);
+            if !matches!(name, "flex-direction" | "flex-flow") || !condition.selector.is_empty() {
                 continue;
             }
             let Some(axis) = attr.value.as_deref().and_then(Axis::of_value) else {
                 continue;
             };
-            if prefix.is_empty() {
+            if condition.at.is_empty() {
                 base = axis;
-            } else if let Some(prefix) = block_prefixes().find(|p| *p == prefix) {
+            } else {
                 // The later one wins, as in the CSS
-                changes.retain(|(p, _)| *p != prefix);
-                changes.push((prefix, axis));
+                changes.retain(|(at, _)| *at != condition.at);
+                changes.push((condition.at, axis));
             }
         }
-        changes.sort_by_key(|(p, _)| block_prefixes().position(|q| q == *p));
+        changes.sort_by_key(|(at, _)| at_order(at));
         Flow {
             base: Some(base),
             changes,
@@ -1762,17 +1580,18 @@ impl Flow {
         }
     }
 
-    /// The direction under `prefix`: the latest one set among the prefixes
-    /// in effect there (a state such as `hover:` keeps the direction without
-    /// a prefix).
-    fn at(&self, prefix: &str) -> Option<Axis> {
+    /// The direction under the at-rules `at`: the latest one set among
+    /// the conditions that hold there (`md:` holds at `lg:`), else the one
+    /// without a prefix.
+    fn at(&self, at: &[usize]) -> Option<Axis> {
         let base = self.base?;
-        let changed = in_effect(prefix).into_iter().rev().find_map(|p| {
-            self.changes
-                .iter()
-                .find(|(q, _)| *q == p)
-                .map(|&(_, axis)| axis)
-        });
+        let here = Condition::at_only(at);
+        let changed = self
+            .changes
+            .iter()
+            .rev()
+            .find(|(chain, _)| Condition::at_only(chain).holds_at(&here))
+            .map(|&(_, axis)| axis);
         Some(changed.unwrap_or(base))
     }
 }
@@ -1860,37 +1679,40 @@ struct Sizes {
 }
 
 impl Sizes {
-    /// Read `attrs` under `prefixes`, a later prefix over an earlier one.
-    fn of(attrs: &[Attribute], prefixes: &[&str]) -> Sizes {
+    /// Read the attributes under the conditions that hold wherever `at`
+    /// does, a later condition over an earlier one.
+    fn of(attrs: &[Attribute], at: &Condition) -> Sizes {
         let mut sizes = Sizes::default();
-        for &want in prefixes {
-            for attr in attrs.iter().filter(|a| !a.html) {
-                let (prefix, name) = split_prefix(&attr.key);
-                let Some(value) = attr.value.as_deref().filter(|v| !v.trim().is_empty()) else {
-                    continue;
-                };
-                if prefix != want {
-                    continue;
+        let mut read: Vec<(Condition, &str, &str)> = Vec::new();
+        for attr in attrs.iter().filter(|a| !a.html) {
+            let (condition, name) = Condition::of(&attr.key);
+            let Some(value) = attr.value.as_deref().filter(|v| !v.trim().is_empty()) else {
+                continue;
+            };
+            if condition.holds_at(at) {
+                read.push((condition, name, value));
+            }
+        }
+        read.sort_by_cached_key(|(condition, _, _)| condition.order());
+        for (_, name, value) in read {
+            match name {
+                "width" => {
+                    let size = Size::of(value);
+                    sizes.width = Some(size);
+                    sizes.width_word |= size != Size::Set;
                 }
-                match name {
-                    "width" => {
-                        let size = Size::of(value);
-                        sizes.width = Some(size);
-                        sizes.width_word |= size != Size::Set;
-                    }
-                    "height" => {
-                        let size = Size::of(value);
-                        sizes.height = Some(size);
-                        sizes.height_word |= size != Size::Set;
-                    }
-                    "flex" => sizes.flex = true,
-                    "flex-grow" => sizes.flex_grow = true,
-                    "flex-shrink" => sizes.flex_shrink = true,
-                    "flex-basis" => sizes.flex_basis = true,
-                    "min-width" => sizes.min_width = true,
-                    "min-height" => sizes.min_height = true,
-                    _ => {}
+                "height" => {
+                    let size = Size::of(value);
+                    sizes.height = Some(size);
+                    sizes.height_word |= size != Size::Set;
                 }
+                "flex" => sizes.flex = true,
+                "flex-grow" => sizes.flex_grow = true,
+                "flex-shrink" => sizes.flex_shrink = true,
+                "flex-basis" => sizes.flex_basis = true,
+                "min-width" => sizes.min_width = true,
+                "min-height" => sizes.min_height = true,
+                _ => {}
             }
         }
         sizes
@@ -1946,12 +1768,12 @@ impl Sizes {
 }
 
 /// The rule that gives an element's `fill` and `shrink`, as its attributes
-/// under `prefixes` set them, their meaning in a parent laid out along
-/// `axis`. Every other property a layout word could have set is put back to
-/// its initial value, so the rule is right whichever earlier rule it
-/// overrides. Properties the element writes itself are left alone.
-fn sizing_rule(attrs: &[Attribute], prefixes: &[&str], axis: Axis) -> String {
-    let sizes = Sizes::of(attrs, prefixes);
+/// under the at-rules `at` set them, their meaning in a parent laid out
+/// along `axis`. Every other property a layout word could have set is put
+/// back to its initial value, so the rule is right whichever earlier rule
+/// it overrides. Properties the element writes itself are left alone.
+fn sizing_rule(attrs: &[Attribute], at: &[usize], axis: Axis) -> String {
+    let sizes = Sizes::of(attrs, &Condition::at_only(at));
     let mut sets: Vec<(&str, &str)> = Vec::new();
     let mut resets: Vec<(&str, &str)> = Vec::new();
     for (dim, size, word) in [
@@ -1981,53 +1803,37 @@ fn sizing_rule(attrs: &[Attribute], prefixes: &[&str], axis: Axis) -> String {
     css
 }
 
-/// The rules an element's `fill` and `shrink` need under each prefix where
-/// the direction of `flow` (its parent's) changes: `(prefix, body)`. With
-/// `children`, for the `children:` styles of the element whose flow it is.
-fn sizing_changes(attrs: &[Attribute], flow: &Flow, children: bool) -> Vec<(&'static str, String)> {
+/// The rules an element's `fill` and `shrink` need under each chain of
+/// at-rules where the direction of `flow` (its parent's) changes: `(at,
+/// body)`.
+fn sizing_changes(attrs: &[Attribute], flow: &Flow) -> Vec<(Vec<usize>, String)> {
     flow.changes
         .iter()
-        .map(|&(prefix, axis)| {
-            let body = if children {
-                sizing_rule(attrs, &["children:"], axis)
-            } else {
-                sizing_rule(attrs, &in_effect(prefix), axis)
-            };
-            (prefix, body)
-        })
+        .map(|(at, axis)| (at.clone(), sizing_rule(attrs, at, *axis)))
         .filter(|(_, body)| !body.is_empty())
         .collect()
 }
 
-/// An element's generated class, with the rules keyed on classes that its
-/// `fill` and `shrink` need where a direction changes under a prefix (see
-/// [`Flow`]): its own, keyed on its parent's class (`:where(.a)>.b`, one
-/// class of specificity like any class rule), and its `children:` styles',
-/// keyed on its own (`.b>*`, like `children:`'s own `.b > *`).
+/// An element's generated class, with the rules keyed on its parent's
+/// class that its `fill` and `shrink` need where the parent's direction
+/// changes under a prefix (see [`Flow`]): `:where(.a)>.b`, one class of
+/// specificity like any class rule.
 fn element_class(elem: &Element, site: &Site, styles: &mut StyleCollector) -> Option<String> {
     let as_child = match site.parent.class {
-        Some(_) => sizing_changes(&elem.attrs, site.parent, false),
+        Some(_) => sizing_changes(&elem.attrs, site.parent),
         None => Vec::new(),
     };
-    let for_children = sizing_changes(&elem.attrs, site.own, true);
     // Two elements with the same CSS but different rules keyed on them
     // need two classes
     let mut distinct = String::new();
-    for (list, mark) in [(&as_child, '<'), (&for_children, '>')] {
-        for (prefix, body) in list {
-            distinct.push(mark);
-            distinct.push_str(prefix);
-            distinct.push_str(body);
-        }
+    for (at, body) in &as_child {
+        distinct.push_str(&format!("<{:?}{}", at, body));
     }
     let class = compute_class(&elem.attrs, site, styles, distinct)?;
     if let Some(parent) = &site.parent.class {
-        for (prefix, body) in as_child {
-            styles.add_keyed(prefix, format!(":where(.{})>.{}", parent, class), body);
+        for (at, body) in as_child {
+            styles.add_keyed(at, format!(":where(.{})>.{}", parent, class), body);
         }
-    }
-    for (prefix, body) in for_children {
-        styles.add_keyed(prefix, format!(".{}>*", class), body);
     }
     Some(class)
 }
@@ -2046,21 +1852,22 @@ fn layout_css(layout: Layout, inline: bool) -> &'static str {
     }
 }
 
-fn attrs_to_css(attrs: &[Attribute], state_prefix: &str, site: &Site) -> String {
+/// The declarations of the attributes under `condition` (with the
+/// element's own defaults when it is none).
+fn attrs_to_css(attrs: &[Attribute], condition: &Condition, site: &Site) -> String {
     let mut css = String::new();
     // The auto margins of `center-x`, `align-left`, ..., written at the end
     let mut aligned = String::new();
     let kind = site.kind;
-    // The direction `fill` and `shrink` compile against: `children:` styles
-    // go on the children, whose parent is this element
-    let axis = if state_prefix == "children:" {
-        site.own.base
-    } else {
-        site.parent.at(state_prefix)
-    };
+    // Under `children:` the styles go on the children, whose parent is this
+    // element: htmlang's words that place an element in its parent are an
+    // error there (the parser reports them), and left out
+    let on_children = condition.on_children();
+    // The direction `fill` and `shrink` compile against
+    let axis = site.parent.at(&condition.at);
 
     // Base element styles only for the default (non-state) pass
-    if state_prefix.is_empty() {
+    if *condition == Condition::default() {
         // Elements with @in-front / @behind children become positioning
         // contexts. Pushed before user attrs so an explicit `position` wins
         // via dedupe (only the last declaration of a property is kept).
@@ -2076,24 +1883,22 @@ fn attrs_to_css(attrs: &[Attribute], state_prefix: &str, site: &Site) -> String 
     // `grid-cols`) mean nothing on an element that doesn't lay out its
     // children, which the parser reports; they are left out. Under
     // `children:` they go on the children, whose layout isn't known here.
-    let lays_out_children = kind.layout().is_container() || state_prefix == "children:";
+    let lays_out_children = kind.layout().is_container() || on_children;
+    fn under<'k>(key: &'k str, condition: &Condition) -> Option<&'k str> {
+        let (c, name) = Condition::of(key);
+        (c == *condition).then_some(name)
+    }
 
     for (index, attr) in attrs.iter().enumerate() {
         if attr.html {
             continue;
         }
-        // Determine the effective key for this pass
-        let effective_key = if state_prefix.is_empty() {
-            if crate::vocab::is_prefixed(&attr.key) {
-                continue;
-            }
-            attr.key.as_str()
-        } else {
-            match attr.key.strip_prefix(state_prefix) {
-                Some(k) => k,
-                None => continue,
-            }
+        let Some(effective_key) = under(&attr.key, condition) else {
+            continue;
         };
+        if on_children && crate::vocab::places_in_parent(effective_key, attr.value.as_deref()) {
+            continue;
+        }
 
         let val = attr.value.as_deref();
         // A style whose value came out empty (a field a record doesn't
@@ -2118,7 +1923,7 @@ fn attrs_to_css(attrs: &[Attribute], state_prefix: &str, site: &Site) -> String 
             "width" | "height" if val.is_some_and(|v| Size::of(v) != Size::Set) => {
                 let later = attrs[index + 1..].iter().any(|a| {
                     !a.html
-                        && a.key.strip_prefix(state_prefix) == Some(effective_key)
+                        && under(&a.key, condition) == Some(effective_key)
                         && a.value.as_deref().is_some_and(|v| !v.trim().is_empty())
                 });
                 if later {
@@ -2132,7 +1937,7 @@ fn attrs_to_css(attrs: &[Attribute], state_prefix: &str, site: &Site) -> String 
                 let size = Size::of(val.unwrap_or_default());
                 // What the element writes itself, which a layout word
                 // leaves alone
-                let sizes = Sizes::of(attrs, &in_effect(state_prefix));
+                let sizes = Sizes::of(attrs, condition);
                 for &(property, value) in sizing(dim, size, axis) {
                     sizes.push(&mut css, property, value);
                 }

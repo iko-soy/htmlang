@@ -43,6 +43,11 @@ Linux, macOS, and Windows. Your change should pass all three.
     `hl-` + a short name; an element's defaults (`ElementKind::css`) are
     part of its class, never a rule on a global element selector, so
     `@markdown`/`@raw` HTML and a page embedding a fragment are untouched.
+    A style's prefixes are a `Condition`: its at-rule prefixes (sorted, so
+    `dark:md:` is `md:dark:`, and written as nested `@media`/`@container`
+    blocks) and its selector chain (read left to right). Each class keeps
+    one list of (condition, declarations), and every block and chain is
+    written in one fixed order, never the order of the source.
   - `ast.rs` — the element kinds; every plain HTML element is one row in
     `TAGS` with its one `Layout` (column, row, grid, text, native or void,
     which decides its text lines, `spacing` and its children's layout
@@ -61,7 +66,7 @@ Linux, macOS, and Windows. Your change should pass all three.
     HTML attributes, `@page`'s own `favicon`), the pixel rule
     (`LENGTH_PROPERTIES`, the one table of properties whose bare numbers
     are px, and `with_px`, the one function that applies it) and the
-    state/media prefixes.
+    state/media prefixes, with the rank that orders the at-rule blocks.
   - `expr.rs` — the expression language for conditions, computed values and
     `${...}`. It evaluates only what decides the result (the branch `if()`
     takes, the side of `and`/`or` that decides) and only reads the rest.

@@ -4615,8 +4615,13 @@ fn function_call_extra_attributes_need_a_single_root() {
 
 #[test]
 fn children_prefix_styles_direct_children() {
+    // Through `:where()`, so a child's own attributes win
     let output = compile("@row [children:flex-shrink 0]\n  @el A");
-    assert!(output.contains(" > *{flex-shrink:0;}"), "{}", output);
+    assert!(
+        output.contains(":where(.hl-a)>*{flex-shrink:0;}"),
+        "{}",
+        output
+    );
 }
 
 #[test]
@@ -5922,8 +5927,9 @@ fn the_after_snippet_of_names_not_values() {
         html
     );
 
+    // Prefixes stack (P7)
     let d = parse_diagnostics("@el [hover:focus:color red]\n  x\n");
-    assert_eq!(coded(&d, "invalid-prefix").len(), 1, "{:?}", d);
+    assert!(d.is_empty(), "{:?}", d);
 }
 
 #[test]
@@ -5993,20 +5999,21 @@ fn prefixes_are_checked_by_name_and_number() {
     assert_eq!(unknown[0].severity, htmlang::parser::Severity::Error);
 
     for attr in [
-        "md:hover:color red",
-        "dark:hover:color red",
-        "children:odd:color red",
+        "before:hover:color red",
+        "md:after:first:color red",
+        "children:width fill",
         "hover:required",
         "md:id=x",
         "has(.a{):color red",
+        "md:has(.a{):color red",
     ] {
         let src = format!("@el [{}]\n  x\n", attr);
         let d = parse_diagnostics(&src);
         assert_eq!(coded(&d, "invalid-prefix").len(), 1, "{}: {:?}", src, d);
     }
-    // One prefix of any kind works, and so does a prefixed flag
+    // Prefixes of any kind work, stacked too, and so does a prefixed flag
     let d = parse_diagnostics(
-        "@el [nth:2n+1:color red, has(img:hover):padding 4, cq-md:padding 8, md:center-x, print:display none]\n  x\n",
+        "@el [nth:2n+1:color red, has(img:hover):padding 4, cq-md:padding 8, md:center-x, print:display none, md:hover:color red, dark:hover:color red, children:odd:color red, hover:before:content \"x\", md:dark:children:hover:after:color red]\n  x\n",
     );
     assert!(d.is_empty(), "{:?}", d);
 }
@@ -6426,8 +6433,15 @@ fn fill_and_center_compile_against_the_parent_s_layout() {
     );
     assert!(out.contains("flex:1;min-height:0;"), "{}", out);
     // `children:` styles go on the children, whose parent is the element
-    let out = compile("@row [children:width fill]\n  @el A\n  @el B\n");
-    assert!(out.contains(" > *{flex:1;min-width:0;}"), "{}", out);
+    // itself: a word that places an element in its parent is an error there
+    let result = htmlang::parser::parse("@row [children:width fill]\n  @el A\n  @el B\n");
+    assert_eq!(
+        coded(&result.diagnostics, "invalid-prefix").len(),
+        1,
+        "{:?}",
+        result.diagnostics
+    );
+    assert!(!htmlang::codegen::generate(&result.document).contains("flex:1"));
 }
 
 #[test]
@@ -6968,14 +6982,166 @@ fn a_layout_word_leaves_what_you_write_yourself() {
 }
 
 #[test]
-fn children_styles_follow_a_prefixed_direction() {
-    let out = compile("@row [children:width fill, md:flex-direction column]\n  @el A\n");
-    assert!(out.contains(".hl-a > *{flex:1;min-width:0;}"), "{}", out);
+fn a_direction_under_stacked_prefixes_moves_the_children() {
+    let out = compile(
+        "@row [md:flex-direction column, md:dark:flex-direction row]\n  @el [width fill] A\n",
+    );
     assert!(
-        out.contains("@media(min-width:768px){.hl-a>*{flex:0 1 auto;min-width:auto;width:100%;}"),
+        out.contains(
+            "@media(min-width:768px){:where(.hl-a)>.hl-b{flex:0 1 auto;min-width:auto;width:100%;}"
+        ),
         "{}",
         out
     );
+    assert!(
+        out.contains("@media(min-width:768px){@media(prefers-color-scheme:dark){:where(.hl-a)>.hl-b{width:auto;flex:1;min-width:0;}.hl-a{flex-direction:row;}}}"),
+        "{}",
+        out
+    );
+}
+
+#[test]
+fn snapshot_prefixes_compose() {
+    snapshot_test("prefixes_compose");
+}
+
+#[test]
+fn stacked_at_rules_are_one_condition_in_either_order() {
+    let out = compile("@el [md:dark:padding 8] a\n@el [dark:md:padding 8] b\n");
+    // One class for both, in one nested block, the width outside
+    assert!(
+        out.contains("<div class=\"hl-a\"><span>a</span></div><div class=\"hl-a\">"),
+        "{}",
+        out
+    );
+    assert!(
+        out.contains(
+            "@media(min-width:768px){@media(prefers-color-scheme:dark){.hl-a{padding:8px;}}}"
+        ),
+        "{}",
+        out
+    );
+}
+
+#[test]
+fn rules_are_written_in_one_order_whatever_the_source_order() {
+    let styles = [
+        "padding 4",
+        "hover:color blue",
+        "dark:color white",
+        "md:padding 8",
+        "md:dark:padding 12",
+        "before:content \"x\"",
+        "children:opacity 1",
+        "hover:children:opacity 0.5",
+    ];
+    let forward = compile(&format!("@el [{}]\n  @el a\n", styles.join(", ")));
+    let mut reversed = styles;
+    reversed.reverse();
+    let backward = compile(&format!("@el [{}]\n  @el a\n", reversed.join(", ")));
+    assert_eq!(forward, backward);
+    // Plain, then selectors, then each block: `md:dark:` after `dark:`
+    let order = [
+        ".hl-a{display:flex;flex-direction:column;padding:4px;}",
+        ".hl-a:hover{color:blue;}",
+        ".hl-a::before{content:\"x\";}",
+        ":where(.hl-a)>*{opacity:1;}",
+        ":where(.hl-a:hover)>*{opacity:0.5;}",
+        "@media(min-width:768px){.hl-a{padding:8px;}}",
+        "@media(prefers-color-scheme:dark){.hl-a{color:white;}}",
+        "@media(min-width:768px){@media(prefers-color-scheme:dark){.hl-a{padding:12px;}}}",
+    ];
+    let at: Vec<usize> = order
+        .iter()
+        .map(|rule| {
+            forward
+                .find(rule)
+                .unwrap_or_else(|| panic!("{}: {}", rule, forward))
+        })
+        .collect();
+    assert!(at.windows(2).all(|w| w[0] < w[1]), "{:?}: {}", at, forward);
+}
+
+#[test]
+fn a_prefix_applies_to_a_group_a_bundle_or_the_branch_an_if_takes() {
+    let out = compile(
+        "@let card [padding 16, border-radius 8]\n@let on true\n\
+         @el [md:[padding 32, font-size 20]] a\n\
+         @el [md:$card] b\n\
+         @el [hover:if($on, [color red, background blue], color gray)] c\n\
+         @el [dark:[color white, hover:color gray]] d\n",
+    );
+    for rule in [
+        "@media(min-width:768px){.hl-a{padding:32px;font-size:20px;}.hl-b{padding:16px;border-radius:8px;}}",
+        ".hl-c:hover{color:red;background:blue;}",
+        "@media(prefers-color-scheme:dark){.hl-d{color:white;}.hl-d:hover{color:gray;}}",
+    ] {
+        assert!(out.contains(rule), "{}: {}", rule, out);
+    }
+    assert!(!out.contains("color:gray;}.hl-c"), "{}", out);
+}
+
+#[test]
+fn a_prefixed_group_or_bundle_holds_styles_only() {
+    for src in [
+        "@el [md:[id=x, padding 4]]\n  x\n",
+        "@let b [id=x, padding 4]\n@el [md:$b]\n  x\n",
+        "@el [hover:[required]]\n  x\n",
+        "@let on true\n@el [hover:if($on, [aria-current=page, color red])]\n  x\n",
+        "@el [children:[width fill, color red]]\n  x\n",
+        "@el [hover:[before:color red], before:[hover:color red]]\n  x\n",
+    ] {
+        let d = parse_diagnostics(src);
+        let invalid = coded(&d, "invalid-prefix");
+        assert_eq!(invalid.len(), 1, "{}: {:?}", src, d);
+        assert_eq!(errors(&d).len(), 1, "{}: {:?}", src, d);
+    }
+    let d = parse_diagnostics("@el [md:$b]\n  x\n");
+    assert_eq!(coded(&d, "undefined-variable").len(), 1, "{:?}", d);
+}
+
+#[test]
+fn a_group_s_prefix_and_what_follows_the_group_are_checked() {
+    let d = parse_diagnostics("@el [hovr:[padding 4, color red]]\n  x\n");
+    let unknown = coded(&d, "unknown-prefix");
+    assert_eq!(unknown.len(), 1, "{:?}", d);
+    assert_eq!(unknown[0].suggestion.as_deref(), Some("hover:"));
+    let d = parse_diagnostics("@el [md:[padding 4] extra]\n  x\n");
+    assert_eq!(coded(&d, "unexpected-argument").len(), 1, "{:?}", d);
+    // A group's members are checked like any attribute's, in code that
+    // doesn't run too
+    let d = parse_diagnostics("@if false\n  @el [md:[colr red]]\n    x\n");
+    assert_eq!(coded(&d, "unknown-attribute").len(), 1, "{:?}", d);
+}
+
+#[test]
+fn a_child_s_own_style_wins_over_its_parent_s_children_style() {
+    let out =
+        compile("@row [children:opacity 1, hover:children:opacity 0.8]\n  @el [opacity 0.5] a\n");
+    // Both parent rules have no specificity, so the child's class wins,
+    // and the hovered one comes after the plain one
+    assert!(
+        out.contains(":where(.hl-a)>*{opacity:1;}:where(.hl-a:hover)>*{opacity:0.8;}"),
+        "{}",
+        out
+    );
+    assert!(
+        out.contains(".hl-b{display:flex;flex-direction:column;opacity:0.5;}"),
+        "{}",
+        out
+    );
+}
+
+#[test]
+fn an_html_attribute_name_may_hold_a_colon() {
+    let out = compile("@el [xml:lang=en, x-on:click=open, xlink:href=#a]\n  x\n");
+    assert!(
+        out.contains("xml:lang=\"en\" x-on:click=\"open\" xlink:href=\"#a\""),
+        "{}",
+        out
+    );
+    let d = parse_diagnostics("@el [md:id=x]\n  x\n");
+    assert_eq!(coded(&d, "invalid-prefix").len(), 1, "{:?}", d);
 }
 
 #[test]

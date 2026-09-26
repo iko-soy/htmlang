@@ -1,0 +1,17 @@
+-- Prefixes stack, and one prefix covers a group, a bundle or an if()
+@let card [padding 16, border 1 solid #e5e7eb, border-radius 8]
+@let active true
+@page Prefixes compose
+@el [dark:md:padding 8, padding 4, md:dark:color white, dark:color #e5e7eb, md:padding 6, hover:color blue]
+  Written out of order, emitted in one order
+@el [md:[padding 32, font-size 20], dark:[background #1e3a8a, hover:background #1e40af]]
+  Groups
+@section [spacing 16, md:$card, hover:if($active, [background #eef2ff, color #3730a3])]
+  A bundle and an if()
+@row [spacing 4, children:opacity 1, hover:children:opacity 0.8, children:hover:color red, children:odd:background #f3f4f6]
+  @el [opacity 0.5] Own opacity wins
+  @el Two
+@el [before:content "→ ", hover:before:color blue, md:hover:after:content "!"]
+  Pseudo-elements last
+@el [xml:lang=en, x-on:click=open]
+  @el [md:dark:[padding 12, hover:[color red, cq-md:color green]]] Nested groups

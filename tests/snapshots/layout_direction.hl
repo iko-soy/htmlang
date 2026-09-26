@@ -20,9 +20,10 @@
   @el [width 240, lg:width fill] Fixed, then fills
   @el [width shrink] Shrinks
 
--- `children:` styles follow the direction too
-@row [spacing 8, children:width fill, md:flex-direction column]
-  @el A
+-- A direction under stacked prefixes: a column from md up, a row again
+-- from md up in dark mode
+@row [spacing 8, md:flex-direction column, md:dark:flex-direction row]
+  @el [width fill] A
   @el B
 
 -- The direction of a media or container condition

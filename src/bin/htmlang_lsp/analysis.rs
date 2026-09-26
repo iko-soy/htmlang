@@ -217,8 +217,12 @@ pub(crate) fn code_actions(
 
             // Rewrite a value as the compiler suggests (a quoted font
             // stack as `A\, B`, a slot name `my footer` as `my-footer`, a
-            // prefix `hovr:` as `hover:`).
-            code::INVALID_VALUE | code::INVALID_SLOT_NAME | code::UNKNOWN_PREFIX => {
+            // prefix `hovr:` as `hover:`, prefixes in order: `before:hover:`
+            // as `hover:before:`).
+            code::INVALID_VALUE
+            | code::INVALID_SLOT_NAME
+            | code::UNKNOWN_PREFIX
+            | code::INVALID_PREFIX => {
                 let (Some(subject), Some(suggestion)) = (subject, suggestion) else {
                     continue;
                 };
@@ -1206,6 +1210,15 @@ mod tests {
         assert_eq!(edits[0].new_text, "hover:");
         assert_eq!(edits[0].range.start, Position::new(0, 16));
         assert_eq!(edits[0].range.end, Position::new(0, 21));
+
+        // A pseudo-element goes last among the selector prefixes
+        let found = fixes("@el [before:hover:color red] x\n");
+        let (_, edits) = found
+            .iter()
+            .find(|(t, _)| t == "Replace with 'hover:before:color'")
+            .unwrap_or_else(|| panic!("{:?}", found));
+        assert_eq!(edits[0].range.start, Position::new(0, 5));
+        assert_eq!(edits[0].range.end, Position::new(0, 23));
 
         // An unknown property is written as it is, with a warning and a fix
         let found = fixes("@el [colr red] x\n");

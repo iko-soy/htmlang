@@ -316,11 +316,11 @@ pub(crate) fn hover(word: &str) -> Option<String> {
             doc.usage,
         ));
     }
-    if let Some(selector) = prefix_selector(word) {
-        return Some(markdown(word, &selector, ""));
-    }
     let base = vocab::base_attribute(word);
     let prefix = &word[..word.len() - base.len()];
+    if base.is_empty() {
+        return Some(markdown(word, &prefix_chain(prefix)?, ""));
+    }
     let text = attribute_hover(base)?;
     Some(if prefix.is_empty() {
         text
@@ -329,9 +329,32 @@ pub(crate) fn hover(word: &str) -> Option<String> {
             "{}\n\n*With `{}`:* {}",
             text,
             prefix,
-            prefix_selector(prefix).unwrap_or_default()
+            prefix_chain(prefix).unwrap_or_default()
         )
     })
+}
+
+/// What a chain of prefixes applies to, one prefix after another
+/// (`md:hover:`: from the md width up, in the `:hover` state).
+pub(crate) fn prefix_chain(chain: &str) -> Option<String> {
+    let (prefixes, rest) = vocab::split_prefixes(chain);
+    if prefixes.is_empty() || !rest.is_empty() {
+        return None;
+    }
+    let parts: Option<Vec<String>> = prefixes.into_iter().map(prefix_selector).collect();
+    let parts = parts?;
+    if parts.len() == 1 {
+        return parts.into_iter().next();
+    }
+    let parts: Vec<String> = parts
+        .iter()
+        .map(|p| p.trim_end_matches('.').to_string())
+        .collect();
+    Some(format!(
+        "{}. Media, width and container prefixes wrap the rule in their `@media` or \
+         `@container`; the others build its selector, left to right.",
+        parts.join("; ")
+    ))
 }
 
 fn attribute_hover(name: &str) -> Option<String> {
@@ -391,7 +414,12 @@ pub(crate) fn prefix_selector(prefix: &str) -> Option<String> {
     }
     if let Some((_, selector)) = vocab::PSEUDO_PREFIXES.iter().find(|(p, _)| *p == prefix) {
         return Some(if selector.starts_with(" > ") {
-            "Styles each direct child (`> *`).".to_string()
+            "Styles each direct child (`> *`); a child's own attributes win over it.".to_string()
+        } else if selector.starts_with("::") {
+            format!(
+                "Styles the `{}` pseudo-element (the last selector prefix).",
+                selector
+            )
         } else {
             format!("Applies in the `{}` state.", selector)
         });
@@ -528,6 +556,16 @@ mod tests {
         assert!(hover("required").unwrap().contains("Boolean"));
         assert!(hover("hover:color").unwrap().contains(":hover"));
         assert!(hover("md:").unwrap().contains("viewport"));
+        let chain = hover("md:hover:").unwrap();
+        assert!(
+            chain.contains("viewport") && chain.contains(":hover"),
+            "{chain}"
+        );
+        let stacked = hover("dark:hover:background").unwrap();
+        assert!(
+            stacked.contains("dark") && stacked.contains(":hover"),
+            "{stacked}"
+        );
         assert!(hover("@spacer").unwrap().contains("standard library"));
         assert!(hover("$truncate").unwrap().contains("bundle"));
         assert!(hover("@nav").unwrap().contains("<nav>"));

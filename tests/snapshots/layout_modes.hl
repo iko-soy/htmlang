@@ -34,9 +34,9 @@
 @ul [spacing 2]
   @li [center-x] Centered in a column
   @li [width fill] Full width
-@row [children:width fill]
-  @el A
-  @el B
+@row
+  @el [width fill] A
+  @el [width fill] B
 
 -- Native: HTML's own layout; lines are separated by a line break
 @pre

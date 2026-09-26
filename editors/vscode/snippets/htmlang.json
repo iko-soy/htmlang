@@ -36,7 +36,7 @@
     "body": [
       "@let --${1:ink} ${2:#0f172a}",
       "@let --${3:surface} ${4:white}",
-      "@page [color var(--$1), background var(--$3), dark:--$1 ${5:#e2e8f0}, dark:--$3 ${6:#0b1220}] ${7:My Page}",
+      "@page [color var(--$1), background var(--$3), dark:[--$1 ${5:#e2e8f0}, --$3 ${6:#0b1220}]] ${7:My Page}",
       "$0"
     ],
     "description": "Colour tokens on :root, redefined once for dark mode on the page: everything that uses them follows"
@@ -246,10 +246,17 @@
   "Dark mode": {
     "prefix": "@dark",
     "body": [
-      "@el [background ${1:white}, color ${2:#111827}, dark:background ${3:#111827}, dark:color ${4:#f9fafb}]",
+      "@el [background ${1:white}, color ${2:#111827}, dark:[background ${3:#111827}, color ${4:#f9fafb}]]",
       "  $0"
     ],
-    "description": "Light and dark colors on one element"
+    "description": "Light and dark colors on one element: a prefix applies to a [group] of styles"
+  },
+  "Responsive group": {
+    "prefix": "md:[",
+    "body": [
+      "${1:md}:[${2:padding 32}, ${3:font-size 20}]"
+    ],
+    "description": "Prefixes applied to a group of styles (or to a bundle: md:\\$card); prefixes stack, as in md:hover:color"
   },
   "Keyframes": {
     "prefix": "@keyframes",

@@ -944,7 +944,8 @@ fn check_page_tokens(tokens: &[syntax::Attr], line: usize, ctx: &mut ParseContex
                     check_page_tokens(branch.attrs(), line, ctx);
                 }
             }
-            None if token.key.starts_with('$') => {}
+            // Under prefixes there are only styles
+            None if token.key.starts_with('$') || token.prefixed.is_some() => {}
             None => {
                 let value = token.value.as_deref().map(|v| v.trim_matches('"'));
                 let value = match value {
@@ -965,11 +966,31 @@ fn check_page_tokens(tokens: &[syntax::Attr], line: usize, ctx: &mut ParseContex
 }
 
 fn literal_attrs(tokens: &[syntax::Attr]) -> Vec<syntax::Attr> {
+    // A prefixed group is checked with its prefixes, as far as its own
+    // attributes can be; a prefixed bundle or `if()` depends on what it holds
+    let group = |a: &syntax::Attr| {
+        let prefixed = a.prefixed.as_ref()?;
+        let syntax::Branch::Group { list, trailing } = &prefixed.target else {
+            return None;
+        };
+        let mut list = list.clone();
+        list.attrs = literal_attrs(&list.attrs);
+        let mut a = a.clone();
+        a.prefixed = Some(Box::new(syntax::Prefixed {
+            target: syntax::Branch::Group {
+                list,
+                trailing: trailing.clone(),
+            },
+            ..(**prefixed).clone()
+        }));
+        Some(a)
+    };
+    let groups = tokens.iter().filter_map(group);
     tokens
         .iter()
         .filter(|a| {
             let bundle = a.key.starts_with('$') && a.value.is_none() && !a.html;
-            a.choice.is_none() && !bundle
+            a.choice.is_none() && a.prefixed.is_none() && !bundle
         })
         .map(|a| {
             let mut a = a.clone();
@@ -980,6 +1001,7 @@ fn literal_attrs(tokens: &[syntax::Attr]) -> Vec<syntax::Attr> {
             }
             a
         })
+        .chain(groups)
         .collect()
 }
 
@@ -3911,27 +3933,30 @@ fn check_css_value(
     true
 }
 
-/// Check an attribute written as a style or a flag (not `key=value`): its
-/// prefix, its name, and, for a style, its value. A name htmlang doesn't
-/// know but CSS could have (`corner-shape`) is passed to the CSS as written,
-/// with a warning; custom properties (`--brand`) and vendor-prefixed ones
-/// (`-webkit-...`) without one. Anything that can't be written into the
-/// page is an error; returns false then, and the attribute is left out.
-fn check_attribute(
+/// Check an attribute's prefixes: each is known, their selector prefixes
+/// read left to right with a pseudo-element (`before:`) last, the selector
+/// of `has(...)` or `nth:...:` can be written into the CSS, and a word that
+/// places an element in its parent (`width fill`, `center-x`, `align-*`)
+/// isn't under `children:`, whose styles go on the children. Media,
+/// container and width prefixes go anywhere. Returns false, after
+/// reporting, when the attribute can't be written.
+fn check_prefixes(
     attr: &Attribute,
     line: usize,
     column: Option<usize>,
-    after_another: bool,
     ctx: &mut ParseContext,
 ) -> bool {
     use crate::vocab;
     let (prefixes, base) = vocab::split_prefixes(&attr.key);
-    let fail = |ctx: &mut ParseContext, code: &'static str, message: String, subject: &str| {
-        let diagnostic = Diagnostic::error(code, line, message).subject(subject);
-        let diagnostic = at_attribute(diagnostic, column, ctx);
-        ctx.diagnostics.push(diagnostic);
-        false
-    };
+    let fail =
+        |ctx: &mut ParseContext, message: String, subject: &str, suggestion: Option<String>| {
+            let diagnostic = Diagnostic::error(code::INVALID_PREFIX, line, message)
+                .subject(subject)
+                .suggest(suggestion);
+            let diagnostic = at_attribute(diagnostic, column, ctx);
+            ctx.diagnostics.push(diagnostic);
+            false
+        };
 
     // `hovr:color red`: a word and a `:` before the name is a prefix
     if let Some(colon) = base.find(':')
@@ -3958,31 +3983,104 @@ fn check_attribute(
         ctx.diagnostics.push(diagnostic);
         return false;
     }
-    if prefixes.len() > 1 {
+    // The selector of `has(...)` or `nth:...:` goes into the CSS as written
+    for prefix in &prefixes {
+        if let Some(reason) = css_breakout(prefix.trim_end_matches(':')) {
+            return fail(
+                ctx,
+                format!(
+                    "the prefix '{}' has {}: it can't be written into the page's CSS",
+                    prefix, reason
+                ),
+                prefix,
+                None,
+            );
+        }
+    }
+    // A pseudo-element is the last selector prefix: CSS has no
+    // `::before:hover`
+    let selectors: Vec<&str> = prefixes
+        .iter()
+        .copied()
+        .filter(|p| vocab::at_rule_rank(p).is_none())
+        .collect();
+    if let Some(at) = selectors.iter().position(|p| vocab::is_pseudo_element(p))
+        && at + 1 < selectors.len()
+    {
+        let element = selectors[at];
+        // The same prefixes, with the pseudo-element moved after the other
+        // selector prefixes
+        let mut order: Vec<&str> = prefixes.iter().copied().filter(|p| *p != element).collect();
+        let last_selector = order
+            .iter()
+            .rposition(|p| vocab::at_rule_rank(p).is_none())
+            .map_or(order.len(), |i| i + 1);
+        order.insert(last_selector, element);
+        let fixed = format!("{}{}", order.concat(), base);
         return fail(
             ctx,
-            code::INVALID_PREFIX,
             format!(
-                "'{}' has more than one prefix: an attribute takes one prefix, so `{}` and `{}` \
-                 can't both apply",
-                attr.key, prefixes[0], prefixes[1]
+                "'{}': `{}` selects a pseudo-element, which comes after the other selector \
+                 prefixes, as in CSS: write `{}`",
+                attr.key, element, fixed
             ),
             &attr.key,
+            Some(fixed),
         );
     }
-    // The selector of `has(...)` or `nth:...:` goes into the CSS as written
-    if let Some(prefix) = prefixes.first()
-        && let Some(reason) = css_breakout(prefix.trim_end_matches(':'))
-    {
+    // Under `children:` the styles go on the children, whose parent is this
+    // element: a word that places an element in its parent can't say where
+    if prefixes.contains(&"children:") && vocab::places_in_parent(base, attr.value.as_deref()) {
+        let (word, css) = match (base, attr.value.as_deref().map(str::trim)) {
+            (_, Some("fill")) => (format!("{} fill", base), " (`children:flex 1`)"),
+            (_, Some("shrink")) => (format!("{} shrink", base), " (`children:flex-shrink 0`)"),
+            _ => (base.to_string(), ""),
+        };
         return fail(
             ctx,
-            code::INVALID_PREFIX,
             format!(
-                "the prefix '{}' has {}: it can't be written into the page's CSS",
-                prefix, reason
+                "'{}{}': `{}` places an element in its parent, and under `children:` that \
+                 parent is this element: write `{}` on the children themselves, or the CSS \
+                 you mean{}",
+                attr.key,
+                attr.value
+                    .as_deref()
+                    .map_or(String::new(), |v| format!(" {}", v.trim())),
+                word,
+                word,
+                css
             ),
-            prefix,
+            &attr.key,
+            None,
         );
+    }
+    true
+}
+
+/// Check an attribute written as a style or a flag (not `key=value`): its
+/// prefix, its name, and, for a style, its value. A name htmlang doesn't
+/// know but CSS could have (`corner-shape`) is passed to the CSS as written,
+/// with a warning; custom properties (`--brand`) and vendor-prefixed ones
+/// (`-webkit-...`) without one. Anything that can't be written into the
+/// page is an error; returns false then, and the attribute is left out.
+fn check_attribute(
+    attr: &Attribute,
+    line: usize,
+    column: Option<usize>,
+    after_another: bool,
+    ctx: &mut ParseContext,
+) -> bool {
+    use crate::vocab;
+    let (prefixes, base) = vocab::split_prefixes(&attr.key);
+    let fail = |ctx: &mut ParseContext, code: &'static str, message: String, subject: &str| {
+        let diagnostic = Diagnostic::error(code, line, message).subject(subject);
+        let diagnostic = at_attribute(diagnostic, column, ctx);
+        ctx.diagnostics.push(diagnostic);
+        false
+    };
+
+    if !check_prefixes(attr, line, column, ctx) {
+        return false;
     }
     let prefixed = !prefixes.is_empty();
     // `md:id=x`: `=` makes an HTML attribute, which has no states
@@ -4235,8 +4333,32 @@ fn parse_attrs(
     validate: bool,
     text_keys: &[String],
 ) -> Vec<(Attribute, Option<Value>)> {
-    let mut attrs: Vec<(Attribute, Option<Value>)> = Vec::new();
-    let mut seen_keys: Vec<(String, bool)> = Vec::new();
+    let mut read = ReadAttrs::default();
+    read_attrs(tokens, "", line_num, ctx, validate, text_keys, &mut read);
+    read.attrs
+}
+
+/// The attributes of a list read so far, and the keys written (for the
+/// duplicate check).
+#[derive(Default)]
+struct ReadAttrs {
+    attrs: Vec<(Attribute, Option<Value>)>,
+    seen_keys: Vec<(String, bool)>,
+}
+
+/// [`parse_attrs`] for the attributes of `tokens`, each under the prefixes
+/// `prefix` (`md:` for those of `md:[...]`), which distribute over a
+/// group, a bundle and the branch an `if()` takes. Only styles take a
+/// prefix, so an HTML attribute there is an error.
+fn read_attrs(
+    tokens: &[syntax::Attr],
+    prefix: &str,
+    line_num: usize,
+    ctx: &mut ParseContext,
+    validate: bool,
+    text_keys: &[String],
+    out: &mut ReadAttrs,
+) {
     let mut chosen = Vec::new();
     choose_attrs(tokens, line_num, ctx, validate, text_keys, &mut chosen);
 
@@ -4249,6 +4371,23 @@ fn parse_attrs(
         let (key, value, html) = (token.key.clone(), token.value.clone(), token.html);
         let column = |at: usize| Some(token.span.column + at);
 
+        // `md:[...]`, `md:$card`, `md:if(...)`: the prefixes apply to each
+        // attribute there, and a prefix a parameter can't have
+        if let Some(prefixed) = &token.prefixed {
+            if let Some(inner) = group_prefix(token, prefixed, prefix, line, ctx) {
+                read_attrs(
+                    prefixed.target.attrs(),
+                    &inner,
+                    line_num,
+                    ctx,
+                    validate,
+                    &[],
+                    out,
+                );
+            }
+            continue;
+        }
+
         // `$name` (or `${name}`) alone: an attribute bundle, spliced in
         let bundle = key.strip_prefix('$').filter(|_| value.is_none() && !html);
         let bundle = bundle.and_then(|after| match interp::reference(after, &ctx.env)? {
@@ -4257,8 +4396,17 @@ fn parse_attrs(
         });
         if let Some(name) = bundle {
             if let Some(define_attrs) = ctx.env.bundle(&name).cloned() {
-                ctx.used_defines.insert(name);
+                ctx.used_defines.insert(name.clone());
                 for attr in define_attrs.iter() {
+                    if !prefix.is_empty() {
+                        if let Some(attr) =
+                            prefixed_member(attr, prefix, &name, line, column(0), validate, ctx)
+                        {
+                            out.attrs.push((attr, None));
+                        }
+                        continue;
+                    }
+                    let attrs = &out.attrs;
                     // Checked here, where it is either a parameter or not
                     let checked_here = validate
                         && !ctx.in_bundle
@@ -4270,7 +4418,7 @@ fn parse_attrs(
                     {
                         continue;
                     }
-                    attrs.push((attr.clone(), None));
+                    out.attrs.push((attr.clone(), None));
                 }
             } else {
                 not_a_bundle(&name, line, column(0), ctx);
@@ -4295,6 +4443,31 @@ fn parse_attrs(
             );
             continue;
         }
+
+        // Only a style has states: `md:[id=x]`, `md:id=x`
+        if html && (!prefix.is_empty() || !crate::vocab::split_prefixes(&key).0.is_empty()) {
+            let written = format!("{}{}", prefix, key);
+            let (name, _) = crate::vocab::split_prefixes(&written);
+            let diagnostic = Diagnostic::error(
+                code::INVALID_PREFIX,
+                line,
+                format!(
+                    "'{}=': a prefix applies to a style, and `{}=` is an HTML attribute, \
+                     which has no states",
+                    written,
+                    &written[name.concat().len()..]
+                ),
+            )
+            .subject(token.key.as_str());
+            let diagnostic = at_attribute(diagnostic, column(0), ctx);
+            ctx.diagnostics.push(diagnostic);
+            continue;
+        }
+        let key = if prefix.is_empty() {
+            key
+        } else {
+            format!("{}{}", prefix, key)
+        };
 
         // A value's variables are filled in. A style's value is CSS, where
         // quoted text keeps its quotes; an HTML attribute's (and a
@@ -4344,7 +4517,7 @@ fn parse_attrs(
         // `width 200` do too), and the later one wins
         if validate {
             let seen = (attr.key.clone(), attr.html);
-            if seen_keys.contains(&seen) {
+            if out.seen_keys.contains(&seen) {
                 let message = if attr.html {
                     format!("duplicate attribute '{}='", attr.key)
                 } else {
@@ -4355,7 +4528,7 @@ fn parse_attrs(
                 let diagnostic = at_attribute(diagnostic, column(0), ctx);
                 ctx.diagnostics.push(diagnostic);
             } else {
-                seen_keys.push(seen);
+                out.seen_keys.push(seen);
             }
         }
 
@@ -4369,14 +4542,117 @@ fn parse_attrs(
         // A style or a flag: its name is checked, and what can't be
         // written into the page is an error and left out
         let checked = validate && !attr.html && !(ctx.in_bundle && could_be_parameter(&attr));
-        if checked && !check_attribute(&attr, line, column(0), !attrs.is_empty(), ctx) {
+        let after_another = !out.attrs.is_empty();
+        if checked && !check_attribute(&attr, line, column(0), after_another, ctx) {
             continue;
         }
 
-        attrs.push((attr, typed));
+        out.attrs.push((attr, typed));
     }
+}
 
-    attrs
+/// The prefixes of a prefixed group, bundle or `if()` inside `outer` (the
+/// prefixes of the groups it is in), when they are all known; else the
+/// unknown one is reported. Text after a group's `]` is an error too.
+fn group_prefix(
+    token: &syntax::Attr,
+    prefixed: &syntax::Prefixed,
+    outer: &str,
+    line: usize,
+    ctx: &mut ParseContext,
+) -> Option<String> {
+    let at = |ctx: &ParseContext, diagnostic: Diagnostic, span: syntax::Span| match &ctx
+        .current_source
+    {
+        (current, Some(text)) if span.line != 0 && *current == span.line => {
+            diagnostic.column(span.column).source(text.clone())
+        }
+        _ => diagnostic,
+    };
+    if let syntax::Branch::Group {
+        trailing: Some(trailing),
+        ..
+    } = &prefixed.target
+    {
+        let diagnostic = Diagnostic::error(
+            code::UNEXPECTED_ARGUMENT,
+            line,
+            format!(
+                "'{}' after the `]` of `{}[...]`: the prefixes apply to the attributes in the \
+                 group, so it goes inside it",
+                trailing.raw, prefixed.prefix
+            ),
+        )
+        .subject(trailing.raw.as_str());
+        let diagnostic = at(ctx, diagnostic, trailing.span);
+        ctx.push_once(diagnostic);
+    }
+    let (known, rest) = crate::vocab::split_prefixes(&prefixed.prefix);
+    if !rest.is_empty() {
+        let written = rest.split_inclusive(':').next().unwrap_or(rest);
+        let suggestion = suggest_closest(written, &crate::vocab::all_prefixes())
+            .filter(|&closest| closest != written);
+        let message = match suggestion {
+            Some(closest) => format!("unknown prefix '{}', did you mean '{}'?", written, closest),
+            None => format!("unknown prefix '{}'", written),
+        };
+        let diagnostic = Diagnostic::error(code::UNKNOWN_PREFIX, line, message)
+            .subject(written)
+            .suggest(suggestion);
+        let diagnostic = at(ctx, diagnostic, token.span);
+        ctx.push_once(diagnostic);
+        return None;
+    }
+    Some(format!("{}{}", outer, known.concat()))
+}
+
+/// An attribute of the bundle `bundle`, spliced in under `prefix`
+/// (`md:$card`): the same attribute with the prefixes in front, when it can
+/// take them. An HTML attribute can't; a style's prefixes are checked, as
+/// is a flag or a name that isn't a style (a bundle's parameter), which
+/// under a prefix are attributes like any other.
+fn prefixed_member(
+    attr: &Attribute,
+    prefix: &str,
+    bundle: &str,
+    line: usize,
+    column: Option<usize>,
+    validate: bool,
+    ctx: &mut ParseContext,
+) -> Option<Attribute> {
+    let key = format!("{}{}", prefix, attr.key);
+    if attr.html {
+        if validate {
+            let diagnostic = Diagnostic::error(
+                code::INVALID_PREFIX,
+                line,
+                format!(
+                    "'{}${}': the bundle has `{}=`, an HTML attribute, and a prefix applies to \
+                     styles, which have states",
+                    prefix, bundle, attr.key
+                ),
+            )
+            .subject(format!("{}${}", prefix, bundle));
+            let diagnostic = at_attribute(diagnostic, column, ctx);
+            ctx.diagnostics.push(diagnostic);
+        }
+        return None;
+    }
+    let prefixed = Attribute {
+        key,
+        ..attr.clone()
+    };
+    if validate {
+        let fine = if attr.value.is_none() || could_be_parameter(attr) {
+            check_attribute(&prefixed, line, column, false, ctx)
+        } else {
+            check_prefixes(&prefixed, line, column, ctx)
+        };
+        if !fine {
+            return None;
+        }
+    }
+    Some(prefixed)
 }
 
 /// `class=hl-x`: the `hl-` prefix is htmlang's, for its generated classes,
@@ -4699,6 +4975,18 @@ fn branch_text(branch: &syntax::Branch) -> String {
 /// the variable holds. Each branch of an `if()` is checked on its own.
 fn check_attrs(tokens: &[syntax::Attr], line: usize, ctx: &mut ParseContext, text_keys: &[String]) {
     parse_attr_list(&literal_attrs(tokens), line, ctx, true, text_keys);
+    check_choices(tokens, line, ctx, text_keys);
+}
+
+/// [`check_attrs`] for the branches of each `if()` of `tokens`, also inside
+/// a prefixed group or as a prefixed `if()` (whose branches are checked
+/// without the prefixes).
+fn check_choices(
+    tokens: &[syntax::Attr],
+    line: usize,
+    ctx: &mut ParseContext,
+    text_keys: &[String],
+) {
     for token in tokens {
         if let Some(choice) = &token.choice
             && choice_shape(token, choice, line, ctx).is_some()
@@ -4706,6 +4994,9 @@ fn check_attrs(tokens: &[syntax::Attr], line: usize, ctx: &mut ParseContext, tex
             for branch in &choice.branches {
                 check_attrs(branch.attrs(), line, ctx, text_keys);
             }
+        }
+        if let Some(prefixed) = &token.prefixed {
+            check_choices(prefixed.target.attrs(), line, ctx, &[]);
         }
     }
 }

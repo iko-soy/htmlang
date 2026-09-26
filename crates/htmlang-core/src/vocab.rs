@@ -338,6 +338,52 @@ pub const MEDIA_PREFIXES: &[&str] = &[
 ];
 pub const CONTAINER_QUERY_PREFIXES: &[&str] = &["cq-sm:", "cq-md:", "cq-lg:", "cq-xl:", "cq-2xl:"];
 
+/// The place of an at-rule prefix (a width, media or container prefix,
+/// whose styles go in an `@media` or `@container` block) in the order the
+/// blocks are written: the widths, then `dark:` … `portrait:`, then the
+/// container widths. `None` for a selector prefix.
+pub fn at_rule_rank(prefix: &str) -> Option<usize> {
+    at_rule_prefixes().position(|p| p == prefix)
+}
+
+/// The at-rule prefixes, in the order their blocks are written.
+pub fn at_rule_prefixes() -> impl Iterator<Item = &'static str> {
+    RESPONSIVE_PREFIXES
+        .iter()
+        .chain(MEDIA_PREFIXES)
+        .chain(CONTAINER_QUERY_PREFIXES)
+        .copied()
+}
+
+/// Whether the at-rule prefix of rank `a` holds wherever the one of rank
+/// `b` does: itself, or a smaller width of the same kind (`sm:` wherever
+/// `md:` holds).
+pub fn at_rule_implied(a: usize, b: usize) -> bool {
+    let widths = RESPONSIVE_PREFIXES.len();
+    let media = widths + MEDIA_PREFIXES.len();
+    a == b || (a < b && ((b < widths) || (a >= media && b >= media)))
+}
+
+/// A selector prefix that selects a pseudo-element (`before:`, `after:`,
+/// `placeholder:`, `selection:`), which comes last among the selector
+/// prefixes: `hover:before:` is the `::before` of a hovered element, and
+/// CSS has no `::before:hover`.
+pub fn is_pseudo_element(prefix: &str) -> bool {
+    PSEUDO_PREFIXES
+        .iter()
+        .any(|&(p, selector)| p == prefix && selector.starts_with("::"))
+}
+
+/// htmlang's words that place an element in its parent, so they mean
+/// something only against the parent: `width`/`height` `fill` or
+/// `shrink`, `center-x`, `center-y`, `align-*`.
+pub fn places_in_parent(name: &str, value: Option<&str>) -> bool {
+    match name {
+        "width" | "height" => value.is_some_and(|v| matches!(v.trim(), "fill" | "shrink")),
+        _ => name.starts_with("center-") || name.starts_with("align-"),
+    }
+}
+
 /// Does `key` carry any state, media, responsive or container prefix?
 pub fn is_prefixed(key: &str) -> bool {
     prefix_len(key).is_some()
@@ -579,6 +625,22 @@ mod tests {
             super::split_prefixes("has(a:hover)"),
             (vec![], "has(a:hover)")
         );
+    }
+
+    #[test]
+    fn at_rule_prefixes_are_ranked_in_block_order() {
+        use super::{at_rule_implied, at_rule_rank};
+        let rank = |p| at_rule_rank(p).unwrap();
+        assert!(rank("sm:") < rank("2xl:") && rank("2xl:") < rank("dark:"));
+        assert!(rank("portrait:") < rank("cq-sm:"));
+        assert_eq!(at_rule_rank("hover:"), None);
+        assert!(at_rule_implied(rank("sm:"), rank("md:")));
+        assert!(!at_rule_implied(rank("md:"), rank("sm:")));
+        assert!(at_rule_implied(rank("cq-sm:"), rank("cq-lg:")));
+        assert!(!at_rule_implied(rank("lg:"), rank("cq-xl:")));
+        assert!(!at_rule_implied(rank("dark:"), rank("print:")));
+        assert!(at_rule_implied(rank("dark:"), rank("dark:")));
+        assert!(super::is_pseudo_element("before:") && !super::is_pseudo_element("hover:"));
     }
 
     #[test]

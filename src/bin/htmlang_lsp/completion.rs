@@ -39,13 +39,18 @@ pub(crate) fn completions(text: &str, position: Position) -> Vec<CompletionItem>
             return variable_completions(text, edit_range);
         }
 
-        // After a state/media prefix (`hover:`, `md:`, `nth:2n:`), offer
-        // the styles it can apply to.
+        // After prefixes (`hover:`, `md:hover:`, `nth:2n:`), offer the
+        // styles they can apply to, and the prefixes that can follow
         if let Some(colon) = current_word.rfind(':') {
             let prefix = &current_word[..=colon];
             if vocab::is_prefixed(prefix) {
                 let element = owning_element(text, position);
-                let mut items = state_attr_completions(prefix, edit_range, element.as_deref());
+                let group = attr_context(before)
+                    .and_then(|c| c.group)
+                    .unwrap_or_default();
+                let mut items =
+                    state_attr_completions(prefix, &group, edit_range, element.as_deref());
+                items.extend(prefix_completions(prefix, &group, edit_range));
                 items.extend(custom_property_completions(
                     text,
                     prefix,
@@ -54,6 +59,20 @@ pub(crate) fn completions(text: &str, position: Position) -> Vec<CompletionItem>
                 ));
                 return items;
             }
+        }
+
+        // In a prefixed group (`md:[...]`) every attribute is a style
+        if let Some(group) = attr_context(before).and_then(|c| c.group) {
+            let element = owning_element(text, position);
+            let mut items = state_attr_completions("", &group, edit_range, element.as_deref());
+            items.extend(prefix_completions("", &group, edit_range));
+            items.extend(custom_property_completions(
+                text,
+                "",
+                current_word,
+                edit_range,
+            ));
+            return items;
         }
 
         // Attribute-value enums for `attr <value>` patterns (e.g. type, cursor).
@@ -178,6 +197,9 @@ pub(crate) struct AttrContext<'a> {
     pub segment: &'a str,
     /// The attributes before it in the list, as written.
     pub previous: Vec<&'a str>,
+    /// In a prefixed group (`md:[...]`, also inside another one): the
+    /// groups' prefixes as written, which apply to the attribute.
+    pub group: Option<String>,
 }
 
 impl AttrContext<'_> {
@@ -211,6 +233,8 @@ pub(crate) fn attr_context(before: &str) -> Option<AttrContext<'_>> {
         depth: i32,
         previous: Vec<&'a str>,
         ifs: Vec<(i32, usize)>,
+        /// The prefixes before the `[` of a prefixed group
+        prefix: Option<&'a str>,
     }
     let mut lists: Vec<List> = Vec::new();
     let mut quoted = false;
@@ -226,12 +250,23 @@ pub(crate) fn attr_context(before: &str) -> Option<AttrContext<'_>> {
         match c {
             '"' if !lists.is_empty() => quoted = !quoted,
             _ if quoted => {}
-            '[' => lists.push(List {
-                start: i + 1,
-                depth: 0,
-                previous: Vec::new(),
-                ifs: Vec::new(),
-            }),
+            '[' => {
+                // `md:[`: a group whose attributes take the prefixes
+                let prefix = lists.last().and_then(|list| {
+                    let from = list.ifs.last().map_or(list.start, |(_, at)| *at);
+                    let written = before[from..i].trim_start();
+                    let prefix = written.strip_suffix(':').map(|_| written)?;
+                    let (known, rest) = vocab::split_prefixes(prefix);
+                    (!known.is_empty() && rest.is_empty()).then_some(prefix)
+                });
+                lists.push(List {
+                    start: i + 1,
+                    depth: 0,
+                    previous: Vec::new(),
+                    ifs: Vec::new(),
+                    prefix,
+                })
+            }
             ']' => {
                 lists.pop();
             }
@@ -272,11 +307,15 @@ pub(crate) fn attr_context(before: &str) -> Option<AttrContext<'_>> {
         }
         i += c.len_utf8();
     }
+    // The prefixes of every group the attribute is in, outermost first
+    let prefixes: String = lists.iter().filter_map(|list| list.prefix).collect();
+    let group = (!prefixes.is_empty()).then_some(prefixes);
     let list = lists.pop()?;
     let start = list.ifs.last().map_or(list.start, |(_, at)| *at);
     Some(AttrContext {
         segment: &before[start..],
         previous: list.previous,
+        group,
     })
 }
 
@@ -1040,18 +1079,26 @@ fn lays_out_children(element: Option<&str>) -> bool {
         .is_none_or(|kind| kind.layout().is_container())
 }
 
-/// Styles that can follow a state/media prefix: `hover:color`, `md:padding`.
-/// `spacing`, `wrap` and `grid-cols` only where `element` lays out its
-/// children, or after `children:`, which puts them on the children.
+/// Styles that can follow prefixes: `hover:color`, `md:padding`, also in a
+/// group under the prefixes `group` (`md:[`). `spacing`, `wrap` and
+/// `grid-cols` only where `element` lays out its children, or under
+/// `children:`, which puts them on the children, where the words that
+/// place an element in its parent (`center-x`, `align-*`) can't go.
 fn state_attr_completions(
     prefix: &str,
+    group: &str,
     range: Range,
     element: Option<&str>,
 ) -> Vec<CompletionItem> {
-    let lays_out_children = prefix == "children:" || lays_out_children(element);
+    let chain = format!("{}{}", group, prefix);
+    let (prefixes, _) = vocab::split_prefixes(&chain);
+    let on_children = prefixes.contains(&"children:");
+    let lays_out_children = on_children || lays_out_children(element);
     let htmlang = vocab::HTMLANG_ATTRIBUTES
         .iter()
         .filter(|name| lays_out_children || !vocab::CONTAINER_ATTRIBUTES.contains(name))
+        .filter(|name| !(on_children && vocab::places_in_parent(name, None)))
+        .filter(|name| **name != "inline")
         .map(|name| (*name, !vocab::HTMLANG_FLAGS.contains(name)));
     let css = vocab::CSS_PROPERTIES.iter().map(|name| (*name, true));
     htmlang
@@ -1065,6 +1112,29 @@ fn state_attr_completions(
             };
             let detail = docs::attribute(name).map_or("CSS property", |d| d.summary);
             item(&full, CompletionItemKind::PROPERTY, detail, &insert, range)
+        })
+        .collect()
+}
+
+/// The prefixes that can follow `prefix` (under the group prefixes
+/// `group`): any at-rule prefix, and a selector prefix unless a
+/// pseudo-element (`before:`), which comes last, is already there.
+fn prefix_completions(prefix: &str, group: &str, range: Range) -> Vec<CompletionItem> {
+    let chain = format!("{}{}", group, prefix);
+    let (written, _) = vocab::split_prefixes(&chain);
+    let after_element = written.iter().any(|p| vocab::is_pseudo_element(p));
+    vocab::PSEUDO_PREFIXES
+        .iter()
+        .map(|(p, _)| *p)
+        .filter(|_| !after_element)
+        .chain(vocab::at_rule_prefixes())
+        .filter(|p| !written.contains(p))
+        .map(|p| {
+            let label = format!("{}{}", prefix, p);
+            let detail = docs::prefix_selector(p).unwrap_or_default();
+            let mut completion = item(&label, CompletionItemKind::KEYWORD, &detail, &label, range);
+            completion.sort_text = Some(format!("6_{}", label));
+            completion
         })
         .collect()
 }
@@ -1536,7 +1606,7 @@ mod tests {
         assert!(offers(None, "spacing"));
         // After a prefix too, except `children:`, which styles the children
         let prefixed = |prefix: &str, element: &str, name: &str| {
-            state_attr_completions(prefix, Range::default(), Some(element))
+            state_attr_completions(prefix, "", Range::default(), Some(element))
                 .iter()
                 .any(|i| i.label == format!("{}{}", prefix, name))
         };
@@ -1572,6 +1642,34 @@ mod tests {
         assert!(items.iter().any(|i| i.label == "hover:background"));
         let items = completions("@el [md:", Position::new(0, 8));
         assert!(items.iter().any(|i| i.label == "md:padding"));
+        // Prefixes stack: styles and further prefixes after a chain
+        let items = completions("@el [md:hover:", Position::new(0, 14));
+        let has = |items: &[CompletionItem], label: &str| items.iter().any(|i| i.label == label);
+        assert!(has(&items, "md:hover:color"));
+        assert!(has(&items, "md:hover:dark:"));
+        assert!(has(&items, "md:hover:before:"));
+        assert!(!has(&items, "md:hover:md:"));
+        // A pseudo-element is the last selector prefix
+        let items = completions("@el [before:", Position::new(0, 12));
+        assert!(has(&items, "before:dark:") && !has(&items, "before:hover:"));
+        // Under `children:`, no word that places an element in its parent
+        let items = completions("@row [children:", Position::new(0, 15));
+        assert!(has(&items, "children:padding") && !has(&items, "children:center-x"));
+        // In a prefixed group, only styles (and prefixes)
+        let items = completions("@el [md:[pad", Position::new(0, 12));
+        assert!(has(&items, "padding") && has(&items, "hover:"));
+        assert!(!has(&items, "id=") && !has(&items, "disabled"));
+        let items = completions("@row [dark:[children:[", Position::new(0, 22));
+        assert!(has(&items, "padding") && !has(&items, "center-x"));
+        assert_eq!(
+            attr_context("@el [dark:[hover:[co").and_then(|c| c.group),
+            Some("dark:hover:".to_string())
+        );
+        // A value's brackets are not a group
+        assert_eq!(
+            attr_context("@el [grid-template-columns [a").and_then(|c| c.group),
+            None
+        );
     }
 
     #[test]

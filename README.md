@@ -67,6 +67,9 @@ unless you write some, and nothing is added that you didn't ask for.
   token once (`@page [dark:--surface #0b1220]`) instead of every colour
   that uses it.
   Prefixes make a style conditional: `hover:`, `md:`, `dark:`, `first:`.
+  They stack (`md:dark:background`, `hover:children:opacity`), and one
+  prefix covers a group or a bundle (`md:[padding 32, font-size 20]`,
+  `md:$card`).
   A comma separates attributes, so a comma inside a value is written `\,`
   (`transition opacity 0.3s\, transform 0.3s`), and quoted text keeps its
   quotes only in CSS (`before:content "→ "`).
@@ -147,10 +150,11 @@ is an HTML attribute:
 ```
 
 A prefix applies a style only in a state, from a screen width up, or under a
-media condition:
+media condition. Prefixes stack, and a prefix before a `[group]` applies to
+each style in it:
 
 ```
-@el [padding 16, md:padding 32, background #3b82f6, hover:background #2563eb, dark:background #1e3a8a]
+@el [padding 16, md:[padding 32, font-size 20], background #3b82f6, hover:background #2563eb, dark:[background #1e3a8a, hover:background #1e40af]]
   @text [color white] Click me
 ```
 

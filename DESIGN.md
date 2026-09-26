@@ -362,15 +362,15 @@ and `[flex-shrink 0, width fill]` still grows but never shrinks.
   @el [background #fcd34d] One
 ```
 
-A direction set under a media or container prefix (`md:flex-direction
-row`, `print:`, `cq-md:`) switches the children's `fill` and `shrink` in
-that same condition. As in elm-ui, whose child rules are keyed on the
+A direction set under media or container prefixes (`md:flex-direction
+row`, `print:`, `cq-md:`, or a stack of them such as `md:dark:`) switches
+the children's `fill` and `shrink` in that same condition. As in elm-ui, whose child rules are keyed on the
 parent's class (`.r > .wf`), each child gets a rule keyed on its parent's
 class in the parent's `@media` or `@container` block. A width prefix holds
 from its width up, so `sm:flex-direction column` still applies at `lg:`
 unless `lg:` sets a direction of its own. A direction under a state prefix
-(`hover:`, `first:`, `children:`) leaves the children's layout words as
-they are.
+(`hover:`, `first:`, `children:`, or a stack with one in it) leaves the
+children's layout words as they are.
 
 ```
 @header [spacing 16, md:flex-direction row, md:align-items center]
@@ -553,7 +553,7 @@ uses it:
 @let --ink #0f172a
 @let --surface white
 @let --subtle #f8fafc
-@page [color var(--ink), background var(--surface), dark:--ink #e2e8f0, dark:--surface #0b1220, dark:--subtle #111a2e] Tokens
+@page [color var(--ink), background var(--surface), dark:[--ink #e2e8f0, --surface #0b1220, --subtle #111a2e]] Tokens
 @section [padding 96 24, background var(--subtle)]
   @article [padding 24, background var(--surface)]
     Both follow dark mode, from the one place that sets it.
@@ -565,29 +565,66 @@ A prefix applies a style only in some condition:
 
 | Prefix | Applies |
 |---|---|
-| `hover:`, `active:`, `focus:`, `focus-visible:`, `focus-within:`, `disabled:`, `checked:`, `visited:`, `target:`, `valid:`, `invalid:`, `empty:`, `placeholder:`, `selection:` | In that state |
+| `hover:`, `active:`, `focus:`, `focus-visible:`, `focus-within:`, `disabled:`, `checked:`, `visited:`, `target:`, `valid:`, `invalid:`, `empty:` | In that state |
 | `first:`, `last:`, `odd:`, `even:`, `nth:EXPR:` | By the element's position among its siblings |
 | `children:` | To each direct child |
-| `before:`, `after:` | To the `::before` / `::after` pseudo-element (together with `content`) |
+| `before:`, `after:`, `placeholder:`, `selection:` | To that pseudo-element (`::before` and `::after` together with `content`) |
 | `has(SELECTOR):` | When the element contains a match |
 | `sm:`, `md:`, `lg:`, `xl:`, `2xl:` | From that viewport width up (640, 768, 1024, 1280, 1536px) |
 | `cq-sm:` … `cq-2xl:` | From that container width up (the same widths, for an ancestor with `container-type inline-size`) |
 | `dark:`, `print:`, `motion-safe:`, `motion-reduce:`, `landscape:`, `portrait:` | Under that media condition |
 
-A prefix goes on a style or a layout flag, and an attribute takes one
-prefix: a misspelled prefix (`hovr:`) and a second one (`md:hover:`) are
-errors, not styles that silently never apply.
+A prefix goes on a style or a layout flag, and prefixes stack: the key
+is a chain of prefixes, then the property, and the style applies where
+all of them hold. The selector prefixes (every row above the widths)
+read left to right: `hover:children:` styles the children of a hovered
+element, `children:hover:` a hovered child. A pseudo-element is not an
+element with states of its own, so it comes last among them:
+`hover:before:color` is the `::before` of a hovered element, and
+`before:hover:color` is an error that says so. The width, media and
+container prefixes go anywhere in the chain, in any order, and each is
+an `@media` or `@container` rule around the ones inside it:
+`md:dark:padding 32` and `dark:md:padding 32` are the same style, from
+768px up in dark mode. A misspelled prefix (`hovr:`) is an error, not a
+style that silently never applies.
+
+A prefix written before a `[group]` applies to each style in it, and one
+written before a `$bundle` to each style the bundle holds, so styles that
+share a condition are written under it once. A prefix before an `if()`
+applies to the branch it picks. The group or bundle holds styles only:
+an HTML attribute (`md:[id=x]`) or a flag that is not a style has no
+states, and it is an error there, as it is with a prefix of its own
+(`md:id=x`).
+
+`children:` styles each direct child, as the parent sees it. They take
+effect only where the child sets nothing itself, since what an element
+says about itself wins over what its parent says about it. The words
+that place an element in its parent (`width fill`, `width shrink`,
+`center-x`, `align-*`) are errors under `children:`, because there the
+parent they measure against is this element: they go on the children
+themselves, or the CSS they stand for does (`children:flex 1`).
 
 ```
-@el [padding 16, background #3b82f6, hover:background #2563eb, md:padding 32, dark:background #1e3a8a]
+@let card [padding 16, border 1 solid #e5e7eb, border-radius 8]
+@let active true
+@el [padding 16, background #3b82f6, hover:background #2563eb, md:[padding 32, font-size 20], dark:[background #1e3a8a, hover:background #1e40af]]
   @text [color white] Click me
-@row [spacing 4, children:flex 1]
+@row [spacing 4, children:flex 1, hover:children:opacity 0.8]
   @el [odd:background #f3f4f6] A
   @el [odd:background #f3f4f6] B
   @el [odd:background #f3f4f6] C
-@el [before:content "→ ", before:color red]
+@el [before:content "→ ", before:color red, hover:before:color blue]
   Item with an arrow
+@section [spacing 16, md:$card, hover:if($active, [background #eef2ff, color #3730a3])]
+  A card from md up
 ```
+
+The styles of one element follow a fixed order, whatever the order they
+are written in: those without a prefix, then those with selector
+prefixes only, then each width, media and container condition in the
+order of the table (a stack like `md:dark:` after `dark:` on its own),
+with its selector chains inside it. So the later of two that both hold
+is the narrower one, and it wins.
 
 ### Conditional attributes
 
@@ -773,7 +810,9 @@ only the file. It isn't shown, so a style on it is an error.
 
 HTML attributes are written `key=value`: `id=main`, `class=note`,
 `href=/about`, `type=email`, `alt=Logo`, `target=_blank`,
-`aria-label=Close menu`, `data-id=42`. Any name works. Boolean attributes are
+`aria-label=Close menu`, `data-id=42`. Any name works, one with a colon
+in it included (`xml:lang=en`, `x-on:click=open`): before an `=` a colon is
+part of the name, not a prefix. Boolean attributes are
 written bare: `required`, `disabled`, `checked`, `hidden`, `open`, `popover`.
 An HTML attribute written like a style (`type email`) is an error that
 shows the `key=value` form. A style

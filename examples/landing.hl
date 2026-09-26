@@ -8,11 +8,13 @@
   color var(--ink),
   background var(--surface),
   -- Dark mode redefines the tokens once, and everything that uses them follows
-  dark:--ink #e2e8f0,
-  dark:--muted #94a3b8,
-  dark:--line #1e293b,
-  dark:--surface #0b1220,
-  dark:--subtle #111a2e
+  dark:[
+    --ink #e2e8f0,
+    --muted #94a3b8,
+    --line #1e293b,
+    --surface #0b1220,
+    --subtle #111a2e
+  ]
 ] Launchpad
 @meta description Launchpad turns static pages into a product site in minutes.
 @meta og:title Launchpad

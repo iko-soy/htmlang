@@ -150,6 +150,22 @@ pub struct Attr {
     pub span: Span,
     /// The attribute is `if(CONDITION, A, B)` as a whole.
     pub choice: Option<Box<Choice>>,
+    /// The attribute is prefixes applied to a `[group]`, a `$bundle` or an
+    /// `if()`: `md:[padding 32, font-size 20]`, `dark:$card`. Its `key` is
+    /// then the prefixes, and it has no value.
+    pub prefixed: Option<Box<Prefixed>>,
+}
+
+/// Prefixes applied to several attributes at once, which they distribute
+/// over: `md:[padding 32, font-size 20]` is `md:padding 32, md:font-size 20`.
+#[derive(Clone, Debug)]
+pub struct Prefixed {
+    /// The prefixes as written, each with its `:` (`md:hover:`).
+    pub prefix: String,
+    pub prefix_span: Span,
+    /// What they apply to: a group, or one attribute that is a `$bundle`
+    /// or an `if()`.
+    pub target: Branch,
 }
 
 /// A whole attribute `if(CONDITION, A, B)`: `A` or `B`, by the condition.
@@ -1555,6 +1571,17 @@ impl Reader<'_> {
         let (key, value, html) = split_attribute(&arg.raw);
         let piece = &self.text[start..end];
         let s = start + (piece.len() - piece.trim_start().len());
+        if let Some(prefixed) = self.prefixed(s, s + arg.raw.len()) {
+            return Some(Attr {
+                key: prefixed.prefix.clone(),
+                value: None,
+                html: false,
+                raw: arg.raw,
+                span: arg.span,
+                choice: None,
+                prefixed: Some(Box::new(prefixed)),
+            });
+        }
         let choice = self.choice(s, s + arg.raw.len()).map(Box::new);
         Some(Attr {
             key,
@@ -1563,7 +1590,48 @@ impl Reader<'_> {
             raw: arg.raw,
             span: arg.span,
             choice,
+            prefixed: None,
         })
+    }
+
+    /// Prefixes applied to a `[group]`, a `$bundle` or an `if()`, when that
+    /// is all of `start..end`: a key that ends in `:` directly followed by
+    /// `[`, `$` or `if(`. A value is always after a space, so the `[` of a
+    /// value (`grid-template-columns [a] 1fr`) is never a group, and one
+    /// inside a prefix's parentheses (`has([open]):`) isn't either.
+    fn prefixed(&self, start: usize, end: usize) -> Option<Prefixed> {
+        let text = &self.text[start..end];
+        let mut depth = 0;
+        for (i, c) in text.char_indices() {
+            match c {
+                '(' => depth += 1,
+                ')' => depth -= 1,
+                _ if depth > 0 => {}
+                '=' | '"' | '[' | '$' | '\\' => return None,
+                c if c.is_whitespace() => return None,
+                ':' => {
+                    let rest = &text[i + 1..];
+                    if !(rest.starts_with(['[', '$']) || rest.starts_with("if(")) || i == 0 {
+                        continue;
+                    }
+                    let at = start + i + 1;
+                    let target = if rest.starts_with('[') {
+                        let (list, after) = self.attr_list(at, end);
+                        let trailing = self.arg(after, end);
+                        Branch::Group { list, trailing }
+                    } else {
+                        self.attr(at, end).map_or(Branch::Empty, Branch::Attr)
+                    };
+                    return Some(Prefixed {
+                        prefix: text[..i + 1].to_string(),
+                        prefix_span: self.span(start, at),
+                        target,
+                    });
+                }
+                _ => {}
+            }
+        }
+        None
     }
 
     /// `if(CONDITION, A, B)` when it is all of `start..end`: the condition
@@ -2121,7 +2189,8 @@ pub(crate) fn split_attribute(raw: &str) -> (String, Option<String>, bool) {
 }
 
 /// Split an HTML attribute written `key=value` (`alt=`, `type=email`,
-/// `aria-label=Close menu`). Returns `None` for style attributes.
+/// `aria-label=Close menu`, and names with a colon such as `xml:lang=en`
+/// or `x-on:click=open`). Returns `None` for style attributes.
 pub(crate) fn split_html_attribute(part: &str) -> Option<(&str, &str)> {
     let first_token = part.split(char::is_whitespace).next()?;
     let eq = first_token.find('=')?;
@@ -2129,7 +2198,7 @@ pub(crate) fn split_html_attribute(part: &str) -> Option<(&str, &str)> {
     let valid_key = key.starts_with(|c: char| c.is_ascii_alphabetic())
         && key
             .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | ':'));
     valid_key.then(|| (key, part[eq + 1..].trim()))
 }
 
@@ -2293,6 +2362,42 @@ mod tests {
         let group = choice.branches[0].attrs();
         assert_eq!((group[0].span.line, group[0].span.column), (2, 2));
         assert_eq!((group[1].span.line, group[1].span.column), (3, 2));
+    }
+
+    #[test]
+    fn prefixes_apply_to_a_group_a_bundle_or_an_if() {
+        let src = "@el [md:hover:[padding 32, dark:color red], dark:$card, hover:if($on, color red), grid-template-columns [a] 1fr, has([open]):color red, xml:lang=en, md:x]\n";
+        let tree = parse(src);
+        let NodeKind::Element(line) = &tree.nodes[0].kind else {
+            panic!()
+        };
+        let attrs = &line.chain[0].attrs.as_ref().unwrap().attrs;
+        assert_eq!(attrs.len(), 7);
+        let group = attrs[0].prefixed.as_ref().expect("a prefixed group");
+        assert_eq!(group.prefix, "md:hover:");
+        assert_eq!(attrs[0].key, "md:hover:");
+        assert_eq!(
+            &src[group.prefix_span.start..group.prefix_span.end],
+            "md:hover:"
+        );
+        let keys: Vec<&str> = group
+            .target
+            .attrs()
+            .iter()
+            .map(|a| a.key.as_str())
+            .collect();
+        assert_eq!(keys, ["padding", "dark:color"]);
+        let bundle = attrs[1].prefixed.as_ref().expect("a prefixed bundle");
+        assert!(matches!(&bundle.target, Branch::Attr(a) if a.key == "$card"));
+        let choice = attrs[2].prefixed.as_ref().expect("a prefixed if()");
+        assert!(matches!(&choice.target, Branch::Attr(a) if a.choice.is_some()));
+        // A value's `[` and a `[` inside a prefix's parentheses are not groups
+        assert!(attrs[3].prefixed.is_none());
+        assert_eq!(attrs[3].key, "grid-template-columns");
+        assert!(attrs[4].prefixed.is_none());
+        // A name with a colon and `=` is an HTML attribute
+        assert!(attrs[5].html && attrs[5].key == "xml:lang");
+        assert!(attrs[6].prefixed.is_none());
     }
 
     #[test]

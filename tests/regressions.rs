@@ -1440,13 +1440,21 @@ fn a_semicolon_from_data_no_longer_escapes_the_css_rule() {
 
 #[test]
 fn stacked_prefixes_are_no_longer_dropped_silently() {
-    let result = parser::parse("@el [md:hover:color red, hover:md:color blue] x\n");
-    let errors: Vec<_> = result
-        .diagnostics
-        .iter()
-        .filter(|d| d.code == "invalid-prefix")
-        .collect();
-    assert_eq!(errors.len(), 2, "{:?}", result.diagnostics);
+    // Codegen stripped one prefix and dropped the rest, with no diagnostic
+    // (P5 made them errors); they compose now
+    let result = parser::parse(
+        "@el [md:hover:color red, dark:hover:background black, children:odd:color blue, first:before:content \"x\"] x\n",
+    );
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    let html = codegen::generate(&result.document);
+    for css in [
+        "@media(min-width:768px){.hl-a:hover{color:red;}}",
+        "@media(prefers-color-scheme:dark){.hl-a:hover{background:black;}}",
+        ":where(.hl-a)>*:nth-child(odd){color:blue;}",
+        ".hl-a:first-child::before{content:\"x\";}",
+    ] {
+        assert!(html.contains(css), "{} in {}", css, html);
+    }
 }
 
 #[test]
