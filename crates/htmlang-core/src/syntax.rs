@@ -2178,14 +2178,30 @@ pub(crate) fn split_attribute(raw: &str) -> (String, Option<String>, bool) {
     if let Some((key, value)) = split_html_attribute(raw) {
         return (key.to_string(), Some(value.to_string()), true);
     }
-    match raw.split_once(' ') {
-        Some((key, value)) => (
-            key.trim().to_string(),
-            Some(value.trim().to_string()),
+    match key_end(raw) {
+        Some(end) => (
+            raw[..end].trim().to_string(),
+            Some(raw[end + 1..].trim().to_string()),
             false,
         ),
         None => (raw.to_string(), None, false),
     }
+}
+
+/// Where a style's key ends: at the first space outside parentheses, so a
+/// prefix's argument can hold spaces (`has(> img):padding 0`). When a `(`
+/// is never closed, at the first space.
+fn key_end(raw: &str) -> Option<usize> {
+    let mut depth = 0usize;
+    for (i, c) in raw.char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            ' ' if depth == 0 => return Some(i),
+            _ => {}
+        }
+    }
+    if depth > 0 { raw.find(' ') } else { None }
 }
 
 /// Split an HTML attribute written `key=value` (`alt=`, `type=email`,
@@ -2756,5 +2772,29 @@ mod tests {
         assert_eq!(tree.nodes[0].end_line(), 4);
         assert_eq!(tree.node_at_line(2).map(|n| n.span.line), Some(1));
         assert_eq!(tree.node_at_line(4).map(|n| n.span.line), Some(4));
+    }
+
+    #[test]
+    fn a_key_ends_at_the_first_space_outside_parentheses() {
+        let split = |raw: &str| {
+            let (key, value, _) = split_attribute(raw);
+            (key, value)
+        };
+        let pair = |k: &str, v: &str| (k.to_string(), Some(v.to_string()));
+        assert_eq!(
+            split("has(> img):padding 0"),
+            pair("has(> img):padding", "0")
+        );
+        assert_eq!(
+            split("is(:hover, .a b):color red"),
+            pair("is(:hover, .a b):color", "red")
+        );
+        assert_eq!(
+            split("grid-template-columns repeat(2, 1fr)"),
+            pair("grid-template-columns", "repeat(2, 1fr)")
+        );
+        // A `(` never closed: the first space, as before
+        assert_eq!(split("has(.a:color red"), pair("has(.a:color", "red"));
+        assert_eq!(split("hover:bold"), ("hover:bold".to_string(), None));
     }
 }

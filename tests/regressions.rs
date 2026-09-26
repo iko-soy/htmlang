@@ -1443,7 +1443,7 @@ fn stacked_prefixes_are_no_longer_dropped_silently() {
     // Codegen stripped one prefix and dropped the rest, with no diagnostic
     // (P5 made them errors); they compose now
     let result = parser::parse(
-        "@el [md:hover:color red, dark:hover:background black, children:odd:color blue, first:before:content \"x\"] x\n",
+        "@el [md:hover:color red, dark:hover:background black, children:nth-child(odd):color blue, first-child:before:content \"x\"] x\n",
     );
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     let html = codegen::generate(&result.document);

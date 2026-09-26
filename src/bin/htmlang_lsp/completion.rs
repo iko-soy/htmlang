@@ -39,7 +39,7 @@ pub(crate) fn completions(text: &str, position: Position) -> Vec<CompletionItem>
             return variable_completions(text, edit_range);
         }
 
-        // After prefixes (`hover:`, `md:hover:`, `nth:2n:`), offer the
+        // After prefixes (`hover:`, `md:hover:`, `nth-child(2n):`), offer the
         // styles they can apply to, and the prefixes that can follow
         if let Some(colon) = current_word.rfind(':') {
             let prefix = &current_word[..=colon];
@@ -183,7 +183,36 @@ pub(crate) fn find_word_start(text: &str) -> usize {
             break;
         }
     }
-    i
+    back_over_arguments(text, i)
+}
+
+/// Where a word that starts at `start` really starts when a prefix with an
+/// argument is before it: `has(> img):padding` and `nth-child(odd):hover:`
+/// are one word, though their arguments hold characters a word doesn't.
+pub(crate) fn back_over_arguments(text: &str, mut start: usize) -> usize {
+    let bytes = text.as_bytes();
+    while start > 0 && bytes[start - 1] == b')' && bytes.get(start) == Some(&b':') {
+        let mut depth = 0usize;
+        let Some(open) = (0..start).rev().find(|&i| {
+            match bytes[i] {
+                b')' => depth += 1,
+                b'(' => depth -= 1,
+                _ => {}
+            }
+            depth == 0
+        }) else {
+            break;
+        };
+        let mut name = open;
+        while name > 0 && crate::hover::is_word_byte(bytes[name - 1]) {
+            name -= 1;
+        }
+        if name == open {
+            break;
+        }
+        start = name;
+    }
+    start
 }
 
 pub(crate) fn in_brackets(text: &str) -> bool {
@@ -1004,15 +1033,11 @@ fn attr_completions(range: Range, element: Option<&str>) -> Vec<CompletionItem> 
             );
         }
     }
-    let prefixes = vocab::PSEUDO_PREFIXES
-        .iter()
-        .map(|(p, _)| *p)
-        .chain(vocab::RESPONSIVE_PREFIXES.iter().copied())
-        .chain(vocab::MEDIA_PREFIXES.iter().copied())
-        .chain(vocab::CONTAINER_QUERY_PREFIXES.iter().copied());
-    for prefix in prefixes {
-        let detail = docs::prefix_selector(prefix).unwrap_or_default();
-        push(prefix.to_string(), prefix.to_string(), &detail, "6", prefix);
+    for prefix in prefix_labels(false) {
+        let detail = docs::prefix_selector(&prefix).unwrap_or_default();
+        let mut completion = prefix_item("", &prefix, CompletionItemKind::PROPERTY, &detail, range);
+        completion.sort_text = Some(format!("6_{}", prefix));
+        items.push(completion);
     }
     let mut choice = item(
         "if()",
@@ -1123,20 +1148,62 @@ fn prefix_completions(prefix: &str, group: &str, range: Range) -> Vec<Completion
     let chain = format!("{}{}", group, prefix);
     let (written, _) = vocab::split_prefixes(&chain);
     let after_element = written.iter().any(|p| vocab::is_pseudo_element(p));
-    vocab::PSEUDO_PREFIXES
-        .iter()
-        .map(|(p, _)| *p)
-        .filter(|_| !after_element)
-        .chain(vocab::at_rule_prefixes())
-        .filter(|p| !written.contains(p))
+    prefix_labels(after_element)
+        .into_iter()
+        .filter(|p| !written.contains(&p.as_str()))
         .map(|p| {
             let label = format!("{}{}", prefix, p);
-            let detail = docs::prefix_selector(p).unwrap_or_default();
-            let mut completion = item(&label, CompletionItemKind::KEYWORD, &detail, &label, range);
+            let detail = docs::prefix_selector(&p).unwrap_or_default();
+            let mut completion =
+                prefix_item(prefix, &p, CompletionItemKind::KEYWORD, &detail, range);
             completion.sort_text = Some(format!("6_{}", label));
             completion
         })
         .collect()
+}
+
+/// Every prefix as completion offers it, in the order of the compiler's
+/// lists: the selector prefixes (CSS's pseudo-classes and pseudo-elements,
+/// a pseudo-class that takes an argument as `nth-child():`, and
+/// `children:`), unless `at_rules_only`, then the width, media and
+/// container prefixes.
+fn prefix_labels(at_rules_only: bool) -> Vec<String> {
+    let selectors = vocab::PSEUDOS
+        .iter()
+        .map(|&(name, kind)| match kind {
+            vocab::Pseudo::Function => format!("{}():", name),
+            _ => format!("{}:", name),
+        })
+        .chain([vocab::CHILDREN.to_string()])
+        .filter(|_| !at_rules_only);
+    selectors
+        .chain(vocab::at_rule_prefixes().map(str::to_string))
+        .collect()
+}
+
+/// A completion that writes the prefix `label` after the prefixes
+/// `before`: as it is, or for a pseudo-class that takes an argument, as a
+/// snippet with the cursor between the parentheses (`nth-child(|):`).
+fn prefix_item(
+    before: &str,
+    label: &str,
+    kind: CompletionItemKind,
+    detail: &str,
+    range: Range,
+) -> CompletionItem {
+    let full = format!("{}{}", before, label);
+    match full.strip_suffix("():") {
+        Some(head) => {
+            let head = head
+                .replace('\\', "\\\\")
+                .replace('$', "\\$")
+                .replace('}', "\\}");
+            let mut completion = item(&full, kind, detail, &format!("{}($1):", head), range);
+            completion.insert_text_format = Some(InsertTextFormat::SNIPPET);
+            completion
+        }
+        None => item(&full, kind, detail, &full, range),
+    }
 }
 
 fn color_value_completions(before: &str, range: Range) -> Option<Vec<CompletionItem>> {
@@ -1649,6 +1716,25 @@ mod tests {
         assert!(has(&items, "md:hover:dark:"));
         assert!(has(&items, "md:hover:before:"));
         assert!(!has(&items, "md:hover:md:"));
+        // CSS's names; one with an argument puts the cursor inside it
+        assert!(has(&items, "md:hover:marker:") && has(&items, "md:hover:first-child:"));
+        let nth = items
+            .iter()
+            .find(|i| i.label == "md:hover:nth-child():")
+            .expect("nth-child() is offered");
+        assert_eq!(nth.insert_text_format, Some(InsertTextFormat::SNIPPET));
+        assert!(matches!(
+            &nth.text_edit,
+            Some(CompletionTextEdit::Edit(edit)) if edit.new_text == "md:hover:nth-child($1):"
+        ));
+        assert!(!has(&items, "md:hover:first:") && !has(&items, "md:hover:odd:"));
+        // After a prefix with an argument, which may hold spaces
+        let line = "@el [has(> img):";
+        let items = completions(line, Position::new(0, line.len() as u32));
+        assert!(has(&items, "has(> img):padding"), "{:?}", items.len());
+        let line = "@el [nth-child(odd):hover:";
+        let items = completions(line, Position::new(0, line.len() as u32));
+        assert!(has(&items, "nth-child(odd):hover:color"));
         // A pseudo-element is the last selector prefix
         let items = completions("@el [before:", Position::new(0, 12));
         assert!(has(&items, "before:dark:") && !has(&items, "before:hover:"));

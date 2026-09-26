@@ -412,16 +412,20 @@ pub(crate) fn prefix_selector(prefix: &str) -> Option<String> {
     if !prefix.ends_with(':') {
         return None;
     }
-    if let Some((_, selector)) = vocab::PSEUDO_PREFIXES.iter().find(|(p, _)| *p == prefix) {
-        return Some(if selector.starts_with(" > ") {
-            "Styles each direct child (`> *`); a child's own attributes win over it.".to_string()
-        } else if selector.starts_with("::") {
-            format!(
+    if prefix == vocab::CHILDREN {
+        return Some(
+            "Styles each direct child (`:where(.x)>*`); a child's own attributes win over it."
+                .to_string(),
+        );
+    }
+    if let Some(selector) = vocab::pseudo_selector(prefix) {
+        return Some(match vocab::pseudo(vocab::pseudo_name(prefix)) {
+            Some(vocab::Pseudo::Element) => format!(
                 "Styles the `{}` pseudo-element (the last selector prefix).",
                 selector
-            )
-        } else {
-            format!("Applies in the `{}` state.", selector)
+            ),
+            Some(vocab::Pseudo::Function) => format!("Applies where `{}` matches.", selector),
+            _ => format!("Applies in the `{}` state.", selector),
         });
     }
     let name = prefix.trim_end_matches(':');
@@ -436,12 +440,6 @@ pub(crate) fn prefix_selector(prefix: &str) -> Option<String> {
     }
     if vocab::MEDIA_PREFIXES.contains(&prefix) {
         return Some(format!("Applies under the `{}` media condition.", name));
-    }
-    if name.starts_with("nth:") {
-        return Some("Applies to children matching `:nth-child(...)`.".to_string());
-    }
-    if name.starts_with("has(") {
-        return Some("Applies when the element contains a match (`:has(...)`).".to_string());
     }
     None
 }

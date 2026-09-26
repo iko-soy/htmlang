@@ -66,7 +66,9 @@ unless you write some, and nothing is added that you didn't ask for.
   it on an element and everything inside it, so dark mode redefines a
   token once (`@page [dark:--surface #0b1220]`) instead of every colour
   that uses it.
-  Prefixes make a style conditional: `hover:`, `md:`, `dark:`, `first:`.
+  Prefixes make a style conditional: `hover:`, `md:`, `dark:`, and every
+  CSS pseudo-class and pseudo-element under its CSS name (`first-child:`,
+  `nth-child(odd):`, `has(> img):`, `marker:`, `backdrop:`).
   They stack (`md:dark:background`, `hover:children:opacity`), and one
   prefix covers a group or a bundle (`md:[padding 32, font-size 20]`,
   `md:$card`).

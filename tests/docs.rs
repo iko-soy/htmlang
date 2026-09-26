@@ -164,3 +164,35 @@ fn design_md_gives_every_element_its_layout() {
         );
     }
 }
+
+/// DESIGN.md's paragraph on selector prefixes lists every pseudo-class
+/// and pseudo-element the compiler knows, and nothing else.
+#[test]
+fn design_md_lists_every_selector_prefix() {
+    use htmlang::vocab::{PSEUDOS, Pseudo};
+    let design =
+        std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("DESIGN.md")).unwrap();
+    let start = design
+        .find("The selector prefixes are CSS's own")
+        .expect("DESIGN.md lists the selector prefixes");
+    let end = start + design[start..].find("\n\n").unwrap();
+    let paragraph = design[start..end].replace('\n', " ");
+    let mut listed: Vec<String> = paragraph
+        .split('`')
+        .skip(1)
+        .step_by(2)
+        .map(str::to_string)
+        .take_while(|word| !word.contains(' '))
+        .collect();
+    listed.retain(|word| !word.contains(':'));
+    let mut known: Vec<String> = PSEUDOS
+        .iter()
+        .map(|&(name, kind)| match kind {
+            Pseudo::Function => format!("{}()", name),
+            _ => name.to_string(),
+        })
+        .collect();
+    listed.sort();
+    known.sort();
+    assert_eq!(listed, known);
+}

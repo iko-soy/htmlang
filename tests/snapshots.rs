@@ -1541,25 +1541,25 @@ fn placeholder_generates_pseudo() {
 
 #[test]
 fn first_child_generates_pseudo() {
-    let output = compile("@page T\n@el [first:border-top 0]");
+    let output = compile("@page T\n@el [first-child:border-top 0]");
     assert!(output.contains(":first-child"));
 }
 
 #[test]
 fn last_child_generates_pseudo() {
-    let output = compile("@page T\n@el [last:border-bottom 0]");
+    let output = compile("@page T\n@el [last-child:border-bottom 0]");
     assert!(output.contains(":last-child"));
 }
 
 #[test]
 fn odd_generates_pseudo() {
-    let output = compile("@page T\n@el [odd:background #f5f5f5]");
+    let output = compile("@page T\n@el [nth-child(odd):background #f5f5f5]");
     assert!(output.contains(":nth-child(odd)"));
 }
 
 #[test]
 fn even_generates_pseudo() {
-    let output = compile("@page T\n@el [even:background white]");
+    let output = compile("@page T\n@el [nth-child(even):background white]");
     assert!(output.contains(":nth-child(even)"));
 }
 
@@ -1704,7 +1704,7 @@ fn no_warning_new_pseudo_prefixes() {
 #[test]
 fn no_warning_child_selectors() {
     let diags = parse_diagnostics(
-        "@el [first:padding 0, last:padding 0, odd:background #eee, even:background white]",
+        "@el [first-child:padding 0, last-child:padding 0, nth-child(odd):background #eee, nth-child(even):background white]",
     );
     assert!(
         !diags
@@ -2540,11 +2540,11 @@ fn selection_pseudo_generates_css() {
     );
 }
 
-// --- nth: pseudo ---
+// --- nth-child() pseudo ---
 
 #[test]
 fn nth_pseudo_generates_css() {
-    let output = compile("@page T\n@el [nth:3:background red]\n  @text test");
+    let output = compile("@page T\n@el [nth-child(3):background red]\n  @text test");
     assert!(
         output.contains(":nth-child(3)"),
         "should generate :nth-child(3): {}",
@@ -2559,7 +2559,7 @@ fn nth_pseudo_generates_css() {
 
 #[test]
 fn nth_pseudo_formula() {
-    let output = compile("@page T\n@el [nth:2n:background #eee]\n  @text test");
+    let output = compile("@page T\n@el [nth-child(2n):background #eee]\n  @text test");
     assert!(
         output.contains(":nth-child(2n)"),
         "should generate :nth-child(2n): {}",
@@ -2640,12 +2640,12 @@ fn no_warning_selection_prefix() {
 
 #[test]
 fn no_warning_nth_prefix() {
-    let diags = parse_diagnostics("@el [nth:3:background red]");
+    let diags = parse_diagnostics("@el [nth-child(3):background red]");
     assert!(
         !diags
             .iter()
             .any(|d| d.message.contains("unknown attribute")),
-        "nth: prefix should be recognized, got: {:?}",
+        "nth-child() prefix should be recognized, got: {:?}",
         diags
     );
 }
@@ -6000,12 +6000,14 @@ fn prefixes_are_checked_by_name_and_number() {
 
     for attr in [
         "before:hover:color red",
-        "md:after:first:color red",
+        "md:after:first-child:color red",
+        "marker:before:color red",
         "children:width fill",
         "hover:required",
         "md:id=x",
         "has(.a{):color red",
         "md:has(.a{):color red",
+        "nth-child():color red",
     ] {
         let src = format!("@el [{}]\n  x\n", attr);
         let d = parse_diagnostics(&src);
@@ -6013,9 +6015,66 @@ fn prefixes_are_checked_by_name_and_number() {
     }
     // Prefixes of any kind work, stacked too, and so does a prefixed flag
     let d = parse_diagnostics(
-        "@el [nth:2n+1:color red, has(img:hover):padding 4, cq-md:padding 8, md:center-x, print:display none, md:hover:color red, dark:hover:color red, children:odd:color red, hover:before:content \"x\", md:dark:children:hover:after:color red]\n  x\n",
+        "@el [nth-child(2n+1):color red, has(img:hover):padding 4, cq-md:padding 8, md:center-x, print:display none, md:hover:color red, dark:hover:color red, children:nth-child(odd):color red, hover:before:content \"x\", md:dark:children:hover:after:color red]\n  x\n",
     );
     assert!(d.is_empty(), "{:?}", d);
+}
+
+#[test]
+fn selector_prefixes_are_css_pseudo_classes_and_elements() {
+    // CSS's names, `::` for a pseudo-element, and an argument in balanced
+    // parentheses that may hold spaces and colons
+    let src = "@ul [list-style disc, padding-inline-start 20, children:display list-item]\n  \
+               @li [first-child:font-weight 700, nth-child(odd):background var(--subtle), marker:color var(--brand)] One\n\
+               @el [has(> img):padding 0, not(.featured):opacity 0.8, is(:hover, :focus-visible):color red]\n  x\n\
+               @dialog [backdrop:background rgba(0,0,0,.5)] Hi\n\
+               @input [type=email, aria-label=Email, user-invalid:border-color red, only-child:margin 0, file-selector-button:padding 4]\n\
+               @el [nth-last-of-type(2):hover:first-letter:font-size 20] x\n";
+    let result = htmlang::parser::parse(src);
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    let html = htmlang::codegen::generate(&result.document);
+    for css in [
+        ":first-child{font-weight:700;}",
+        ":nth-child(odd){background:var(--subtle);}",
+        "::marker{color:var(--brand);}",
+        ":has(> img){padding:0;}",
+        ":not(.featured){opacity:0.8;}",
+        ":is(:hover, :focus-visible){color:red;}",
+        "::backdrop{background:rgba(0,0,0,.5);}",
+        ":user-invalid{border-color:red;}",
+        ":only-child{margin:0;}",
+        "::file-selector-button{padding:4px;}",
+        ":nth-last-of-type(2):hover::first-letter{font-size:20px;}",
+    ] {
+        assert!(html.contains(css), "{} in {}", css, html);
+    }
+
+    // The names htmlang used to have are unknown prefixes, with the
+    // ordinary "did you mean"
+    for (attr, subject, suggestion) in [
+        ("hvoer:color red", "hvoer:", Some("hover:")),
+        ("first:color red", "first:", Some("first-child:")),
+        ("last:color red", "last:", Some("last-child:")),
+        ("odd:color red", "odd:", None),
+        ("even:color red", "even:", None),
+        ("nth:3:color red", "nth:", None),
+        ("nth-chld(2):color red", "nth-chld(", Some("nth-child(")),
+        (
+            "first-child(2):color red",
+            "first-child(2):",
+            Some("first-child:"),
+        ),
+        ("has:color red", "has:", None),
+        ("md:[mrker:color red]", "mrker:", Some("marker:")),
+    ] {
+        let src = format!("@el [{}]\n  x\n", attr);
+        let d = parse_diagnostics(&src);
+        let unknown = coded(&d, "unknown-prefix");
+        assert_eq!(unknown.len(), 1, "{}: {:?}", src, d);
+        assert_eq!(unknown[0].subject.as_deref(), Some(subject), "{}", src);
+        assert_eq!(unknown[0].suggestion.as_deref(), suggestion, "{}", src);
+        assert_eq!(unknown[0].severity, htmlang::parser::Severity::Error);
+    }
 }
 
 #[test]
@@ -8064,7 +8123,7 @@ fn snapshot_custom_properties() {
 #[test]
 fn a_custom_property_is_a_style_on_any_element_under_any_prefix() {
     let result = htmlang::parser::parse(
-        "@el [--a 1, hover:--b 2, md:--c 3, dark:--d 4, children:--e 5, nth:2n:--f 6, has(.x):--g 7, print:--h 8, cq-md:--i 9]\n  x\n@image [alt=x, --w 20px] a.png\n@paragraph {@em [--j 1] y}\n",
+        "@el [--a 1, hover:--b 2, md:--c 3, dark:--d 4, children:--e 5, nth-child(2n):--f 6, has(.x):--g 7, print:--h 8, cq-md:--i 9]\n  x\n@image [alt=x, --w 20px] a.png\n@paragraph {@em [--j 1] y}\n",
     );
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     let html = htmlang::codegen::generate(&result.document);

@@ -91,6 +91,17 @@ pub(crate) fn word_at(line: &str, col: usize) -> Option<String> {
     while end < bytes.len() && is_word_byte(bytes[end]) {
         end += 1;
     }
+    // A prefix's argument is part of the word: `has(> img):padding`
+    while bytes.get(end) == Some(&b'(')
+        && let Some(close) = htmlang::vocab::closing_paren(line, end)
+        && bytes.get(close + 1) == Some(&b':')
+    {
+        end = close + 1;
+        while end < bytes.len() && is_word_byte(bytes[end]) {
+            end += 1;
+        }
+    }
+    let start = crate::completion::back_over_arguments(line, start);
     if start == end {
         return None;
     }
@@ -242,6 +253,19 @@ mod tests {
             Some(HoverContents::Markup(markup)) => markup.value,
             other => panic!("no hover: {:?}", other),
         }
+    }
+
+    #[test]
+    fn a_prefix_with_an_argument_is_part_of_the_word() {
+        let text =
+            "@el [has(> img):padding 0, nth-child(odd):hover:color red, marker:color red] x\n";
+        let padding = hover_text(text, 0, 18);
+        assert!(padding.contains("`:has(> img)`"), "{}", padding);
+        let color = hover_text(text, 0, 50);
+        assert!(color.contains("`:nth-child(odd)`"), "{}", color);
+        assert!(color.contains("`:hover`"), "{}", color);
+        let marker = hover_text(text, 0, 62);
+        assert!(marker.contains("`::marker` pseudo-element"), "{}", marker);
     }
 
     #[test]

@@ -3933,9 +3933,111 @@ fn check_css_value(
     true
 }
 
+/// An unknown prefix: the message, the text it is about, and what to write
+/// instead, when something is close enough.
+struct PrefixProblem {
+    message: String,
+    subject: String,
+    suggestion: Option<String>,
+}
+
+/// What is wrong with the prefix `rest` starts with, when the known
+/// prefixes are already split off it and what is left still starts with
+/// one: a word and a `:` (`hovr:`), or a word and a parenthesised argument
+/// and a `:` (`nth-chld(2):`). Selector prefixes are CSS's pseudo-classes
+/// and pseudo-elements under their CSS names, so an unknown one gets the
+/// closest name as a suggestion. Only names with the same first letter are
+/// suggested: `odd:` is two edits from `md:`, which it doesn't mean.
+fn unknown_prefix(rest: &str) -> Option<PrefixProblem> {
+    use crate::vocab::{self, Pseudo};
+    let name_len = rest.find(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))?;
+    let name = &rest[..name_len];
+    if name.is_empty() {
+        return None;
+    }
+    if rest[name_len..].starts_with('(') {
+        // `name(...):`: a pseudo-class with an argument
+        let close = vocab::closing_paren(rest, name_len)?;
+        if !rest[close + 1..].starts_with(':') {
+            return None;
+        }
+        let written = &rest[..close + 2];
+        if matches!(vocab::pseudo(name), Some(Pseudo::Class | Pseudo::Element)) {
+            let bare = format!("{}:", name);
+            return Some(PrefixProblem {
+                message: format!(
+                    "'{}': `{}` takes no argument: write `{}`",
+                    written,
+                    vocab::pseudo_selector(&bare).unwrap_or_default(),
+                    bare
+                ),
+                subject: written.to_string(),
+                suggestion: Some(bare),
+            });
+        }
+        let functional: Vec<&str> = vocab::functional_pseudos()
+            .into_iter()
+            .filter(|p| p.chars().next() == name.chars().next())
+            .collect();
+        let suggestion = suggest_closest(name, &functional)
+            .filter(|&closest| closest != name)
+            .map(|closest| format!("{}(", closest));
+        let written = format!("{}(", name);
+        let message = match &suggestion {
+            Some(closest) => format!("unknown prefix '{}', did you mean '{}'?", written, closest),
+            None => format!("unknown prefix '{}'", written),
+        };
+        return Some(PrefixProblem {
+            message,
+            subject: written,
+            suggestion,
+        });
+    }
+    if !rest[name_len..].starts_with(':') {
+        return None;
+    }
+    let written = &rest[..name_len + 1];
+    // `has:`: its argument is missing
+    if vocab::pseudo(name) == Some(Pseudo::Function) {
+        return Some(PrefixProblem {
+            message: format!(
+                "'{}': `:{}()` takes an argument, in parentheses, as in CSS: `{}(...):`",
+                written, name, name
+            ),
+            subject: written.to_string(),
+            suggestion: None,
+        });
+    }
+    let prefixes = vocab::all_prefixes();
+    let candidates: Vec<&str> = prefixes
+        .iter()
+        .map(String::as_str)
+        .filter(|p| p.chars().next() == written.chars().next())
+        .collect();
+    // The closest name that starts with the same letter (`hvoer:` →
+    // `hover:`), else the first that starts with the word written and a `-`
+    // (`first:` → `first-child:`)
+    let suggestion = suggest_closest(written, &candidates)
+        .or_else(|| {
+            let longer = format!("{}-", name);
+            candidates.iter().copied().find(|p| p.starts_with(&longer))
+        })
+        .filter(|&closest| closest != written)
+        .map(str::to_string);
+    let message = match &suggestion {
+        Some(closest) => format!("unknown prefix '{}', did you mean '{}'?", written, closest),
+        None => format!("unknown prefix '{}'", written),
+    };
+    Some(PrefixProblem {
+        message,
+        subject: written.to_string(),
+        suggestion,
+    })
+}
+
 /// Check an attribute's prefixes: each is known, their selector prefixes
-/// read left to right with a pseudo-element (`before:`) last, the selector
-/// of `has(...)` or `nth:...:` can be written into the CSS, and a word that
+/// read left to right with a pseudo-element (`before:`) last, the argument
+/// of `has(...)` or `nth-child(...)` can be written into the CSS, and a word that
 /// places an element in its parent (`width fill`, `center-x`, `align-*`)
 /// isn't under `children:`, whose styles go on the children. Media,
 /// container and width prefixes go anywhere. Returns false, after
@@ -3958,32 +4060,16 @@ fn check_prefixes(
             false
         };
 
-    // `hovr:color red`: a word and a `:` before the name is a prefix
-    if let Some(colon) = base.find(':')
-        && !base[..colon].is_empty()
-        && !base[..colon].contains(['=', ' ', '('])
-    {
-        let written = &base[..colon + 1];
-        let suggestion =
-            suggest_closest(written, &vocab::all_prefixes()).filter(|&closest| closest != written);
-        let message = match suggestion {
-            Some(closest) => format!("unknown prefix '{}', did you mean '{}'?", written, closest),
-            // `nth:2n` without the attribute after its expression
-            None if written == "nth:" => format!(
-                "'{}': the prefix is `nth:EXPR:`, followed by the attribute \
-                 (`nth:2n+1:color red`)",
-                attr.key
-            ),
-            None => format!("unknown prefix '{}'", written),
-        };
-        let diagnostic = Diagnostic::error(code::UNKNOWN_PREFIX, line, message)
-            .subject(written)
-            .suggest(suggestion);
+    if let Some(problem) = unknown_prefix(base) {
+        let diagnostic = Diagnostic::error(code::UNKNOWN_PREFIX, line, problem.message)
+            .subject(problem.subject)
+            .suggest(problem.suggestion);
         let diagnostic = at_attribute(diagnostic, column, ctx);
         ctx.diagnostics.push(diagnostic);
         return false;
     }
-    // The selector of `has(...)` or `nth:...:` goes into the CSS as written
+    // The argument of `has(...)` or `nth-child(...)` goes into the CSS as
+    // written
     for prefix in &prefixes {
         if let Some(reason) = css_breakout(prefix.trim_end_matches(':')) {
             return fail(
@@ -3996,6 +4082,19 @@ fn check_prefixes(
                 None,
             );
         }
+    }
+    // `nth-child():`: CSS has no pseudo-class with an empty argument
+    if let Some(empty) = prefixes.iter().find(|p| p.ends_with("():")) {
+        return fail(
+            ctx,
+            format!(
+                "'{}': `:{}` takes an argument between its parentheses, as in CSS",
+                attr.key,
+                empty.trim_end_matches(':')
+            ),
+            empty,
+            None,
+        );
     }
     // A pseudo-element is the last selector prefix: CSS has no
     // `::before:hover`
@@ -4688,16 +4787,17 @@ fn group_prefix(
     }
     let (known, rest) = crate::vocab::split_prefixes(&prefixed.prefix);
     if !rest.is_empty() {
-        let written = rest.split_inclusive(':').next().unwrap_or(rest);
-        let suggestion = suggest_closest(written, &crate::vocab::all_prefixes())
-            .filter(|&closest| closest != written);
-        let message = match suggestion {
-            Some(closest) => format!("unknown prefix '{}', did you mean '{}'?", written, closest),
-            None => format!("unknown prefix '{}'", written),
-        };
-        let diagnostic = Diagnostic::error(code::UNKNOWN_PREFIX, line, message)
-            .subject(written)
-            .suggest(suggestion);
+        let problem = unknown_prefix(rest).unwrap_or_else(|| {
+            let written = rest.split_inclusive(':').next().unwrap_or(rest);
+            PrefixProblem {
+                message: format!("unknown prefix '{}'", written),
+                subject: written.to_string(),
+                suggestion: None,
+            }
+        });
+        let diagnostic = Diagnostic::error(code::UNKNOWN_PREFIX, line, problem.message)
+            .subject(problem.subject)
+            .suggest(problem.suggestion);
         let diagnostic = at(ctx, diagnostic, token.span);
         ctx.push_once(diagnostic);
         return None;

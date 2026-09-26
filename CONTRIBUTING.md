@@ -68,7 +68,11 @@ Linux, macOS, and Windows. Your change should pass all three.
     HTML attributes, `@page`'s own `favicon`), the pixel rule
     (`LENGTH_PROPERTIES`, the one table of properties whose bare numbers
     are px, and `with_px`, the one function that applies it) and the
-    state/media prefixes, with the rank that orders the at-rule blocks.
+    prefixes: `PSEUDOS`, CSS's pseudo-classes and pseudo-elements under
+    their CSS names, each marked `:`, `::` or taking an argument, in the
+    order their rules are written; `children:`; and the width, media and
+    container prefixes, with the rank that orders the at-rule blocks. A new
+    pseudo-class is one row in `PSEUDOS` and one word in DESIGN.md's list.
   - `expr.rs` — the expression language for conditions, computed values and
     `${...}`. It evaluates only what decides the result (the branch `if()`
     takes, the side of `and`/`or` that decides) and only reads the rest.

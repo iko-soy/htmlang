@@ -300,31 +300,82 @@ fn is_bare_number(word: &str) -> bool {
         && (!int.is_empty() || frac.is_some())
 }
 
-/// State prefixes and the selector each adds: `hover:color red` styles
-/// `.x:hover`, `children:flex-shrink 0` styles `.x > *`.
-pub const PSEUDO_PREFIXES: &[(&str, &str)] = &[
-    ("hover:", ":hover"),
-    ("active:", ":active"),
-    ("focus:", ":focus"),
-    ("focus-visible:", ":focus-visible"),
-    ("focus-within:", ":focus-within"),
-    ("disabled:", ":disabled"),
-    ("checked:", ":checked"),
-    ("placeholder:", "::placeholder"),
-    ("first:", ":first-child"),
-    ("last:", ":last-child"),
-    ("odd:", ":nth-child(odd)"),
-    ("even:", ":nth-child(even)"),
-    ("before:", "::before"),
-    ("after:", "::after"),
-    ("selection:", "::selection"),
-    ("visited:", ":visited"),
-    ("empty:", ":empty"),
-    ("target:", ":target"),
-    ("valid:", ":valid"),
-    ("invalid:", ":invalid"),
-    ("children:", " > *"),
+/// How CSS writes a pseudo-class or pseudo-element that a selector prefix
+/// names.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Pseudo {
+    /// A pseudo-class, `:hover`: the prefix `hover:`.
+    Class,
+    /// A pseudo-class that takes an argument, `:nth-child(odd)`: the
+    /// prefix `nth-child(odd):`.
+    Function,
+    /// A pseudo-element, `::marker`: the prefix `marker:`.
+    Element,
+}
+
+/// The pseudo-classes and pseudo-elements a selector prefix can name, under
+/// their CSS names (`first-child:` is `:first-child`, `marker:` is
+/// `::marker`), and whether each is written `:` or `::` in CSS. A name not
+/// here is an unknown prefix, as a property not in [`CSS_PROPERTIES`] is an
+/// unknown property. The order is the order the rules are written in, so a
+/// later one wins where both hold: position, then form state, then the
+/// states a pointer or the keyboard sets (`hover:`, `focus:`, `active:`),
+/// then `disabled:`, as in CSS's usual `:link` … `:hover` … `:active` order.
+pub const PSEUDOS: &[(&str, Pseudo)] = &[
+    ("link", Pseudo::Class),
+    ("visited", Pseudo::Class),
+    ("first-child", Pseudo::Class),
+    ("last-child", Pseudo::Class),
+    ("only-child", Pseudo::Class),
+    ("first-of-type", Pseudo::Class),
+    ("last-of-type", Pseudo::Class),
+    ("only-of-type", Pseudo::Class),
+    ("nth-child", Pseudo::Function),
+    ("nth-last-child", Pseudo::Function),
+    ("nth-of-type", Pseudo::Function),
+    ("nth-last-of-type", Pseudo::Function),
+    ("empty", Pseudo::Class),
+    ("target", Pseudo::Class),
+    ("open", Pseudo::Class),
+    ("popover-open", Pseudo::Class),
+    ("default", Pseudo::Class),
+    ("checked", Pseudo::Class),
+    ("indeterminate", Pseudo::Class),
+    ("placeholder-shown", Pseudo::Class),
+    ("autofill", Pseudo::Class),
+    ("required", Pseudo::Class),
+    ("optional", Pseudo::Class),
+    ("valid", Pseudo::Class),
+    ("invalid", Pseudo::Class),
+    ("user-valid", Pseudo::Class),
+    ("user-invalid", Pseudo::Class),
+    ("read-only", Pseudo::Class),
+    ("read-write", Pseudo::Class),
+    ("not", Pseudo::Function),
+    ("is", Pseudo::Function),
+    ("where", Pseudo::Function),
+    ("has", Pseudo::Function),
+    ("focus-within", Pseudo::Class),
+    ("hover", Pseudo::Class),
+    ("focus", Pseudo::Class),
+    ("focus-visible", Pseudo::Class),
+    ("active", Pseudo::Class),
+    ("enabled", Pseudo::Class),
+    ("disabled", Pseudo::Class),
+    ("before", Pseudo::Element),
+    ("after", Pseudo::Element),
+    ("marker", Pseudo::Element),
+    ("placeholder", Pseudo::Element),
+    ("selection", Pseudo::Element),
+    ("backdrop", Pseudo::Element),
+    ("first-line", Pseudo::Element),
+    ("first-letter", Pseudo::Element),
+    ("file-selector-button", Pseudo::Element),
 ];
+
+/// htmlang's one combinator word: `children:flex-shrink 0` styles each
+/// direct child, `:where(.x)>*`.
+pub const CHILDREN: &str = "children:";
 
 /// Viewport-width prefixes (`md:padding 32`).
 pub const RESPONSIVE_PREFIXES: &[&str] = &["sm:", "md:", "lg:", "xl:", "2xl:"];
@@ -364,14 +415,40 @@ pub fn at_rule_implied(a: usize, b: usize) -> bool {
     a == b || (a < b && ((b < widths) || (a >= media && b >= media)))
 }
 
-/// A selector prefix that selects a pseudo-element (`before:`, `after:`,
-/// `placeholder:`, `selection:`), which comes last among the selector
-/// prefixes: `hover:before:` is the `::before` of a hovered element, and
-/// CSS has no `::before:hover`.
-pub fn is_pseudo_element(prefix: &str) -> bool {
-    PSEUDO_PREFIXES
+/// The pseudo-class or pseudo-element `name` names, and how CSS writes it.
+pub fn pseudo(name: &str) -> Option<Pseudo> {
+    PSEUDOS
         .iter()
-        .any(|&(p, selector)| p == prefix && selector.starts_with("::"))
+        .find(|(n, _)| *n == name)
+        .map(|&(_, kind)| kind)
+}
+
+/// The CSS name of a selector prefix, without its argument:
+/// `nth-child(odd):` → `nth-child`, `hover:` → `hover`.
+pub fn pseudo_name(prefix: &str) -> &str {
+    let name = prefix.strip_suffix(':').unwrap_or(prefix);
+    name.split_once('(').map_or(name, |(name, _)| name)
+}
+
+/// What a selector prefix adds to the selector: `hover:` → `:hover`,
+/// `marker:` → `::marker`, `nth-child(2n+1):` → `:nth-child(2n+1)`. `None`
+/// for `children:` and the at-rule prefixes.
+pub fn pseudo_selector(prefix: &str) -> Option<String> {
+    let written = prefix.strip_suffix(':')?;
+    match pseudo(pseudo_name(prefix))? {
+        Pseudo::Element => Some(format!("::{}", written)),
+        Pseudo::Class | Pseudo::Function => Some(format!(":{}", written)),
+    }
+}
+
+/// A selector prefix that selects a pseudo-element (`before:`, `marker:`,
+/// `backdrop:`, ...), which comes last among the selector prefixes:
+/// `hover:before:` is the `::before` of a hovered element, and CSS has no
+/// `::before:hover`.
+pub fn is_pseudo_element(prefix: &str) -> bool {
+    prefix
+        .strip_suffix(':')
+        .is_some_and(|name| pseudo(name) == Some(Pseudo::Element))
 }
 
 /// htmlang's words that place an element in its parent, so they mean
@@ -390,35 +467,52 @@ pub fn is_prefixed(key: &str) -> bool {
 }
 
 /// The length of the prefix `key` starts with (its `:` included), when it
-/// starts with one: `hover:`, `md:`, `nth:2n+1:`, `has(> img):`.
+/// starts with a known one: `hover:`, `md:`, `children:`, or a pseudo-class
+/// with its argument in balanced parentheses, which may hold spaces and
+/// colons of its own (`nth-child(2n+1):`, `has(> img):`).
 pub fn prefix_len(key: &str) -> Option<usize> {
-    let known = PSEUDO_PREFIXES
-        .iter()
-        .map(|&(p, _)| p)
-        .chain(RESPONSIVE_PREFIXES.iter().copied())
-        .chain(MEDIA_PREFIXES.iter().copied())
-        .chain(CONTAINER_QUERY_PREFIXES.iter().copied())
-        .find(|p| key.starts_with(p));
-    if let Some(prefix) = known {
-        return Some(prefix.len());
+    let name_len = key
+        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+        .filter(|&len| len > 0)?;
+    let name = &key[..name_len];
+    match key[name_len..].chars().next()? {
+        ':' => {
+            let prefix = &key[..=name_len];
+            let known = prefix == CHILDREN
+                || at_rule_rank(prefix).is_some()
+                || matches!(pseudo(name), Some(Pseudo::Class | Pseudo::Element));
+            known.then_some(name_len + 1)
+        }
+        '(' if pseudo(name) == Some(Pseudo::Function) => {
+            let close = closing_paren(key, name_len)?;
+            key[close + 1..].starts_with(':').then_some(close + 2)
+        }
+        _ => None,
     }
-    if let Some(rest) = key.strip_prefix("nth:") {
-        return rest.find(':').map(|colon| 4 + colon + 1);
-    }
-    if key.starts_with("has(") {
-        // The selector may hold parentheses and colons of its own
-        let mut depth = 0;
-        for (i, c) in key.char_indices().skip(3) {
-            match c {
-                '(' => depth += 1,
-                ')' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        return key[i + 1..].starts_with(':').then_some(i + 2);
-                    }
-                }
-                _ => {}
+}
+
+/// The `)` that closes the `(` at `open` in `text`. Parentheses inside
+/// quotes, and a character after a backslash, don't count.
+pub fn closing_paren(text: &str, open: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut quote = None;
+    let mut chars = text.char_indices().skip_while(|&(i, _)| i < open);
+    while let Some((i, c)) = chars.next() {
+        match (quote, c) {
+            (_, '\\') => {
+                chars.next();
             }
+            (Some(q), c) if c == q => quote = None,
+            (Some(_), _) => {}
+            (None, '"' | '\'') => quote = Some(c),
+            (None, '(') => depth += 1,
+            (None, ')') => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            _ => {}
         }
     }
     None
@@ -436,20 +530,30 @@ pub fn split_prefixes(key: &str) -> (Vec<&str>, &str) {
     (prefixes, rest)
 }
 
-/// Every prefix's name, for "did you mean" suggestions.
-pub fn all_prefixes() -> Vec<&'static str> {
-    PSEUDO_PREFIXES
+/// Every prefix written without an argument (`hover:`, `marker:`, `md:`,
+/// `children:`), for "did you mean" suggestions.
+pub fn all_prefixes() -> Vec<String> {
+    PSEUDOS
         .iter()
-        .map(|&(p, _)| p)
-        .chain(RESPONSIVE_PREFIXES.iter().copied())
-        .chain(MEDIA_PREFIXES.iter().copied())
-        .chain(CONTAINER_QUERY_PREFIXES.iter().copied())
-        .chain(["nth:", "has("])
+        .filter(|(_, kind)| *kind != Pseudo::Function)
+        .map(|(name, _)| format!("{}:", name))
+        .chain(at_rule_prefixes().map(str::to_string))
+        .chain([CHILDREN.to_string()])
+        .collect()
+}
+
+/// The pseudo-classes that take an argument (`nth-child`, `has`), for "did
+/// you mean" suggestions.
+pub fn functional_pseudos() -> Vec<&'static str> {
+    PSEUDOS
+        .iter()
+        .filter(|(_, kind)| *kind == Pseudo::Function)
+        .map(|&(name, _)| name)
         .collect()
 }
 
 /// The attribute name without its prefixes: `hover:md:background` →
-/// `background`, `nth:2n:color` → `color`, `has(.x):padding` → `padding`.
+/// `background`, `nth-child(2n):color` → `color`, `has(.x):padding` → `padding`.
 pub fn base_attribute(key: &str) -> &str {
     split_prefixes(key).1
 }
@@ -603,7 +707,10 @@ mod tests {
     #[test]
     fn base_attribute_strips_every_prefix() {
         assert_eq!(super::base_attribute("hover:md:background"), "background");
-        assert_eq!(super::base_attribute("nth:2n:color"), "color");
+        assert_eq!(super::base_attribute("nth-child(2n):color"), "color");
+        assert_eq!(super::base_attribute("has(> img):padding"), "padding");
+        assert_eq!(super::base_attribute("nth:2n:color"), "nth:2n:color");
+        assert_eq!(super::base_attribute("first:color"), "first:color");
         assert_eq!(super::base_attribute("has(.a):dark:padding"), "padding");
         assert_eq!(super::base_attribute("children:flex-shrink"), "flex-shrink");
         assert_eq!(super::base_attribute("width"), "width");
@@ -618,8 +725,20 @@ mod tests {
             (vec!["md:", "hover:"], "color")
         );
         assert_eq!(
-            super::split_prefixes("nth:2n+1:padding"),
-            (vec!["nth:2n+1:"], "padding")
+            super::split_prefixes("nth-child(2n+1):hover:padding"),
+            (vec!["nth-child(2n+1):", "hover:"], "padding")
+        );
+        assert_eq!(
+            super::split_prefixes("is(:hover, :focus):not(.a):marker:color"),
+            (vec!["is(:hover, :focus):", "not(.a):", "marker:"], "color")
+        );
+        assert_eq!(
+            super::split_prefixes("has([title=\"a)\"]):color"),
+            (vec!["has([title=\"a)\"]):"], "color")
+        );
+        assert_eq!(
+            super::split_prefixes("hover(x):first-child(2):color"),
+            (vec![], "hover(x):first-child(2):color")
         );
         assert_eq!(
             super::split_prefixes("has(a:hover)"),
@@ -641,6 +760,30 @@ mod tests {
         assert!(!at_rule_implied(rank("dark:"), rank("print:")));
         assert!(at_rule_implied(rank("dark:"), rank("dark:")));
         assert!(super::is_pseudo_element("before:") && !super::is_pseudo_element("hover:"));
+        assert!(super::is_pseudo_element("marker:") && !super::is_pseudo_element("has(a):"));
+    }
+
+    #[test]
+    fn pseudo_prefixes_are_written_as_css_writes_them() {
+        use super::pseudo_selector as selector;
+        assert_eq!(selector("hover:").as_deref(), Some(":hover"));
+        assert_eq!(selector("marker:").as_deref(), Some("::marker"));
+        assert_eq!(selector("backdrop:").as_deref(), Some("::backdrop"));
+        assert_eq!(
+            selector("nth-child(odd):").as_deref(),
+            Some(":nth-child(odd)")
+        );
+        assert_eq!(selector("has(> img):").as_deref(), Some(":has(> img)"));
+        assert_eq!(selector("children:"), None);
+        assert_eq!(selector("md:"), None);
+        // Every name is written once, and none is also an at-rule prefix
+        for (i, (name, _)) in super::PSEUDOS.iter().enumerate() {
+            assert!(
+                !super::PSEUDOS[..i].iter().any(|(n, _)| n == name),
+                "{name}"
+            );
+            assert_eq!(super::at_rule_rank(&format!("{name}:")), None, "{name}");
+        }
     }
 
     #[test]

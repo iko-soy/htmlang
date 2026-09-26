@@ -369,7 +369,7 @@ parent's class (`.r > .wf`), each child gets a rule keyed on its parent's
 class in the parent's `@media` or `@container` block. A width prefix holds
 from its width up, so `sm:flex-direction column` still applies at `lg:`
 unless `lg:` sets a direction of its own. A direction under a state prefix
-(`hover:`, `first:`, `children:`, or a stack with one in it) leaves the
+(`hover:`, `first-child:`, `children:`, or a stack with one in it) leaves the
 children's layout words as they are.
 
 ```
@@ -565,14 +565,33 @@ A prefix applies a style only in some condition:
 
 | Prefix | Applies |
 |---|---|
-| `hover:`, `active:`, `focus:`, `focus-visible:`, `focus-within:`, `disabled:`, `checked:`, `visited:`, `target:`, `valid:`, `invalid:`, `empty:` | In that state |
-| `first:`, `last:`, `odd:`, `even:`, `nth:EXPR:` | By the element's position among its siblings |
+| `hover:`, `focus:`, `first-child:`, `checked:`, `user-invalid:`, `open:`, ... | When that CSS pseudo-class matches (`:hover`, `:first-child`, ...) |
+| `nth-child(odd):`, `not(.featured):`, `has(> img):`, `is(...):`, ... | When that pseudo-class, with its argument, matches |
+| `before:`, `after:`, `marker:`, `placeholder:`, `backdrop:`, ... | To that pseudo-element (`::before`, `::marker`, ...) |
 | `children:` | To each direct child |
-| `before:`, `after:`, `placeholder:`, `selection:` | To that pseudo-element (`::before` and `::after` together with `content`) |
-| `has(SELECTOR):` | When the element contains a match |
 | `sm:`, `md:`, `lg:`, `xl:`, `2xl:` | From that viewport width up (640, 768, 1024, 1280, 1536px) |
 | `cq-sm:` … `cq-2xl:` | From that container width up (the same widths, for an ancestor with `container-type inline-size`) |
 | `dark:`, `print:`, `motion-safe:`, `motion-reduce:`, `landscape:`, `portrait:` | Under that media condition |
+
+The selector prefixes are CSS's own pseudo-classes and pseudo-elements,
+under their CSS names, without the colons: `link`, `visited`,
+`first-child`, `last-child`, `only-child`, `first-of-type`,
+`last-of-type`, `only-of-type`, `empty`, `target`, `open`,
+`popover-open`, `default`, `checked`, `indeterminate`,
+`placeholder-shown`, `autofill`, `required`, `optional`, `valid`,
+`invalid`, `user-valid`, `user-invalid`, `read-only`, `read-write`,
+`focus-within`, `hover`, `focus`, `focus-visible`, `active`, `enabled`
+and `disabled`; with an argument, `nth-child()`, `nth-last-child()`,
+`nth-of-type()`, `nth-last-of-type()`, `not()`, `is()`, `where()` and
+`has()`; and the pseudo-elements `before`, `after`, `marker`,
+`placeholder`, `selection`, `backdrop`, `first-line`, `first-letter` and
+`file-selector-button`, which htmlang writes with CSS's `::`. The argument
+is CSS, written as it is between balanced parentheses, and it may hold
+spaces and colons: the key ends at the first space outside parentheses, so
+`has(> img):padding 0` and `is(:hover, :focus-visible):color red` are one
+key each. `children:` is htmlang's one combinator word. A name that isn't
+one of these (`hvoer:`, or `first:` for `first-child:`) is an unknown
+prefix, an error, not a selector that silently never matches.
 
 A prefix goes on a style or a layout flag, and prefixes stack: the key
 is a chain of prefixes, then the property, and the style applies where
@@ -585,8 +604,7 @@ element with states of its own, so it comes last among them:
 container prefixes go anywhere in the chain, in any order, and each is
 an `@media` or `@container` rule around the ones inside it:
 `md:dark:padding 32` and `dark:md:padding 32` are the same style, from
-768px up in dark mode. A misspelled prefix (`hovr:`) is an error, not a
-style that silently never applies.
+768px up in dark mode.
 
 A prefix written before a `[group]` applies to each style in it, and one
 written before a `$bundle` to each style the bundle holds, so styles that
@@ -613,9 +631,9 @@ themselves, or the CSS they stand for does (`children:flex 1`).
 @el [padding 16, background #3b82f6, hover:background #2563eb, md:[padding 32, font-size 20], dark:[background #1e3a8a, hover:background #1e40af]]
   @text [color white] Click me
 @row [spacing 4, children:flex 1, hover:children:opacity 0.8]
-  @el [odd:background #f3f4f6] A
-  @el [odd:background #f3f4f6] B
-  @el [odd:background #f3f4f6] C
+  @el [nth-child(odd):background #f3f4f6] A
+  @el [nth-child(odd):background #f3f4f6] B
+  @el [nth-child(odd):background #f3f4f6] C
 @el [before:content "→ ", before:color red, hover:before:color blue]
   Item with an arrow
 @section [spacing 16, md:$card, hover:if($active, [background #eef2ff, color #3730a3])]
@@ -629,7 +647,10 @@ order of the table (a stack like `md:dark:` after `dark:` on its own),
 with its selector chains inside it. So where two styles both hold, the
 one later in the table wins (`dark:` over `md:`, `lg:` over `md:`), and a
 stack wins over each of its prefixes on its own (`md:dark:` over `dark:`
-and `md:`).
+and `md:`). Selector chains follow CSS's usual order: `link:` and
+`visited:`, the position and form states, then `hover:`, `focus:`,
+`active:`, and `enabled:` and `disabled:` last. So a hovered row wins over
+`nth-child(odd):`, and a pressed button's `active:` over its `focus:`.
 
 ### Conditional attributes
 
@@ -737,12 +758,15 @@ to 0 (in the element's own class, so Markdown and raw HTML keep theirs; see
 items are columns like other containers, so `spacing` on a list is the gap between its items, and
 a list shows no markers. To bring them back, write
 `[list-style disc, padding-inline-start 20, children:display list-item]` on
-the list.
+the list, and `marker:` styles the markers themselves (`::marker`).
 
 ```
 @ol [spacing 4]
   @li First
   @li Second
+@ul [list-style disc, padding-inline-start 20, children:display list-item, children:marker:color #2563eb]
+  @li [first-child:font-weight 700] Markers
+  @li Back
 @form [method=post, spacing 8] /subscribe
   @label [for=email] Email
   @input [type=email, name=email, id=email, required]

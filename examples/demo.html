@@ -34,7 +34,7 @@ body { margin: 0; font-family: system-ui, -apple-system, sans-serif; display: fl
   :where(.hl-af) {display:flex;flex-direction:column;position:absolute;inset:0;}
   :where(.hl-al,.hl-b8) {text-decoration:none;color:inherit;}
   :where(.hl-an,.hl-b5) {display:flex;flex-direction:column;margin:0;}
-  :where(.hl-at) {display:flex;flex-direction:column;margin:0;padding-left:0;list-style:none;}
+  :where(.hl-at) {display:flex;flex-direction:column;margin:0;padding-left:0;}
   :where(.hl-a8) {text-decoration:none;}
   :where(.hl-b6) {display:block;}
   :where(.hl-b7) {display:flex;}
@@ -77,7 +77,7 @@ body { margin: 0; font-family: system-ui, -apple-system, sans-serif; display: fl
   .hl-ap {padding:16px;background:var(--surface);border:1px solid var(--line);border-radius:8px;transition:all 0.15s ease;cursor:pointer;}
   .hl-aq,.hl-as,.hl-av,.hl-bz {padding:16px;background:var(--surface);border:1px solid var(--line);border-radius:8px;}
   .hl-ar {padding:16px;background:var(--surface);border:1px solid var(--line);border-radius:8px;--tone:#a855f7;color:var(--tone);border-color:var(--tone);}
-  .hl-at {padding:16px;background:var(--surface);border:1px solid var(--line);border-radius:8px;gap:4px;}
+  .hl-at {padding:16px;background:var(--surface);border:1px solid var(--line);border-radius:8px;gap:4px;list-style:disc;padding-inline-start:36px;}
   .hl-au {border-radius:4px;}
   .hl-aw {cursor:pointer;}
   .hl-ax {margin-inline-end:8px;}
@@ -124,16 +124,17 @@ body { margin: 0; font-family: system-ui, -apple-system, sans-serif; display: fl
   .hl-b4 {gap:8px;align-items:center;font-size:14px;color:var(--muted);}
   .hl-b6 {border-radius:8px;width:100%;}
   .hl-b7 {flex-direction:row;gap:8px;padding-block:24px;color:var(--muted);font-size:14px;}
+  .hl-au:first-child {font-weight:700;}
+  .hl-au:nth-child(odd) {background:var(--subtle);}
+  .hl-bv:invalid {border-color:#ef4444;}
+  .hl-av:has(input:checked) {border-color:var(--brand);background:#eff6ff;}
   .hl-ap:hover {background:#eff6ff;border-color:var(--brand);}
   .hl-bx:hover {background:#3575dd;}
   .hl-b8:hover {color:var(--brand);}
   .hl-bv:focus {outline:2px solid var(--brand);}
-  .hl-au:first-child {font-weight:700;}
-  .hl-au:nth-child(odd) {background:var(--subtle);}
   .hl-as::before {content:"→ ";color:var(--brand);}
-  .hl-bv:invalid {border-color:#ef4444;}
-  .hl-av:has(input:checked) {border-color:var(--brand);background:#eff6ff;}
-  :where(.hl-at)>* {padding:4px 8px;}
+  :where(.hl-at)>* {display:list-item;padding:4px 8px;}
+  :where(.hl-at)>*::marker {color:var(--brand);}
 @media (min-width: 768px) {
   :where(.hl-t)>.hl-u {width:auto;flex:1;min-width:0;}
   .hl-t {flex-direction:row;}
@@ -366,402 +367,406 @@ Style      </h2>
     </div>
     <!-- @paragraph line 121 -->
     <p class="hl-m" data-hl-line="121" data-hl-el="paragraph">
-Besides the layout attributes, every attribute is a CSS property with its CSS name and value. A bare number in a length, shadows included, is pixels, and \, keeps a comma in a value. A custom property (--name) is one too: set on an element, it holds for everything inside it. Prefixes stack, and one prefix before a [group] applies to each style in it.    </p>
-    <!-- @row line 126 -->
-    <div class="hl-n" data-hl-line="126" data-hl-el="row">
-      <!-- @el line 127 -->
-      <div class="hl-ao" data-hl-line="127" data-hl-el="el">
+Besides the layout attributes, every attribute is a CSS property with its CSS name and value. A bare number in a length, shadows included, is pixels, and \, keeps a comma in a value. A custom property (--name) is one too: set on an element, it holds for everything inside it. Prefixes stack, and one prefix before a [group] applies to each style in it. A selector prefix is a CSS pseudo-class or pseudo-element under its own name: hover:, first-child:, nth-child(odd):, has(...):, marker:.    </p>
+    <!-- @row line 127 -->
+    <div class="hl-n" data-hl-line="127" data-hl-el="row">
+      <!-- @el line 128 -->
+      <div class="hl-ao" data-hl-line="128" data-hl-el="el">
         <span>Any CSS property</span>
       </div>
-      <!-- @el line 128 -->
-      <div class="hl-ap" data-hl-line="128" data-hl-el="el">
+      <!-- @el line 129 -->
+      <div class="hl-ap" data-hl-line="129" data-hl-el="el">
         <span>hover:</span>
       </div>
-      <!-- @el line 129 -->
-      <div class="hl-aq" data-hl-line="129" data-hl-el="el">
+      <!-- @el line 130 -->
+      <div class="hl-aq" data-hl-line="130" data-hl-el="el">
         <span>md:[...] and dark:hover:</span>
       </div>
-      <!-- @el line 130 -->
-      <div class="hl-ar" data-hl-line="130" data-hl-el="el">
+      <!-- @el line 131 -->
+      <div class="hl-ar" data-hl-line="131" data-hl-el="el">
         <span>custom properties</span>
       </div>
-      <!-- @el line 131 -->
-      <div class="hl-as" data-hl-line="131" data-hl-el="el">
+      <!-- @el line 132 -->
+      <div class="hl-as" data-hl-line="132" data-hl-el="el">
         <span>before:</span>
       </div>
     </div>
-    <!-- @ul line 132 -->
-    <ul class="hl-at" data-hl-line="132" data-hl-el="ul">
-      <!-- @li line 134 -->
-      <li class="hl-au" data-hl-line="134" data-hl-el="li">
-        <span>first: bolds this one</span>
+    <!-- @ul line 133 -->
+    <ul class="hl-at" data-hl-line="133" data-hl-el="ul">
+      <!-- @li line 135 -->
+      <li class="hl-au" data-hl-line="135" data-hl-el="li">
+        <span>first-child: bolds this one</span>
       </li>
-      <!-- @li line 134 -->
-      <li class="hl-au" data-hl-line="134" data-hl-el="li">
-        <span>odd: shades every other row</span>
+      <!-- @li line 135 -->
+      <li class="hl-au" data-hl-line="135" data-hl-el="li">
+        <span>nth-child(odd): shades every other row</span>
       </li>
-      <!-- @li line 134 -->
-      <li class="hl-au" data-hl-line="134" data-hl-el="li">
+      <!-- @li line 135 -->
+      <li class="hl-au" data-hl-line="135" data-hl-el="li">
         <span>children: pads them all</span>
       </li>
+      <!-- @li line 135 -->
+      <li class="hl-au" data-hl-line="135" data-hl-el="li">
+        <span>children:marker: colours the bullets</span>
+      </li>
     </ul>
-    <!-- @el line 135 -->
-    <div class="hl-av" data-hl-line="135" data-hl-el="el">
-      <!-- @label line 136 -->
-      <label class="hl-aw" data-hl-line="136" data-hl-el="label">
-        <!-- @input line 137 -->
-        <input class="hl-ax" type="checkbox" data-hl-line="137" data-hl-el="input">
+    <!-- @el line 136 -->
+    <div class="hl-av" data-hl-line="136" data-hl-el="el">
+      <!-- @label line 137 -->
+      <label class="hl-aw" data-hl-line="137" data-hl-el="label">
+        <!-- @input line 138 -->
+        <input class="hl-ax" type="checkbox" data-hl-line="138" data-hl-el="input">
  Tick the box: has() styles the card around it      </label>
     </div>
   </section>
-  <!-- @section line 174 -->
-  <section class="hl-i" data-hl-line="174" data-hl-el="section">
-    <!-- @row line 174 -->
-    <div class="hl-j" data-hl-line="174" data-hl-el="row">
-      <!-- @text line 174 -->
-      <span class="hl-k" data-hl-line="174" data-hl-el="text">
+  <!-- @section line 175 -->
+  <section class="hl-i" data-hl-line="175" data-hl-el="section">
+    <!-- @row line 175 -->
+    <div class="hl-j" data-hl-line="175" data-hl-el="row">
+      <!-- @text line 175 -->
+      <span class="hl-k" data-hl-line="175" data-hl-el="text">
 4.      </span>
-      <!-- @h2 line 174 -->
-      <h2 class="hl-l" data-hl-line="174" data-hl-el="h2">
+      <!-- @h2 line 175 -->
+      <h2 class="hl-l" data-hl-line="175" data-hl-el="h2">
 Functions      </h2>
     </div>
-    <!-- @paragraph line 175 -->
-    <p class="hl-m" data-hl-line="175" data-hl-el="paragraph">
-Functions are       <!-- @code line 176 -->
-      <code class="hl-h" data-hl-line="176" data-hl-el="code">
+    <!-- @paragraph line 176 -->
+    <p class="hl-m" data-hl-line="176" data-hl-el="paragraph">
+Functions are       <!-- @code line 177 -->
+      <code class="hl-h" data-hl-line="177" data-hl-el="code">
 @let @name      </code> with a body. Their parameters are listed and passed like attributes, a name alone passes true, and a body can be text like this one.    </p>
-    <!-- @paragraph line 177 -->
-    <p class="hl-m" data-hl-line="177" data-hl-el="paragraph">
-A call works wherever an element does, even inside a sentence: press       <!-- @kbd line 179 -->
-      <kbd class="hl-ay" data-hl-line="179" data-hl-el="kbd">
-Ctrl      </kbd>       <!-- @kbd line 179 -->
-      <kbd class="hl-ay" data-hl-line="179" data-hl-el="kbd">
+    <!-- @paragraph line 178 -->
+    <p class="hl-m" data-hl-line="178" data-hl-el="paragraph">
+A call works wherever an element does, even inside a sentence: press       <!-- @kbd line 180 -->
+      <kbd class="hl-ay" data-hl-line="180" data-hl-el="kbd">
+Ctrl      </kbd>       <!-- @kbd line 180 -->
+      <kbd class="hl-ay" data-hl-line="180" data-hl-el="kbd">
 K      </kbd> to search.    </p>
-    <!-- @row line 180 -->
-    <div class="hl-n" data-hl-line="180" data-hl-el="row">
-      <!-- @el line 181 -->
-      <div class="hl-az" data-hl-line="181" data-hl-el="el">
-        <!-- @text line 181 -->
-        <span class="hl-a0" data-hl-line="181" data-hl-el="text">
-1        </span>
-        <!-- @text line 181 -->
-        <span class="hl-a1" data-hl-line="181" data-hl-el="text">
-output file        </span>
-      </div>
+    <!-- @row line 181 -->
+    <div class="hl-n" data-hl-line="181" data-hl-el="row">
       <!-- @el line 182 -->
       <div class="hl-az" data-hl-line="182" data-hl-el="el">
         <!-- @text line 182 -->
-        <span class="hl-a2" data-hl-line="182" data-hl-el="text">
-0        </span>
+        <span class="hl-a0" data-hl-line="182" data-hl-el="text">
+1        </span>
         <!-- @text line 182 -->
         <span class="hl-a1" data-hl-line="182" data-hl-el="text">
-lines of JavaScript        </span>
+output file        </span>
       </div>
       <!-- @el line 183 -->
-      <div class="hl-a3" data-hl-line="183" data-hl-el="el">
+      <div class="hl-az" data-hl-line="183" data-hl-el="el">
         <!-- @text line 183 -->
-        <span class="hl-a4" data-hl-line="183" data-hl-el="text">
-∞        </span>
+        <span class="hl-a2" data-hl-line="183" data-hl-el="text">
+0        </span>
         <!-- @text line 183 -->
         <span class="hl-a1" data-hl-line="183" data-hl-el="text">
+lines of JavaScript        </span>
+      </div>
+      <!-- @el line 184 -->
+      <div class="hl-a3" data-hl-line="184" data-hl-el="el">
+        <!-- @text line 184 -->
+        <span class="hl-a4" data-hl-line="184" data-hl-el="text">
+∞        </span>
+        <!-- @text line 184 -->
+        <span class="hl-a1" data-hl-line="184" data-hl-el="text">
 components        </span>
       </div>
     </div>
-    <!-- @article line 184 -->
-    <article class="hl-a5" data-hl-line="184" data-hl-el="article">
-      <!-- @row line 184 -->
-      <div class="hl-a6" data-hl-line="184" data-hl-el="row">
-        <!-- @h3 line 184 -->
-        <h3 class="hl-a7" data-hl-line="184" data-hl-el="h3">
+    <!-- @article line 185 -->
+    <article class="hl-a5" data-hl-line="185" data-hl-el="article">
+      <!-- @row line 185 -->
+      <div class="hl-a6" data-hl-line="185" data-hl-el="row">
+        <!-- @h3 line 185 -->
+        <h3 class="hl-a7" data-hl-line="185" data-hl-el="h3">
 Named slots        </h3>
-        <!-- @el line 184 -->
-        <div class="hl-s" data-hl-line="184" data-hl-el="el">
+        <!-- @el line 185 -->
+        <div class="hl-s" data-hl-line="185" data-hl-el="el">
         </div>
-        <!-- @link line 186 -->
-        <a href="/edit" class="hl-a8" data-hl-line="186" data-hl-el="link">
+        <!-- @link line 187 -->
+        <a href="/edit" class="hl-a8" data-hl-line="187" data-hl-el="link">
 Edit        </a>
       </div>
-      <!-- @paragraph line 187 -->
-      <p class="hl-m" data-hl-line="187" data-hl-el="paragraph">
-Children fill         <!-- @code line 188 -->
-        <code class="hl-h" data-hl-line="188" data-hl-el="code">
-@children        </code>;         <!-- @code line 188 -->
-        <code class="hl-h" data-hl-line="188" data-hl-el="code">
+      <!-- @paragraph line 188 -->
+      <p class="hl-m" data-hl-line="188" data-hl-el="paragraph">
+Children fill         <!-- @code line 189 -->
+        <code class="hl-h" data-hl-line="189" data-hl-el="code">
+@children        </code>;         <!-- @code line 189 -->
+        <code class="hl-h" data-hl-line="189" data-hl-el="code">
 @slot        </code> blocks fill slots by name, and a slot name the panel doesn't have is an error.      </p>
-      <!-- @text line 184 -->
-      <span class="hl-a9" data-hl-line="184" data-hl-el="text">
+      <!-- @text line 185 -->
+      <span class="hl-a9" data-hl-line="185" data-hl-el="text">
 Default footer      </span>
     </article>
-    <!-- @row line 190 -->
-    <div class="hl-ba" data-hl-line="190" data-hl-el="row">
-      <!-- @row line 191 -->
-      <div class="hl-bb hl-fn-badge" data-hl-line="191" data-hl-el="row">
-        <!-- @text line 191 -->
-        <span class="dot" data-hl-line="191" data-hl-el="text">
+    <!-- @row line 191 -->
+    <div class="hl-ba" data-hl-line="191" data-hl-el="row">
+      <!-- @row line 192 -->
+      <div class="hl-bb hl-fn-badge" data-hl-line="192" data-hl-el="row">
+        <!-- @text line 192 -->
+        <span class="dot" data-hl-line="192" data-hl-el="text">
 •        </span>
         <span>scoped style</span>
       </div>
-      <!-- @row line 192 -->
-      <div class="hl-bb hl-fn-badge" data-hl-line="192" data-hl-el="row">
+      <!-- @row line 193 -->
+      <div class="hl-bb hl-fn-badge" data-hl-line="193" data-hl-el="row">
         <span>same function</span>
       </div>
     </div>
   </section>
-  <!-- @section line 198 -->
-  <section class="hl-i" data-hl-line="198" data-hl-el="section">
-    <!-- @row line 198 -->
-    <div class="hl-j" data-hl-line="198" data-hl-el="row">
-      <!-- @text line 198 -->
-      <span class="hl-k" data-hl-line="198" data-hl-el="text">
+  <!-- @section line 199 -->
+  <section class="hl-i" data-hl-line="199" data-hl-el="section">
+    <!-- @row line 199 -->
+    <div class="hl-j" data-hl-line="199" data-hl-el="row">
+      <!-- @text line 199 -->
+      <span class="hl-k" data-hl-line="199" data-hl-el="text">
 5.      </span>
-      <!-- @h2 line 198 -->
-      <h2 class="hl-l" data-hl-line="198" data-hl-el="h2">
+      <!-- @h2 line 199 -->
+      <h2 class="hl-l" data-hl-line="199" data-hl-el="h2">
 Expressions      </h2>
     </div>
-    <!-- @paragraph line 199 -->
-    <p class="hl-m" data-hl-line="199" data-hl-el="paragraph">
+    <!-- @paragraph line 200 -->
+    <p class="hl-m" data-hl-line="200" data-hl-el="paragraph">
 $name inserts a value and ${...} any expression: HTMLANG has 7 letters and 3 tags.    </p>
-    <!-- @row line 202 -->
-    <div class="hl-n" data-hl-line="202" data-hl-el="row">
-      <!-- @el line 204 -->
-      <div class="hl-bc" data-hl-line="204" data-hl-el="el">
+    <!-- @row line 203 -->
+    <div class="hl-n" data-hl-line="203" data-hl-el="row">
+      <!-- @el line 205 -->
+      <div class="hl-bc" data-hl-line="205" data-hl-el="el">
         <span>darken 0%</span>
       </div>
-      <!-- @el line 204 -->
-      <div class="hl-bd" data-hl-line="204" data-hl-el="el">
+      <!-- @el line 205 -->
+      <div class="hl-bd" data-hl-line="205" data-hl-el="el">
         <span>darken 10%</span>
       </div>
-      <!-- @el line 204 -->
-      <div class="hl-be" data-hl-line="204" data-hl-el="el">
+      <!-- @el line 205 -->
+      <div class="hl-be" data-hl-line="205" data-hl-el="el">
         <span>darken 20%</span>
       </div>
-      <!-- @el line 204 -->
-      <div class="hl-bf" data-hl-line="204" data-hl-el="el">
+      <!-- @el line 205 -->
+      <div class="hl-bf" data-hl-line="205" data-hl-el="el">
         <span>darken 30%</span>
       </div>
-      <!-- @el line 211 -->
-      <div class="hl-bg" data-hl-line="211" data-hl-el="el">
+      <!-- @el line 212 -->
+      <div class="hl-bg" data-hl-line="212" data-hl-el="el">
         <span>alpha 0.2</span>
       </div>
-      <!-- @el line 212 -->
-      <div class="hl-bh" data-hl-line="212" data-hl-el="el">
+      <!-- @el line 213 -->
+      <div class="hl-bh" data-hl-line="213" data-hl-el="el">
         <span>mix</span>
       </div>
     </div>
-    <!-- @text line 214 -->
-    <span class="hl-a1" data-hl-line="214" data-hl-el="text">
+    <!-- @text line 215 -->
+    <span class="hl-a1" data-hl-line="215" data-hl-el="text">
 contains($tags, css) is true    </span>
   </section>
-  <!-- @section line 223 -->
-  <section class="hl-i" data-hl-line="223" data-hl-el="section">
-    <!-- @row line 223 -->
-    <div class="hl-j" data-hl-line="223" data-hl-el="row">
-      <!-- @text line 223 -->
-      <span class="hl-k" data-hl-line="223" data-hl-el="text">
+  <!-- @section line 224 -->
+  <section class="hl-i" data-hl-line="224" data-hl-el="section">
+    <!-- @row line 224 -->
+    <div class="hl-j" data-hl-line="224" data-hl-el="row">
+      <!-- @text line 224 -->
+      <span class="hl-k" data-hl-line="224" data-hl-el="text">
 6.      </span>
-      <!-- @h2 line 223 -->
-      <h2 class="hl-l" data-hl-line="223" data-hl-el="h2">
+      <!-- @h2 line 224 -->
+      <h2 class="hl-l" data-hl-line="224" data-hl-el="h2">
 Control flow      </h2>
     </div>
-    <!-- @table line 224 -->
-    <table class="hl-bi" data-hl-line="224" data-hl-el="table">
-      <!-- @thead line 225 -->
-      <thead data-hl-line="225" data-hl-el="thead">
-        <!-- @tr line 226 -->
-        <tr class="hl-bj" data-hl-line="226" data-hl-el="tr">
-          <!-- @th line 227 -->
-          <th class="hl-bk" data-hl-line="227" data-hl-el="th">
-#          </th>
+    <!-- @table line 225 -->
+    <table class="hl-bi" data-hl-line="225" data-hl-el="table">
+      <!-- @thead line 226 -->
+      <thead data-hl-line="226" data-hl-el="thead">
+        <!-- @tr line 227 -->
+        <tr class="hl-bj" data-hl-line="227" data-hl-el="tr">
           <!-- @th line 228 -->
           <th class="hl-bk" data-hl-line="228" data-hl-el="th">
-Name          </th>
+#          </th>
           <!-- @th line 229 -->
           <th class="hl-bk" data-hl-line="229" data-hl-el="th">
-Role          </th>
+Name          </th>
           <!-- @th line 230 -->
           <th class="hl-bk" data-hl-line="230" data-hl-el="th">
+Role          </th>
+          <!-- @th line 231 -->
+          <th class="hl-bk" data-hl-line="231" data-hl-el="th">
 Status          </th>
         </tr>
       </thead>
-      <!-- @tbody line 231 -->
-      <tbody data-hl-line="231" data-hl-el="tbody">
-        <!-- @tr line 233 -->
-        <tr class="hl-bl" data-hl-line="233" data-hl-el="tr">
-          <!-- @td line 234 -->
-          <td class="hl-bk" data-hl-line="234" data-hl-el="td">
+      <!-- @tbody line 232 -->
+      <tbody data-hl-line="232" data-hl-el="tbody">
+        <!-- @tr line 234 -->
+        <tr class="hl-bl" data-hl-line="234" data-hl-el="tr">
+          <!-- @td line 235 -->
+          <td class="hl-bk" data-hl-line="235" data-hl-el="td">
 1          </td>
-          <!-- @td line 235 -->
-          <td class="hl-bm" data-hl-line="235" data-hl-el="td">
+          <!-- @td line 236 -->
+          <td class="hl-bm" data-hl-line="236" data-hl-el="td">
 Ada          </td>
-          <!-- @td line 236 -->
-          <td class="hl-bk" data-hl-line="236" data-hl-el="td">
+          <!-- @td line 237 -->
+          <td class="hl-bk" data-hl-line="237" data-hl-el="td">
 Engineering          </td>
-          <!-- @td line 237 -->
-          <td class="hl-bn" data-hl-line="237" data-hl-el="td">
+          <!-- @td line 238 -->
+          <td class="hl-bn" data-hl-line="238" data-hl-el="td">
 Active          </td>
         </tr>
-        <!-- @tr line 233 -->
-        <tr class="hl-bl" data-hl-line="233" data-hl-el="tr">
-          <!-- @td line 234 -->
-          <td class="hl-bk" data-hl-line="234" data-hl-el="td">
+        <!-- @tr line 234 -->
+        <tr class="hl-bl" data-hl-line="234" data-hl-el="tr">
+          <!-- @td line 235 -->
+          <td class="hl-bk" data-hl-line="235" data-hl-el="td">
 2          </td>
-          <!-- @td line 235 -->
-          <td class="hl-bm" data-hl-line="235" data-hl-el="td">
-Grace          </td>
           <!-- @td line 236 -->
-          <td class="hl-bk" data-hl-line="236" data-hl-el="td">
-Design, research          </td>
+          <td class="hl-bm" data-hl-line="236" data-hl-el="td">
+Grace          </td>
           <!-- @td line 237 -->
-          <td class="hl-bn" data-hl-line="237" data-hl-el="td">
+          <td class="hl-bk" data-hl-line="237" data-hl-el="td">
+Design, research          </td>
+          <!-- @td line 238 -->
+          <td class="hl-bn" data-hl-line="238" data-hl-el="td">
 Active          </td>
         </tr>
-        <!-- @tr line 233 -->
-        <tr class="hl-bl" data-hl-line="233" data-hl-el="tr">
-          <!-- @td line 234 -->
-          <td class="hl-bk" data-hl-line="234" data-hl-el="td">
-3          </td>
+        <!-- @tr line 234 -->
+        <tr class="hl-bl" data-hl-line="234" data-hl-el="tr">
           <!-- @td line 235 -->
-          <td class="hl-bm" data-hl-line="235" data-hl-el="td">
-Linus          </td>
+          <td class="hl-bk" data-hl-line="235" data-hl-el="td">
+3          </td>
           <!-- @td line 236 -->
-          <td class="hl-bk" data-hl-line="236" data-hl-el="td">
-Operations          </td>
+          <td class="hl-bm" data-hl-line="236" data-hl-el="td">
+Linus          </td>
           <!-- @td line 237 -->
-          <td class="hl-bo" data-hl-line="237" data-hl-el="td">
+          <td class="hl-bk" data-hl-line="237" data-hl-el="td">
+Operations          </td>
+          <!-- @td line 238 -->
+          <td class="hl-bo" data-hl-line="238" data-hl-el="td">
 Away          </td>
         </tr>
       </tbody>
     </table>
-    <!-- @row line 242 -->
-    <div class="hl-bp" data-hl-line="242" data-hl-el="row">
-      <!-- @text line 244 -->
-      <span class="hl-bq" data-hl-line="244" data-hl-el="text">
+    <!-- @row line 243 -->
+    <div class="hl-bp" data-hl-line="243" data-hl-el="row">
+      <!-- @text line 245 -->
+      <span class="hl-bq" data-hl-line="245" data-hl-el="text">
 10      </span>
-      <!-- @text line 244 -->
-      <span class="hl-bq" data-hl-line="244" data-hl-el="text">
+      <!-- @text line 245 -->
+      <span class="hl-bq" data-hl-line="245" data-hl-el="text">
 8      </span>
-      <!-- @text line 244 -->
-      <span class="hl-bq" data-hl-line="244" data-hl-el="text">
+      <!-- @text line 245 -->
+      <span class="hl-bq" data-hl-line="245" data-hl-el="text">
 6      </span>
-      <!-- @text line 244 -->
-      <span class="hl-bq" data-hl-line="244" data-hl-el="text">
+      <!-- @text line 245 -->
+      <span class="hl-bq" data-hl-line="245" data-hl-el="text">
 4      </span>
-      <!-- @text line 244 -->
-      <span class="hl-bq" data-hl-line="244" data-hl-el="text">
+      <!-- @text line 245 -->
+      <span class="hl-bq" data-hl-line="245" data-hl-el="text">
 2      </span>
-      <!-- @text line 244 -->
-      <span class="hl-bq" data-hl-line="244" data-hl-el="text">
+      <!-- @text line 245 -->
+      <span class="hl-bq" data-hl-line="245" data-hl-el="text">
 0      </span>
     </div>
-    <!-- @text line 248 -->
-    <span class="hl-br" data-hl-line="248" data-hl-el="text">
+    <!-- @text line 249 -->
+    <span class="hl-br" data-hl-line="249" data-hl-el="text">
 @each … @else shows this for an empty list.    </span>
   </section>
-  <!-- @section line 251 -->
-  <section class="hl-i" data-hl-line="251" data-hl-el="section">
-    <!-- @row line 251 -->
-    <div class="hl-j" data-hl-line="251" data-hl-el="row">
-      <!-- @text line 251 -->
-      <span class="hl-k" data-hl-line="251" data-hl-el="text">
+  <!-- @section line 252 -->
+  <section class="hl-i" data-hl-line="252" data-hl-el="section">
+    <!-- @row line 252 -->
+    <div class="hl-j" data-hl-line="252" data-hl-el="row">
+      <!-- @text line 252 -->
+      <span class="hl-k" data-hl-line="252" data-hl-el="text">
 7.      </span>
-      <!-- @h2 line 251 -->
-      <h2 class="hl-l" data-hl-line="251" data-hl-el="h2">
+      <!-- @h2 line 252 -->
+      <h2 class="hl-l" data-hl-line="252" data-hl-el="h2">
 HTML      </h2>
     </div>
-    <!-- @paragraph line 252 -->
-    <p class="hl-m" data-hl-line="252" data-hl-el="paragraph">
-Every other element has its HTML name, and HTML attributes are written       <!-- @code line 254 -->
-      <code class="hl-h" data-hl-line="254" data-hl-el="code">
-key=value      </code>.       <!-- @code line 254 -->
-      <code class="hl-h" data-hl-line="254" data-hl-el="code">
-@page      </code> is the root element: its styles go on       <!-- @code line 255 -->
+    <!-- @paragraph line 253 -->
+    <p class="hl-m" data-hl-line="253" data-hl-el="paragraph">
+Every other element has its HTML name, and HTML attributes are written       <!-- @code line 255 -->
       <code class="hl-h" data-hl-line="255" data-hl-el="code">
-&lt;body&gt;      </code>, a column that fills the window, and its       <!-- @code line 255 -->
+key=value      </code>.       <!-- @code line 255 -->
       <code class="hl-h" data-hl-line="255" data-hl-el="code">
-key=value      </code> attributes on       <!-- @code line 256 -->
+@page      </code> is the root element: its styles go on       <!-- @code line 256 -->
       <code class="hl-h" data-hl-line="256" data-hl-el="code">
-&lt;html&gt;      </code>, like this page's       <!-- @code line 256 -->
+&lt;body&gt;      </code>, a column that fills the window, and its       <!-- @code line 256 -->
       <code class="hl-h" data-hl-line="256" data-hl-el="code">
+key=value      </code> attributes on       <!-- @code line 257 -->
+      <code class="hl-h" data-hl-line="257" data-hl-el="code">
+&lt;html&gt;      </code>, like this page's       <!-- @code line 257 -->
+      <code class="hl-h" data-hl-line="257" data-hl-el="code">
 lang=en      </code>.    </p>
-    <!-- @row line 257 -->
-    <div class="hl-bs" data-hl-line="257" data-hl-el="row">
-      <!-- @form line 258 -->
-      <form action="/subscribe" class="hl-bt" method="post" data-hl-line="258" data-hl-el="form">
-        <!-- @label line 259 -->
-        <label class="hl-bu" for="email" data-hl-line="259" data-hl-el="label">
+    <!-- @row line 258 -->
+    <div class="hl-bs" data-hl-line="258" data-hl-el="row">
+      <!-- @form line 259 -->
+      <form action="/subscribe" class="hl-bt" method="post" data-hl-line="259" data-hl-el="form">
+        <!-- @label line 260 -->
+        <label class="hl-bu" for="email" data-hl-line="260" data-hl-el="label">
 Email        </label>
-        <!-- @input line 260 -->
-        <input class="hl-bv" id="email" type="email" name="email" placeholder="you@example.com" required data-hl-line="260" data-hl-el="input">
-        <!-- @label line 272 -->
-        <label class="hl-bu" for="topic" data-hl-line="272" data-hl-el="label">
+        <!-- @input line 261 -->
+        <input class="hl-bv" id="email" type="email" name="email" placeholder="you@example.com" required data-hl-line="261" data-hl-el="input">
+        <!-- @label line 273 -->
+        <label class="hl-bu" for="topic" data-hl-line="273" data-hl-el="label">
 Topic        </label>
-        <!-- @select line 273 -->
-        <select class="hl-bw" id="topic" name="topic" data-hl-line="273" data-hl-el="select">
-          <!-- @option line 274 -->
-          <option value="news" data-hl-line="274" data-hl-el="option">
-News          </option>
+        <!-- @select line 274 -->
+        <select class="hl-bw" id="topic" name="topic" data-hl-line="274" data-hl-el="select">
           <!-- @option line 275 -->
-          <option value="releases" data-hl-line="275" data-hl-el="option">
+          <option value="news" data-hl-line="275" data-hl-el="option">
+News          </option>
+          <!-- @option line 276 -->
+          <option value="releases" data-hl-line="276" data-hl-el="option">
 Releases          </option>
         </select>
-        <!-- @button line 276 -->
-        <button class="hl-bx" type="submit" data-hl-line="276" data-hl-el="button">
+        <!-- @button line 277 -->
+        <button class="hl-bx" type="submit" data-hl-line="277" data-hl-el="button">
 Subscribe        </button>
       </form>
-      <!-- @el line 277 -->
-      <div class="hl-by" data-hl-line="277" data-hl-el="el">
-        <!-- @details line 278 -->
-        <details class="hl-bz" data-hl-line="278" data-hl-el="details">
-          <!-- @summary line 279 -->
-          <summary class="hl-b0" data-hl-line="279" data-hl-el="summary">
+      <!-- @el line 278 -->
+      <div class="hl-by" data-hl-line="278" data-hl-el="el">
+        <!-- @details line 279 -->
+        <details class="hl-bz" data-hl-line="279" data-hl-el="details">
+          <!-- @summary line 280 -->
+          <summary class="hl-b0" data-hl-line="280" data-hl-el="summary">
 What does this compile to?          </summary>
-          <!-- @paragraph line 280 -->
-          <p class="hl-b1" data-hl-line="280" data-hl-el="paragraph">
-Flexbox and grid CSS in one             <!-- @code line 281 -->
-            <code class="hl-h" data-hl-line="281" data-hl-el="code">
+          <!-- @paragraph line 281 -->
+          <p class="hl-b1" data-hl-line="281" data-hl-el="paragraph">
+Flexbox and grid CSS in one             <!-- @code line 282 -->
+            <code class="hl-h" data-hl-line="282" data-hl-el="code">
 &lt;style&gt;            </code>, and no JavaScript.          </p>
         </details>
-        <!-- @button line 282 -->
-        <button class="hl-b2" type="button" popovertarget="about" data-hl-line="282" data-hl-el="button">
+        <!-- @button line 283 -->
+        <button class="hl-b2" type="button" popovertarget="about" data-hl-line="283" data-hl-el="button">
 Open a popover        </button>
-        <!-- @el line 283 -->
-        <div class="hl-b3" id="about" popover data-hl-line="283" data-hl-el="el">
+        <!-- @el line 284 -->
+        <div class="hl-b3" id="about" popover data-hl-line="284" data-hl-el="el">
           <span>Native HTML popovers need no script.</span>
         </div>
-        <!-- @row line 285 -->
-        <div class="hl-b4" data-hl-line="285" data-hl-el="row">
-          <!-- @text line 286 -->
-          <span data-hl-line="286" data-hl-el="text">
+        <!-- @row line 286 -->
+        <div class="hl-b4" data-hl-line="286" data-hl-el="row">
+          <!-- @text line 287 -->
+          <span data-hl-line="287" data-hl-el="text">
 Progress          </span>
-          <!-- @progress line 287 -->
-          <progress value="60" max="100" data-hl-line="287" data-hl-el="progress">
+          <!-- @progress line 288 -->
+          <progress value="60" max="100" data-hl-line="288" data-hl-el="progress">
           </progress>
-          <!-- @time line 288 -->
-          <time datetime="2026-09-26" data-hl-line="288" data-hl-el="time">
+          <!-- @time line 289 -->
+          <time datetime="2026-09-26" data-hl-line="289" data-hl-el="time">
 Sept 26          </time>
         </div>
-        <!-- @figure line 289 -->
-        <figure class="hl-b5" data-hl-line="289" data-hl-el="figure">
-          <!-- @image line 290 -->
-          <img src="https://picsum.photos/640/240" class="hl-b6" alt="A placeholder landscape" data-hl-line="290" data-hl-el="image">
-          <!-- @figcaption line 291 -->
-          <figcaption class="hl-a9" data-hl-line="291" data-hl-el="figcaption">
+        <!-- @figure line 290 -->
+        <figure class="hl-b5" data-hl-line="290" data-hl-el="figure">
+          <!-- @image line 291 -->
+          <img src="https://picsum.photos/640/240" class="hl-b6" alt="A placeholder landscape" data-hl-line="291" data-hl-el="image">
+          <!-- @figcaption line 292 -->
+          <figcaption class="hl-a9" data-hl-line="292" data-hl-el="figcaption">
 @figure and @figcaption          </figcaption>
         </figure>
       </div>
     </div>
   </section>
   <hr style="border: none; border-top: 1px dashed #cbd5e1">
-  <!-- @footer line 296 -->
-  <footer class="hl-b7" data-hl-line="296" data-hl-el="footer">
-    <!-- @text line 297 -->
-    <span data-hl-line="297" data-hl-el="text">
+  <!-- @footer line 297 -->
+  <footer class="hl-b7" data-hl-line="297" data-hl-el="footer">
+    <!-- @text line 298 -->
+    <span data-hl-line="298" data-hl-el="text">
 © 2026 htmlang    </span>
-    <!-- @el line 298 -->
-    <div class="hl-s" data-hl-line="298" data-hl-el="el">
+    <!-- @el line 299 -->
+    <div class="hl-s" data-hl-line="299" data-hl-el="el">
     </div>
-    <!-- @link line 299 -->
-    <a href="https://github.com/iko-soy/htmlang" class="hl-b8" data-hl-line="299" data-hl-el="link">
+    <!-- @link line 300 -->
+    <a href="https://github.com/iko-soy/htmlang" class="hl-b8" data-hl-line="300" data-hl-el="link">
 Source    </a>
   </footer>
 </div>

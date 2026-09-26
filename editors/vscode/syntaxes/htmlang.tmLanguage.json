@@ -287,7 +287,8 @@
     },
     "state-prefix": {
       "name": "keyword.other.state.htmlang",
-      "match": "(?:[a-z0-9-]+|nth:[^:\\s,\\]]+|has\\([^)]*\\)):(?=[a-z\\[$-])(?![a-zA-Z0-9_.:-]*=)"
+      "comment": "A prefix: a word (hover:, md:, children:) or a CSS pseudo-class with its argument (nth-child(odd):, has(> img):, not(:nth-child(2)):)",
+      "match": "(?:[a-z0-9-]+(?:\\((?:[^()]|\\([^()]*\\))*\\))?):(?=[a-z\\[$-])(?![a-zA-Z0-9_.:-]*=)"
     },
     "custom-property": {
       "comment": "A custom property's or a vendor-prefixed property's name where an attribute starts: --gap, md:--gap, -webkit-text-stroke",

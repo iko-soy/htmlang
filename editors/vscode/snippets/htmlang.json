@@ -322,6 +322,15 @@
     ],
     "description": "A table with a caption, a header row and a body"
   },
+  "List with markers": {
+    "prefix": "@ul-markers",
+    "body": [
+      "@ul [list-style ${1:disc}, padding-inline-start 20, children:display list-item, children:marker:color ${2:currentColor}]",
+      "  @li ${3:Item}",
+      "$0"
+    ],
+    "description": "A list that shows its markers, with ::marker styled"
+  },
   "External script": {
     "prefix": "@script-src",
     "body": [

@@ -8,7 +8,7 @@
   Groups
 @section [spacing 16, md:$card, hover:if($active, [background #eef2ff, color #3730a3])]
   A bundle and an if()
-@row [spacing 4, children:opacity 1, hover:children:opacity 0.8, children:hover:color red, children:odd:background #f3f4f6]
+@row [spacing 4, children:opacity 1, hover:children:opacity 0.8, children:hover:color red, children:nth-child(odd):background #f3f4f6]
   @el [opacity 0.5] Own opacity wins
   @el Two
 @el [before:content "→ ", hover:before:color blue, md:hover:after:content "!"]

@@ -84,7 +84,7 @@ impl Condition {
 
     /// The styles go on the element's children (`children:`).
     fn on_children(&self) -> bool {
-        self.selector.iter().any(|p| p == "children:")
+        self.selector.iter().any(|p| p == crate::vocab::CHILDREN)
     }
 
     /// Whether this condition holds wherever `other` does: its at-rules
@@ -122,31 +122,32 @@ fn at_order(at: &[usize]) -> AtOrder {
     )
 }
 
-/// Selector chains in the order of the prefix table (`hover:` before
-/// `active:` before `focus:` ...), then `nth:` and `has()` by their text;
-/// a chain before the longer ones it starts. A chain through `children:`
-/// comes after the others, ordered by what follows its last `children:`
-/// and then by what comes before it: only that tail counts toward its
-/// specificity (see [`selector`]), so `hover:children:` follows
-/// `children:` and wins over it on hover.
+/// Selector chains in the order of [`crate::vocab::PSEUDOS`] (position,
+/// then form state, then `hover:`, `focus:`, `active:`, `disabled:`), and
+/// by their argument's text for the same pseudo-class; a chain before the
+/// longer ones it starts. A chain through `children:` comes after the
+/// others, ordered by what follows its last `children:` and then by what
+/// comes before it: only that tail counts toward its specificity (see
+/// [`selector`]), so `hover:children:` follows `children:` and wins over it
+/// on hover.
 type SelectorOrder = (bool, Vec<(usize, String)>, Vec<(usize, String)>);
 
 fn selector_order(selector: &[String]) -> SelectorOrder {
-    let table = crate::vocab::PSEUDO_PREFIXES;
+    let table = crate::vocab::PSEUDOS;
     let ranked = |chain: &[String]| -> Vec<(usize, String)> {
         chain
             .iter()
             .map(|p| {
-                let rank = match table.iter().position(|(q, _)| q == p) {
-                    Some(rank) => rank,
-                    None if p.starts_with("nth:") => table.len(),
-                    None => table.len() + 1,
-                };
+                let name = crate::vocab::pseudo_name(p);
+                let rank = table
+                    .iter()
+                    .position(|(q, _)| *q == name)
+                    .unwrap_or(table.len());
                 (rank, p.clone())
             })
             .collect()
     };
-    match selector.iter().rposition(|p| p == "children:") {
+    match selector.iter().rposition(|p| p == crate::vocab::CHILDREN) {
         None => (false, ranked(selector), Vec::new()),
         Some(i) => (true, ranked(&selector[i + 1..]), ranked(&selector[..i])),
     }
@@ -158,30 +159,17 @@ fn selector_order(selector: &[String]) -> SelectorOrder {
 /// attributes win over them: `children:hover:` is `:where(.a)>*:hover`,
 /// `hover:children:` is `:where(.a:hover)>*`.
 fn selector(class: &str, chain: &[String]) -> String {
-    let last_children = chain.iter().rposition(|p| p == "children:");
+    let last_children = chain.iter().rposition(|p| p == crate::vocab::CHILDREN);
     let mut out = format!(".{}", class);
     for (i, prefix) in chain.iter().enumerate() {
-        if prefix == "children:" {
+        if prefix == crate::vocab::CHILDREN {
             if Some(i) == last_children {
                 out = format!(":where({})>*", out);
             } else {
                 out.push_str(">*");
             }
-        } else if let Some((_, pseudo)) = crate::vocab::PSEUDO_PREFIXES
-            .iter()
-            .find(|(p, _)| p == prefix)
-        {
-            out.push_str(pseudo);
-        } else if let Some(expr) = prefix
-            .strip_prefix("nth:")
-            .and_then(|p| p.strip_suffix(':'))
-        {
-            out.push_str(&format!(":nth-child({})", expr));
-        } else if let Some(inner) = prefix
-            .strip_prefix("has(")
-            .and_then(|p| p.strip_suffix("):"))
-        {
-            out.push_str(&format!(":has({})", inner));
+        } else if let Some(pseudo) = crate::vocab::pseudo_selector(prefix) {
+            out.push_str(&pseudo);
         }
     }
     out
