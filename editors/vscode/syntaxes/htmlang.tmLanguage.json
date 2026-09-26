@@ -25,6 +25,9 @@
       "include": "#function-call"
     },
     {
+      "include": "#escape"
+    },
+    {
       "include": "#variable"
     },
     {
@@ -90,6 +93,10 @@
       "name": "entity.name.function.htmlang",
       "match": "@[a-zA-Z_][a-zA-Z0-9_-]*"
     },
+    "escape": {
+      "name": "constant.character.escape.htmlang",
+      "match": "\\\\(?:\\\\|\\$|@|\\{|\\}|\\[|\\]|,|\"|--)"
+    },
     "variable": {
       "name": "variable.other.htmlang",
       "match": "\\$(?:--[a-zA-Z]|[a-zA-Z_])[a-zA-Z0-9_]*(?:-+[a-zA-Z0-9_]+)*|\\$\\{[^{}]*\\}"
@@ -109,6 +116,12 @@
         }
       },
       "patterns": [
+        {
+          "include": "#escape"
+        },
+        {
+          "include": "#string"
+        },
         {
           "include": "#variable"
         },
@@ -130,6 +143,19 @@
         {
           "name": "punctuation.separator.comma.htmlang",
           "match": ","
+        }
+      ]
+    },
+    "string": {
+      "name": "string.quoted.double.htmlang",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "include": "#escape"
+        },
+        {
+          "include": "#variable"
         }
       ]
     },
@@ -156,6 +182,9 @@
         }
       },
       "patterns": [
+        {
+          "include": "#escape"
+        },
         {
           "include": "#element"
         },

@@ -21,7 +21,8 @@ Linux, macOS, and Windows. Your change should pass all three.
 - `crates/htmlang-core/` — parser, AST, code generator. No I/O lives here.
   - `syntax.rs` — the syntax tree: every line as written, with spans. The
     compiler evaluates it, the formatter prints it back, and the language
-    server takes definitions, directives and verbatim bodies from it.
+    server takes definitions, directives and verbatim bodies from it. It
+    also holds `ESCAPES`, the one escape table of every htmlang string.
   - `parser.rs` — evaluates the tree: definitions, data, loops and
     conditions, and the checks over code that doesn't run.
   - `diagnostic.rs` — `Diagnostic` and the stable diagnostic codes.
@@ -33,7 +34,8 @@ Linux, macOS, and Windows. Your change should pass all three.
   - `expr.rs` — the expression language for conditions and computed values.
   - `interp.rs` — `$name` and `${...}`: where a name ends and how one slot
     of text (a text run, an attribute's value, an argument, a path) is
-    filled in. The one place variables are interpolated.
+    filled in, including what quoted text inserts in CSS and in text. The
+    one place variables are interpolated.
   - `std.hl` — the standard library, written in htmlang and loaded before
     every file.
 - `crates/htmlang-wasm/` — thin wrapper exposing `compile` to the web playground.

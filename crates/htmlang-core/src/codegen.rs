@@ -932,9 +932,8 @@ fn emit_html_attrs(out: &mut String, attrs: &[Attribute]) {
             out.push(' ');
             out.push_str(key);
             out.push_str("=\"");
-            out.push_str(&html_escape(strip_string_quotes(
-                attr.value.as_deref().unwrap_or(""),
-            )));
+            // Quoted text has already lost its quotes (see parser.rs)
+            out.push_str(&html_escape(attr.value.as_deref().unwrap_or("")));
             out.push('"');
         } else if !attr.html
             && attr.value.is_none()
@@ -944,27 +943,6 @@ fn emit_html_attrs(out: &mut String, attrs: &[Attribute]) {
             out.push_str(key);
         }
     }
-}
-
-/// If the value is wrapped in a single pair of matching quotes (e.g.
-/// `"Avatar"`), return the inner content. Quotes act as source-level
-/// delimiters in the `.hl` syntax and shouldn't leak into HTML attribute
-/// values. Multi-quoted values like `"h h" "s m"` are left unchanged —
-/// those are real string tokens (used e.g. by CSS `grid-template-areas`).
-fn strip_string_quotes(val: &str) -> &str {
-    let bytes = val.as_bytes();
-    if bytes.len() < 2 {
-        return val;
-    }
-    let first = bytes[0];
-    let last = bytes[bytes.len() - 1];
-    if (first == b'"' && last == b'"') || (first == b'\'' && last == b'\'') {
-        let inner = &val[1..val.len() - 1];
-        if !inner.as_bytes().contains(&first) {
-            return inner;
-        }
-    }
-    val
 }
 
 // True if any direct child is `@in-front` or `@behind`. Such children render
@@ -1966,18 +1944,6 @@ fn attrs_to_css(
 
             // Any other standard CSS property is copied through, with `px`
             // added to bare numbers where the property takes a length.
-            // `font-family "Inter, sans-serif"`: the quotes only keep the
-            // stack's commas from splitting the attribute list.
-            "font-family" => {
-                if let Some(v) = val {
-                    let v = match v.strip_prefix('"').and_then(|v| v.strip_suffix('"')) {
-                        Some(stack) if stack.contains(',') => stack,
-                        _ => v,
-                    };
-                    push_css(&mut css, "font-family", v);
-                }
-            }
-
             key if crate::vocab::is_css_property(key) => {
                 if let Some(v) = val {
                     if crate::vocab::is_length_property(key) {

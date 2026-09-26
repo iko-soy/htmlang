@@ -81,6 +81,11 @@ fn snapshot_variable_slots() {
 }
 
 #[test]
+fn snapshot_escapes_and_quotes() {
+    snapshot_test("escapes_and_quotes");
+}
+
+#[test]
 fn snapshot_functions() {
     snapshot_test("functions");
 }

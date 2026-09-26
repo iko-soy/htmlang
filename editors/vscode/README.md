@@ -7,7 +7,8 @@ Syntax highlighting, snippets, and language server support for
 
 - **Syntax highlighting**: `@` elements and directives, `$variables`,
   `[attribute]` lists with state and media prefixes, `key=value` HTML
-  attributes, `{@inline}` elements, colors, numbers and `-- comments`.
+  attributes, quoted text, escapes (`\,`, `\$`, `\]`), `{@inline}` elements,
+  colors, numbers and `-- comments`.
 - **Diagnostics**: the compiler's own, each with its code: parse errors,
   unknown elements and attributes with "did you mean" suggestions, undefined
   and unused definitions, and accessibility warnings. The whole file is
@@ -24,7 +25,8 @@ Syntax highlighting, snippets, and language server support for
   `@data` file paths are links.
 - **Code actions**: fixes keyed on diagnostic codes (replace a misspelled
   name, add a missing `alt` or `type`, include the file that defines an
-  unknown function), removing unused definitions, and extracting a selection
+  unknown function, write a quoted font stack as `A\, B`), removing unused
+  definitions, and extracting a selection
   into a `@let` function or attribute bundle.
 - **Outline and symbols**: the document outline, and `Ctrl-T` workspace
   search across every `.hl` file.

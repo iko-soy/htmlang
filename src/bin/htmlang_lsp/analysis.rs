@@ -207,6 +207,29 @@ pub(crate) fn code_actions(
                 }
             }
 
+            // Rewrite a value as the compiler suggests (a quoted font
+            // stack as `A\, B`).
+            code::INVALID_VALUE => {
+                let (Some(subject), Some(suggestion)) = (subject, suggestion) else {
+                    continue;
+                };
+                if let Some(col) = source_line.find(subject) {
+                    let edit = TextEdit {
+                        range: Range::new(
+                            Position::new(line, col as u32),
+                            Position::new(line, (col + subject.len()) as u32),
+                        ),
+                        new_text: suggestion.to_string(),
+                    };
+                    actions.push(quick_fix(
+                        format!("Replace with '{}'", suggestion),
+                        diag,
+                        uri,
+                        vec![edit],
+                    ));
+                }
+            }
+
             // Remove a definition nothing uses, with its body.
             code::UNUSED_VARIABLE | code::UNUSED_BUNDLE | code::UNUSED_FUNCTION => {
                 let Some(def) = defs
@@ -1068,6 +1091,18 @@ mod tests {
     }
 
     #[test]
+    fn a_quoted_font_stack_is_fixed_with_escaped_commas() {
+        let found = fixes("@el [font-family \"Inter, sans-serif\"] x\n");
+        let (_, edits) = found
+            .iter()
+            .find(|(t, _)| t == r"Replace with 'Inter\, sans-serif'")
+            .unwrap_or_else(|| panic!("{:?}", found));
+        assert_eq!(edits[0].new_text, r"Inter\, sans-serif");
+        assert_eq!(edits[0].range.start, Position::new(0, 17));
+        assert_eq!(edits[0].range.end, Position::new(0, 36));
+    }
+
+    #[test]
     fn folding_follows_the_tree() {
         let text = "-- a\n-- b\n@el\n  @text x\n\n  @text y\n@style\n  .a {\n  }\n@text z\n";
         let ranges = folding_ranges(&syntax::parse(text));
@@ -1100,6 +1135,8 @@ mod tests {
             variable_refs("$lang.json costs $5, ${x} $--brand $a- b"),
             [(0, 5), (23, 24), (26, 34), (35, 37)]
         );
+        // `\$a` is a dollar sign
+        assert_eq!(variable_refs(r"\$a $b"), [(4, 6)]);
         // A typo'd variable gets the compiler's suggestion as a fix
         let found = fixes("@let gap 8\n@el [padding $gpa]\n");
         assert!(

@@ -59,3 +59,22 @@ fn grammar_attribute_names_are_style_attributes() {
         );
     }
 }
+
+#[test]
+fn grammar_escapes_are_the_compilers() {
+    let grammar = grammar();
+    // Each alternative is the character(s) after the backslash, with a
+    // regex escape where one is needed
+    let listed: BTreeSet<String> = alternatives(&pattern(&grammar, "escape"))
+        .into_iter()
+        .map(|a| a.strip_prefix('\\').map_or(a.clone(), str::to_string))
+        .collect();
+    let compiled: BTreeSet<String> = htmlang::syntax::ESCAPES
+        .iter()
+        .map(|e| e[1..].to_string())
+        .collect();
+    assert_eq!(
+        listed, compiled,
+        "update the `escape` rule of the TextMate grammar"
+    );
+}

@@ -107,9 +107,9 @@
   @chapter [title Style, number 3]
     @paragraph
       Besides the layout attributes, every attribute is a CSS property with its
-      CSS name and value. A bare number is pixels for lengths.
+      CSS name and value. A bare number is pixels for lengths, and \\, keeps a comma in a value.
     @row [spacing $unit, wrap]
-      @el [$card, box-shadow 0 1px 3px rgba(0,0,0,0.1), transform rotate(-2deg)] Any CSS property
+      @el [$card, box-shadow 0 1px 3px rgba(0,0,0,0.1)\, 0 8px 24px rgba(0,0,0,0.08), transform rotate(-2deg)] Any CSS property
       @el [$card, hover:background #eff6ff, hover:border-color var(--brand), transition all 0.15s ease, cursor pointer] hover:
       @el [$card, md:background #ecfdf5, dark:background #064e3b] md: and dark:
       @el [$card, before:content "→ ", before:color var(--brand)] before:

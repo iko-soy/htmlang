@@ -5,7 +5,7 @@ use std::rc::Rc;
 use crate::ast::*;
 use crate::diagnostic::code;
 pub use crate::diagnostic::{Diagnostic, Severity};
-use crate::interp;
+use crate::interp::{self, Sink};
 use crate::syntax::{self, DirectiveArgs, LetForm, NodeKind, Segment, Tree};
 
 // ---------------------------------------------------------------------------
@@ -110,6 +110,31 @@ impl interp::Scope for Vars<'_> {
                     .is_some_and(|rest| rest.starts_with('.'))
             })
     }
+
+    fn quoted(&self, path: &str) -> Option<String> {
+        self.0.get(&quoted_key(path)).cloned()
+    }
+}
+
+/// Where the variables keep the CSS form of a quoted value `name`: under
+/// `name"`, next to `name` (what it says), as a list keeps its length
+/// under `name#`.
+fn quoted_key(name: &str) -> String {
+    format!("{}\"", name)
+}
+
+/// Give the variable `name` a value, quoted text or not.
+fn assign(vars: &mut HashMap<String, String>, name: &str, value: String, quoted: Option<&Quoted>) {
+    match quoted {
+        Some(quoted) => {
+            vars.insert(quoted_key(name), quoted.css.clone());
+            vars.insert(name.to_string(), quoted.text.clone());
+        }
+        None => {
+            vars.remove(&quoted_key(name));
+            vars.insert(name.to_string(), value);
+        }
+    }
 }
 
 /// Evaluates a syntax tree (see `syntax.rs`) into the document's nodes.
@@ -146,59 +171,103 @@ impl ParseContext {
             .is_some_and(|value| value.truthy())
     }
 
-    /// Fill in the variables of one slot's text (see `interp.rs`), written
-    /// at `line` and `column` (when known). What can't be filled is left as
-    /// written and reported.
-    fn interpolate(&mut self, text: &str, line: usize, column: Option<usize>) -> String {
-        self.fill(text, line, column).0
-    }
-
-    /// [`interpolate`](Self::interpolate), and whether everything was
-    /// filled in.
-    fn fill(&mut self, text: &str, line: usize, column: Option<usize>) -> (String, bool) {
-        self.fill_mapped(text, line, column, |offset| offset)
-    }
-
-    /// Fill in a slot of text, where `\$`, `\{` and the other escapes
-    /// stay literal.
-    fn interpolate_text(&mut self, raw: &str, line: usize, column: Option<usize>) -> String {
-        let protected = protect_escapes(raw);
-        let (filled, _) = self.fill_mapped(&protected, line, column, |offset| {
-            // An offset into the protected text, as one into `raw`
-            protected[..offset]
-                .chars()
-                .map(|c| match ESCAPES.iter().find(|(_, p, _)| *p == c) {
-                    Some((escape, _, _)) => escape.len(),
-                    None => c.len_utf8(),
-                })
-                .sum()
-        });
-        restore_escapes(&filled)
-    }
-
-    /// [`fill`](Self::fill), where `source_offset` turns an offset into
-    /// `text` into one into the text as written.
-    fn fill_mapped(
+    /// Fill in one slot of htmlang text written at `line` and `column`
+    /// (when known), for `sink`: its escapes stand for themselves and its
+    /// variables are filled in (see `interp.rs`). What can't be filled is
+    /// left as written and reported; the flag says whether everything was
+    /// filled.
+    fn fill(
         &mut self,
-        text: &str,
+        raw: &str,
         line: usize,
         column: Option<usize>,
-        source_offset: impl Fn(usize) -> usize,
+        sink: Sink,
     ) -> (String, bool) {
-        if !text.contains('$') {
-            return (text.to_string(), true);
+        let (filled, ok) = self.fill_protected(raw, line, column, sink);
+        (restore_escapes(&filled), ok)
+    }
+
+    /// [`fill`](Self::fill) for text.
+    fn interpolate_text(&mut self, raw: &str, line: usize, column: Option<usize>) -> String {
+        self.fill(raw, line, column, Sink::Text).0
+    }
+
+    /// [`fill`](Self::fill), with the escapes still placeholders (see
+    /// [`protect_escapes`]).
+    fn fill_protected(
+        &mut self,
+        raw: &str,
+        line: usize,
+        column: Option<usize>,
+        sink: Sink,
+    ) -> (String, bool) {
+        let mut protected = protect_escapes(raw);
+        if sink == Sink::Css {
+            protected = keep_css_string_escapes(&protected);
         }
-        track_var_refs(text, &mut self.used_variables);
-        let (out, problems) = interp::interpolate(text, &Vars(&self.variables));
+        if !protected.contains('$') {
+            return (protected, true);
+        }
+        track_var_refs(&protected, &mut self.used_variables);
+        let (out, problems) = interp::interpolate_for(&protected, &Vars(&self.variables), sink);
         let filled = problems.is_empty();
         for mut problem in problems {
             match &mut problem {
                 interp::Problem::Undefined { offset, .. }
-                | interp::Problem::Invalid { offset, .. } => *offset = source_offset(*offset),
+                | interp::Problem::Invalid { offset, .. } => {
+                    // An offset into the protected text, as one into `raw`
+                    *offset = protected[..*offset]
+                        .chars()
+                        .map(|c| escape_of(c).map_or(c.len_utf8(), str::len))
+                        .sum();
+                }
             }
             self.report(problem, line, column);
         }
         (out, filled)
+    }
+
+    /// Fill in a value slot (an attribute's value, a `@let` value, `@meta`'s
+    /// value) for `sink`, and say whether it is quoted text: one `"..."`, or
+    /// one variable that holds quoted text. Quoted text keeps its quotes
+    /// only in CSS.
+    fn fill_value(
+        &mut self,
+        raw: &str,
+        line: usize,
+        column: Option<usize>,
+        sink: Sink,
+    ) -> (String, Option<Quoted>, bool) {
+        if let Some(inner) = syntax::quoted_string(raw) {
+            let (css, ok) = self.fill(raw, line, column, Sink::Css);
+            // Already reported by the CSS pass, so filled in quietly
+            let (text, _) = interp::interpolate(&protect_escapes(inner), &Vars(&self.variables));
+            let quoted = Quoted {
+                text: restore_escapes(&text),
+                css,
+            };
+            let out = match sink {
+                Sink::Css => quoted.css.clone(),
+                Sink::Text => quoted.text.clone(),
+            };
+            return (out, Some(quoted), ok);
+        }
+        let (out, ok) = self.fill(raw, line, column, sink);
+        let quoted = raw
+            .trim()
+            .strip_prefix('$')
+            .and_then(
+                |after| match interp::reference(after, &Vars(&self.variables))? {
+                    (interp::Reference::Var(path), len) if len == after.len() => Some(path),
+                    _ => None,
+                },
+            )
+            .and_then(|path| {
+                let css = interp::Scope::quoted(&Vars(&self.variables), &path)?;
+                let text = self.variables.get(&path)?.clone();
+                Some(Quoted { text, css })
+            });
+        (out, quoted, ok)
     }
 
     /// Report a variable that can't be filled in, or an invalid `${...}`,
@@ -384,7 +453,12 @@ pub fn parse_with_base(input: &str, base_path: Option<&Path>) -> ParseResult {
             favicon: ctx.favicon,
             meta_tags: ctx.meta_tags,
             head_blocks: ctx.head_blocks,
-            variables: ctx.variables,
+            // Without the quoted forms (see `quoted_key`)
+            variables: ctx
+                .variables
+                .into_iter()
+                .filter(|(key, _)| !key.ends_with('"'))
+                .collect(),
             defines: ctx.defines,
             css_vars: ctx.css_vars,
             custom_css: ctx.custom_css,
@@ -529,7 +603,7 @@ fn check_head(head: &syntax::Head, line: usize, inline: bool, ctx: &mut ParseCon
                 a
             })
             .collect();
-        parse_attr_list(&literal, line, ctx, true);
+        parse_attr_list(&literal, line, ctx, true, &[]);
     }
 }
 
@@ -708,8 +782,12 @@ impl Evaluator {
             // @page [lang en, favicon /f.png] Title
             ("page", DirectiveArgs::Page { attrs, title }) => {
                 if let Some(list) = attrs {
-                    for attr in parse_attr_list(&list.attrs, line_num, ctx, false) {
-                        let value = attr.value.unwrap_or_default();
+                    for attr in parse_attr_list(&list.attrs, line_num, ctx, false, &[]) {
+                        // A setting, not CSS: quoted text loses its quotes
+                        let value = match attr.quoted {
+                            Some(quoted) => quoted.text,
+                            None => attr.value.unwrap_or_default(),
+                        };
                         match attr.key.as_str() {
                             "lang" => ctx.lang = Some(value),
                             "favicon" => ctx.favicon = Some(value),
@@ -730,7 +808,7 @@ impl Evaluator {
                 }
                 let title = match title {
                     Some(title) => {
-                        ctx.interpolate(&title.raw, title.span.line, Some(title.span.column))
+                        ctx.interpolate_text(&title.raw, title.span.line, Some(title.span.column))
                     }
                     None => String::new(),
                 };
@@ -750,20 +828,32 @@ impl Evaluator {
                             .eval(&expression.raw, line_num, Some(expression.span.column))
                             .map(|v| v.to_string())
                             .unwrap_or_default();
-                        set_variable(name, value, line_num, ctx);
+                        set_variable(name, value, None, line_num, ctx);
                     }
                     // Attribute bundle: @let name [attr1, attr2, ...]
                     LetForm::Bundle(list) => {
-                        let attrs = parse_attr_list(&list.attrs, line_num, ctx, true);
+                        let attrs = parse_attr_list(&list.attrs, line_num, ctx, true, &[]);
                         ctx.defines.insert(name.to_string(), attrs);
                         ctx.define_lines.entry(name.to_string()).or_insert(line_num);
                     }
-                    // Literal text with `$var` interpolation, quoted or not:
-                    // @let greeting "Hello $name"
-                    LetForm::Value(Some(value)) | LetForm::Quoted(value) => {
-                        let value =
-                            ctx.interpolate(&value.raw, value.span.line, Some(value.span.column));
-                        set_variable(name, value, line_num, ctx);
+                    // Text with `$var` interpolation: `@let size 16px`. It is
+                    // quoted text when it is one variable holding some.
+                    LetForm::Value(Some(value)) => {
+                        let (text, quoted, _) = ctx.fill_value(
+                            &value.raw,
+                            value.span.line,
+                            Some(value.span.column),
+                            Sink::Text,
+                        );
+                        set_variable(name, text, quoted.as_ref(), line_num, ctx);
+                    }
+                    // Quoted text: `@let arrow "→ "`
+                    LetForm::Quoted(value) => {
+                        let raw = format!("\"{}\"", value.raw);
+                        let column = value.span.column.saturating_sub(1);
+                        let (text, quoted, _) =
+                            ctx.fill_value(&raw, value.span.line, Some(column), Sink::Text);
+                        set_variable(name, text, quoted.as_ref(), line_num, ctx);
                     }
                     LetForm::Value(None) => {}
                 }
@@ -784,7 +874,9 @@ impl Evaluator {
                     return Ok(None);
                 };
                 let value_column = arg.span.column + arg.raw.len() - value.trim_start().len();
-                let value = ctx.interpolate(value.trim(), line_num, Some(value_column));
+                // An HTML attribute value: quoted text loses its quotes
+                let (value, _, _) =
+                    ctx.fill_value(value.trim(), line_num, Some(value_column), Sink::Text);
                 match name.trim().strip_prefix("og:") {
                     Some(property) => ctx.og_tags.push((property.to_string(), value)),
                     None => ctx.meta_tags.push((name.trim().to_string(), value)),
@@ -818,7 +910,7 @@ impl Evaluator {
                         .collect();
                     return Ok(Some(vec![Node::Raw(markdown_to_html(&md_lines))]));
                 };
-                let filename = ctx.interpolate(&file.raw, line_num, Some(file.span.column));
+                let filename = ctx.interpolate_text(&file.raw, line_num, Some(file.span.column));
                 let resolved = ctx.resolve(&filename);
                 let md_text = match ctx.read_file(&resolved) {
                     Ok(text) => text,
@@ -874,7 +966,7 @@ impl Evaluator {
             Some(quoted) => (quoted, path.span.column + 1),
             None => (path.raw.as_str(), path.span.column),
         };
-        let filename = ctx.interpolate(filename, line_num, Some(column));
+        let filename = ctx.interpolate_text(filename, line_num, Some(column));
         let resolved = ctx.resolve(&filename);
 
         if ctx.include_stack.contains(&resolved) {
@@ -943,6 +1035,7 @@ impl Evaluator {
         ctx: &mut ParseContext,
     ) {
         let prefix = prefix.to_string();
+        ctx.variables.remove(&quoted_key(&prefix));
         let filename = source.raw.as_str();
         if let Some(env) = filename.strip_prefix("env:") {
             let (var, default) = match env.split_once(char::is_whitespace) {
@@ -952,7 +1045,7 @@ impl Evaluator {
             let default_column = default.map(|d| source.span.column + filename.len() - d.len());
             let value = std::env::var(var)
                 .ok()
-                .or_else(|| default.map(|d| ctx.interpolate(d, line_num, default_column)));
+                .or_else(|| default.map(|d| ctx.interpolate_text(d, line_num, default_column)));
             if value.is_none() {
                 ctx.diagnostics.push(
                     Diagnostic::warning(
@@ -966,7 +1059,7 @@ impl Evaluator {
                     .source(content),
                 );
             }
-            ctx.variables.insert(prefix, value.unwrap_or_default());
+            assign(&mut ctx.variables, &prefix, value.unwrap_or_default(), None);
             return;
         }
 
@@ -974,7 +1067,7 @@ impl Evaluator {
         let (json_text, source) = if filename.starts_with(['[', '{']) {
             (filename.to_string(), "the inline data".to_string())
         } else {
-            let filename = ctx.interpolate(filename, line_num, Some(source.span.column));
+            let filename = ctx.interpolate_text(filename, line_num, Some(source.span.column));
             if filename.contains('*') {
                 self.load_data_glob(&prefix, &filename, line_num, content, ctx);
                 return;
@@ -1154,12 +1247,17 @@ impl Evaluator {
             .as_ref()
             .is_some_and(|path| interp::resolve(path, &Vars(&ctx.variables)).is_none());
         // A field a record doesn't have (`$post.tags`) is an empty list
-        let text = ctx.interpolate(list_src, list.span.line, Some(list.span.column));
+        // Items are split at the commas that aren't escaped (`\,`)
+        let (text, _) =
+            ctx.fill_protected(list_src, list.span.line, Some(list.span.column), Sink::Text);
         let text_items: Vec<String> = match &data_list {
             Some(_) => Vec::new(),
             // Reported; there is nothing to repeat
             None if undefined => Vec::new(),
-            None => text_list_items(&text),
+            None => text_list_items(&text)
+                .iter()
+                .map(|item| restore_escapes(item))
+                .collect(),
         };
         let count = data_list.as_ref().map_or(text_items.len(), |(_, len)| *len);
 
@@ -1176,11 +1274,11 @@ impl Evaluator {
                 Some((name, _)) => bind_item(&mut ctx.variables, &format!("{}.{}", name, i), item),
                 None => {
                     let text = text_items.get(i).cloned().unwrap_or_default();
-                    ctx.variables.insert(item.to_string(), text);
+                    assign(&mut ctx.variables, item, text, None);
                 }
             }
             if let Some(index) = index {
-                ctx.variables.insert(index.to_string(), i.to_string());
+                assign(&mut ctx.variables, index, i.to_string(), None);
             }
             nodes.extend(self.eval_block(body, ctx));
         }
@@ -1263,10 +1361,11 @@ impl Evaluator {
             } else {
                 None
             };
-            if ctx.functions.contains_key(&head.name) {
+            if let Some(function) = ctx.functions.get(&head.name) {
+                let params = function.params.clone();
                 ctx.used_functions.insert(head.name.clone());
                 let args = head.attrs.as_ref().map_or_else(Vec::new, |list| {
-                    parse_attr_list(&list.attrs, line_num, ctx, false)
+                    parse_attr_list(&list.attrs, line_num, ctx, false, &params)
                 });
                 links.push(Link::Call {
                     name: head.name.clone(),
@@ -1371,19 +1470,25 @@ impl Evaluator {
                 .get(i)
                 .filter(|a| !fn_def.params.contains(&a.key) && a.value.is_some())
                 .map(|_| i);
-            let value = named
+            let argument = named
                 .filter(|&j| args[j].value.is_some())
                 .or(positional)
-                .and_then(|j| {
+                .map(|j| {
                     consumed[j] = true;
-                    args[j].value.clone()
-                })
-                .or_else(|| fn_def.defaults.get(param).cloned())
+                    let quoted = args[j].quoted.clone();
+                    let value = match &quoted {
+                        Some(quoted) => quoted.text.clone(),
+                        None => args[j].value.clone().unwrap_or_default(),
+                    };
+                    (value, quoted)
+                });
+            let (value, quoted) = argument
+                .or_else(|| fn_def.defaults.get(param).map(|d| literal_value(d)))
                 .unwrap_or_default();
             if let Some(j) = named {
                 consumed[j] = true;
             }
-            ctx.variables.insert(param.clone(), value);
+            assign(&mut ctx.variables, param, value, quoted.as_ref());
         }
         // Arguments that aren't parameters are attributes for the
         // function's root element, so a function can be styled like an
@@ -1436,6 +1541,7 @@ impl Evaluator {
                                 key: "class".to_string(),
                                 value: Some(class),
                                 html: true,
+                                quoted: None,
                             }),
                         }
                     }
@@ -1475,12 +1581,35 @@ impl Evaluator {
     }
 }
 
-/// Define `$name` (and, for `--name`, the CSS custom property).
-fn set_variable(name: &str, value: String, line_num: usize, ctx: &mut ParseContext) {
-    if name.starts_with("--") {
-        ctx.css_vars.push((name.to_string(), value.clone()));
+/// A value as written, with nothing to fill in (a parameter's default):
+/// its escapes stand for themselves, and one `"..."` is quoted text.
+fn literal_value(raw: &str) -> (String, Option<Quoted>) {
+    match syntax::quoted_string(raw) {
+        Some(inner) => {
+            let quoted = Quoted {
+                text: syntax::unescape(inner),
+                css: restore_escapes(&keep_css_string_escapes(&protect_escapes(raw))),
+            };
+            (quoted.text.clone(), Some(quoted))
+        }
+        None => (syntax::unescape(raw), None),
     }
-    ctx.variables.insert(name.to_string(), value);
+}
+
+/// Define `$name` (and, for `--name`, the CSS custom property, which gets
+/// quoted text with its quotes).
+fn set_variable(
+    name: &str,
+    value: String,
+    quoted: Option<&Quoted>,
+    line_num: usize,
+    ctx: &mut ParseContext,
+) {
+    if name.starts_with("--") {
+        let css = quoted.map_or_else(|| value.clone(), |q| q.css.clone());
+        ctx.css_vars.push((name.to_string(), css));
+    }
+    assign(&mut ctx.variables, name, value, quoted);
     ctx.let_lines.entry(name.to_string()).or_insert(line_num);
 }
 
@@ -1553,7 +1682,7 @@ fn parse_single_element(
 ) -> Result<Element, ParseError> {
     let kind = parse_element_kind(&head.name, line_num, ctx)?;
     let attrs = head.attrs.as_ref().map_or_else(Vec::new, |list| {
-        parse_attr_list(&list.attrs, line_num, ctx, true)
+        parse_attr_list(&list.attrs, line_num, ctx, true, &[])
     });
 
     // The argument is one slot: a URL, a source, an action, a slot name, or
@@ -1754,7 +1883,7 @@ fn suggest_var_name(input: &str, vars: &HashMap<String, String>) -> Option<Strin
     let max_allowed = 2usize.min(input_chars.len().saturating_sub(1));
     let mut best: Option<String> = None;
     let mut best_dist = usize::MAX;
-    for name in vars.keys().filter(|k| !k.ends_with('#')) {
+    for name in vars.keys().filter(|k| !k.ends_with(['#', '"'])) {
         let nlen = name.chars().count();
         if nlen.abs_diff(input_chars.len()) > max_allowed {
             continue;
@@ -1802,6 +1931,26 @@ const CSS_UNIT_SUFFIXES: &[&str] = &[
     "mm", "in", "pt", "pc", "fr",
 ];
 
+/// The quoted strings of a CSS value, without their quotes.
+fn css_strings(value: &str) -> Vec<&str> {
+    let mut strings = Vec::new();
+    let mut start = None;
+    let mut escaped = false;
+    for (i, c) in value.char_indices() {
+        match (c, start) {
+            _ if escaped => escaped = false,
+            ('\\', Some(_)) => escaped = true,
+            ('"', None) => start = Some(i + 1),
+            ('"', Some(from)) => {
+                strings.push(&value[from..i]);
+                start = None;
+            }
+            _ => {}
+        }
+    }
+    strings
+}
+
 fn has_css_unit(value: &str) -> bool {
     CSS_UNIT_SUFFIXES.iter().any(|u| value.ends_with(u))
         || value.starts_with("var(")
@@ -1817,6 +1966,31 @@ const SIZE_KEYWORDS: &[&str] = &["fill", "shrink"];
 
 fn validate_attr_value(attr: &Attribute, line_num: usize, ctx: &mut ParseContext) {
     let base_key = crate::vocab::base_attribute(attr.key.as_str());
+
+    // In CSS, a quoted font-family is one family, commas and all
+    if base_key == "font-family"
+        && let Some(val) = &attr.value
+        && let Some(family) = css_strings(val).into_iter().find(|s| s.contains(','))
+    {
+        let stack = family
+            .split(',')
+            .map(str::trim)
+            .collect::<Vec<_>>()
+            .join("\\, ");
+        ctx.diagnostics.push(
+            Diagnostic::warning(
+                code::INVALID_VALUE,
+                line_num,
+                format!(
+                    "font-family \"{}\" is one family, whose name has a comma in it: \
+                     for a font stack, write `font-family {}`",
+                    family, stack
+                ),
+            )
+            .subject(format!("\"{}\"", family))
+            .suggest(Some(stack)),
+        );
+    }
 
     if let Some(val) = &attr.value {
         if NUMERIC_ATTRS.contains(&base_key) {
@@ -2131,12 +2305,14 @@ fn is_valid_hex_color(s: &str) -> bool {
 /// Evaluate the attributes of a list: bundles are spliced in, `if()`
 /// chooses, and variables fill values. A variable fills only the value it
 /// is written in: attributes come from bundles, never from text. With
-/// `validate`, unknown names and invalid values are reported.
+/// `validate`, unknown names and invalid values are reported. The values of
+/// `text_keys` (a function's parameters) are text rather than CSS.
 fn parse_attr_list(
     tokens: &[syntax::Attr],
     line_num: usize,
     ctx: &mut ParseContext,
     validate: bool,
+    text_keys: &[String],
 ) -> Vec<Attribute> {
     let mut attrs = Vec::new();
     let mut seen_keys: Vec<String> = Vec::new();
@@ -2198,7 +2374,15 @@ fn parse_attr_list(
 
         // A value `if(cond, a, b)` is `a` or `b`, by `cond`; an empty
         // choice leaves the attribute out. Then its variables are filled.
+        // A style's value is CSS, where quoted text keeps its quotes; an
+        // HTML attribute's (and a parameter's) is text, where it loses them.
+        let sink = if html || text_keys.contains(&key) {
+            Sink::Text
+        } else {
+            Sink::Css
+        };
         let mut filled = true;
+        let mut quoted = None;
         let value = match value {
             None => None,
             Some(value) => {
@@ -2208,12 +2392,18 @@ fn parse_attr_list(
                     Some(branch) => (branch, None),
                     None => (value, at),
                 };
-                let (text, ok) = ctx.fill(&text, line, at);
+                let (text, is_quoted, ok) = ctx.fill_value(&text, line, at, sink);
                 filled = ok;
+                quoted = is_quoted;
                 Some(text)
             }
         };
-        let attr = Attribute { key, value, html };
+        let attr = Attribute {
+            key,
+            value,
+            html,
+            quoted,
+        };
         // A value that couldn't be filled in is already reported
         let validate = validate && filled;
 
@@ -2278,7 +2468,7 @@ fn parse_attr_list(
                 );
             } else {
                 let suggestion = suggest_closest(base_key, &crate::vocab::all_attributes());
-                let msg = match suggestion {
+                let mut msg = match suggestion {
                     Some(closest) => {
                         format!(
                             "unknown attribute '{}', did you mean '{}'?",
@@ -2287,6 +2477,13 @@ fn parse_attr_list(
                     }
                     None => format!("unknown attribute '{}'", attr.key),
                 };
+                // `box-shadow 0 1px red, 0 2px blue`: the comma ended the
+                // attribute, and the rest of the value became one
+                if !base_key.starts_with(|c: char| c.is_ascii_alphabetic() || c == '-') {
+                    msg.push_str(
+                        ". A comma separates attributes: to keep one in a value, write `\\,`",
+                    );
+                }
                 ctx.diagnostics.push(
                     Diagnostic::warning(code::UNKNOWN_ATTRIBUTE, line_num, msg)
                         .subject(base_key)
@@ -2345,32 +2542,64 @@ fn not_a_bundle(name: &str, line: usize, column: Option<usize>, ctx: &mut ParseC
 // Text segment parsing (inline {...} elements)
 // ---------------------------------------------------------------------------
 
-/// Escapes in text: `\@`, `\$`, `\{`, `\--` and `\\` stand for the
-/// character(s) themselves. While a text is processed, each is a private-use
-/// placeholder, so it can't start a variable, an inline element or a line.
-const ESCAPES: &[(&str, char, &str)] = &[
-    ("\\\\", '\u{E000}', "\\"),
-    ("\\$", '\u{E001}', "$"),
-    ("\\{", '\u{E002}', "{"),
-    ("\\@", '\u{E003}', "@"),
-    ("\\--", '\u{E004}', "--"),
-];
-
+/// While a slot is filled in, each escape (see [`syntax::ESCAPES`]) is a
+/// private-use placeholder, U+E000 plus its place in the table, so it
+/// can't start a variable, a quote or an inline element. Afterwards it
+/// becomes what it stands for.
 fn protect_escapes(text: &str) -> String {
     if !text.contains('\\') {
         return text.to_string();
     }
-    let mut out = text.to_string();
-    for (escape, placeholder, _) in ESCAPES {
-        out = out.replace(escape, &placeholder.to_string());
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while let Some(c) = text[i..].chars().next() {
+        let len = syntax::escape_len(&text[i..]);
+        if len == 0 {
+            out.push(c);
+            i += c.len_utf8();
+            continue;
+        }
+        let escape = &text[i..i + len];
+        let index = syntax::ESCAPES.iter().position(|e| *e == escape);
+        out.extend(index.and_then(|n| char::from_u32(0xE000 + n as u32)));
+        i += len;
     }
     out
 }
 
+/// The escape a placeholder stands for, as written (`\,`).
+fn escape_of(c: char) -> Option<&'static str> {
+    let index = (c as u32).checked_sub(0xE000)?;
+    syntax::ESCAPES.get(index as usize).copied()
+}
+
 fn restore_escapes(text: &str) -> String {
-    let mut out = text.to_string();
-    for (_, placeholder, literal) in ESCAPES {
-        out = out.replace(*placeholder, literal);
+    text.chars()
+        .fold(String::with_capacity(text.len()), |mut out, c| {
+            match escape_of(c) {
+                // What the escape stands for: what follows the backslash
+                Some(escape) => out.push_str(&escape[1..]),
+                None => out.push(c),
+            }
+            out
+        })
+}
+
+/// Inside the quoted strings of a CSS value, `\"` and `\\` mean in CSS what
+/// they mean in htmlang, so they stay as written there.
+fn keep_css_string_escapes(protected: &str) -> String {
+    let mut out = String::with_capacity(protected.len());
+    let mut inside = false;
+    for c in protected.chars() {
+        match escape_of(c) {
+            Some(escape @ ("\\\"" | "\\\\")) if inside => out.push_str(escape),
+            _ => {
+                if c == '"' {
+                    inside = !inside;
+                }
+                out.push(c);
+            }
+        }
     }
     out
 }
@@ -2454,7 +2683,7 @@ fn text_list_items(list: &str) -> Vec<String> {
 fn bind_item(vars: &mut HashMap<String, String>, source: &str, target: &str) {
     let under = |key: &str, name: &str| {
         key.strip_prefix(name)
-            .is_some_and(|rest| rest.is_empty() || rest.starts_with(['.', '#']))
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with(['.', '#', '"']))
     };
     vars.retain(|key, _| !under(key, target));
     let copies: Vec<(String, String)> = vars

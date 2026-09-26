@@ -900,9 +900,62 @@ struct Reader<'a> {
     spans: &'a dyn Spans,
 }
 
-/// The escape sequences of text: the character(s) after the backslash
-/// stand for themselves.
-pub(crate) const ESCAPES: &[&str] = &["\\\\", "\\$", "\\{", "\\@", "\\--"];
+/// The escapes, the same in every htmlang string (text, arguments,
+/// attribute values, `@let`, `@page`, `@meta`): the character(s) after the
+/// backslash stand for themselves. A backslash before anything else is
+/// kept as written, so CSS's `\201C` and a pattern's `\d` pass through.
+pub const ESCAPES: &[&str] = &[
+    "\\\\", "\\$", "\\@", "\\{", "\\}", "\\[", "\\]", "\\,", "\\\"", "\\--",
+];
+
+/// The length of the escape `s` starts with, or 0.
+pub fn escape_len(s: &str) -> usize {
+    if !s.starts_with('\\') {
+        return 0;
+    }
+    ESCAPES
+        .iter()
+        .find(|escape| s.starts_with(**escape))
+        .map_or(0, |escape| escape.len())
+}
+
+/// `s` with its escapes replaced by what they stand for.
+pub fn unescape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while let Some(found) = s[i..].find('\\') {
+        let at = i + found;
+        out.push_str(&s[i..at]);
+        let len = escape_len(&s[at..]);
+        if len == 0 {
+            out.push('\\');
+            i = at + 1;
+        } else {
+            out.push_str(&s[at + 1..at + len]);
+            i = at + len;
+        }
+    }
+    out.push_str(&s[i..]);
+    out
+}
+
+/// The text between the quotes when `s` is one quoted string, `"..."`, and
+/// nothing else: `\"` inside it is not its end.
+pub fn quoted_string(s: &str) -> Option<&str> {
+    let inner = s.strip_prefix('"')?;
+    let mut i = 0;
+    while i < inner.len() {
+        let rest = &inner[i..];
+        if rest.starts_with('"') {
+            return (i + 1 == inner.len()).then(|| &inner[..i]);
+        }
+        i += match escape_len(rest) {
+            0 => rest.chars().next().map_or(1, char::len_utf8),
+            n => n,
+        };
+    }
+    None
+}
 
 impl Reader<'_> {
     fn span(&self, start: usize, end: usize) -> Span {
@@ -1027,34 +1080,34 @@ impl Reader<'_> {
     }
 
     /// `[attr, attr]` starting at `open`, and where it ends. Brackets
-    /// inside `"..."` don't count.
+    /// inside `"..."` and escaped ones (`\]`) don't count.
     fn attr_list(&self, open: usize, limit: usize) -> (AttrList, usize) {
         let mut depth = 0;
         let mut quoted = false;
-        let mut escaped = false;
         let mut close = None;
-        for (i, c) in self.text[open..limit].char_indices() {
-            if quoted {
-                match c {
-                    _ if escaped => escaped = false,
-                    '\\' => escaped = true,
-                    '"' => quoted = false,
-                    _ => {}
-                }
+        let mut i = open;
+        while i < limit {
+            let rest = &self.text[i..limit];
+            let escape = escape_len(rest);
+            if escape > 0 {
+                i += escape;
                 continue;
             }
+            let Some(c) = rest.chars().next() else { break };
             match c {
-                '"' => quoted = true,
+                '"' => quoted = !quoted,
+                _ if quoted => {}
                 '[' => depth += 1,
                 ']' => {
                     depth -= 1;
                     if depth == 0 {
-                        close = Some(open + i);
+                        close = Some(i);
                         break;
                     }
                 }
                 _ => {}
             }
+            i += c.len_utf8();
         }
         let inner_end = close.unwrap_or(limit);
         let attrs = self
@@ -1071,29 +1124,34 @@ impl Reader<'_> {
         (list, end)
     }
 
-    /// Ranges between the commas that aren't inside `(...)`, `[...]`,
-    /// `{...}` or `"..."`.
+    /// Ranges between the commas that aren't escaped (`\,`) or inside
+    /// `(...)`, `[...]`, `{...}` or `"..."`.
     fn split_commas(&self, start: usize, end: usize) -> Vec<(usize, usize)> {
         let mut parts = Vec::new();
         let mut from = start;
         let mut depth = 0i32;
         let mut quoted = false;
-        let mut escaped = false;
-        for (i, c) in self.text[start..end].char_indices() {
+        let mut i = start;
+        while i < end {
+            let rest = &self.text[i..end];
+            let escape = escape_len(rest);
+            if escape > 0 {
+                i += escape;
+                continue;
+            }
+            let Some(c) = rest.chars().next() else { break };
             match c {
-                // Quotes are matched as `attr_list` matches them
-                _ if escaped => escaped = false,
-                '\\' if quoted => escaped = true,
                 '"' => quoted = !quoted,
                 _ if quoted => {}
                 '(' | '[' | '{' => depth += 1,
                 ')' | ']' | '}' => depth -= 1,
                 ',' if depth <= 0 => {
-                    parts.push((from, start + i));
-                    from = start + i + 1;
+                    parts.push((from, i));
+                    from = i + 1;
                 }
                 _ => {}
             }
+            i += c.len_utf8();
         }
         parts.push((from, end));
         parts
@@ -1132,10 +1190,7 @@ impl Reader<'_> {
         while i < e {
             let rest = &self.text[i..e];
             if rest.starts_with('\\') {
-                i += ESCAPES
-                    .iter()
-                    .find(|esc| rest.starts_with(**esc))
-                    .map_or(1, |esc| esc.len());
+                i += escape_len(rest).max(1);
                 continue;
             }
             if rest.starts_with("{@") {
@@ -1167,10 +1222,7 @@ impl Reader<'_> {
         while i < limit {
             let rest = &self.text[i..limit];
             if rest.starts_with('\\') {
-                i += ESCAPES
-                    .iter()
-                    .find(|esc| rest.starts_with(**esc))
-                    .map_or(1, |esc| esc.len());
+                i += escape_len(rest).max(1);
                 continue;
             }
             match rest.chars().next() {
@@ -1392,9 +1444,9 @@ impl Reader<'_> {
                     let (list, _) = self.attr_list(value_at, len);
                     open = !list.closed;
                     LetForm::Bundle(list)
-                } else if value.len() >= 2 && value.starts_with('"') && value.ends_with('"') {
+                } else if let Some(inner) = quoted_string(value) {
                     LetForm::Quoted(Arg {
-                        raw: value[1..value.len() - 1].to_string(),
+                        raw: inner.to_string(),
                         span: self.span(value_at + 1, len - 1),
                     })
                 } else {
@@ -1537,6 +1589,52 @@ mod tests {
         };
         assert_eq!(line.chain.len(), 1);
         assert_eq!(line.text.as_ref().unwrap().raw, "Ask me > @support");
+    }
+
+    #[test]
+    fn escapes_are_one_closed_table() {
+        assert_eq!(
+            unescape(r#"\\ \$ \@ \{ \} \[ \] \, \" \-- \201C \d \"#),
+            r#"\ $ @ { } [ ] , " -- \201C \d \"#
+        );
+        assert_eq!(quoted_string(r#""a\"b""#), Some(r#"a\"b"#));
+        assert_eq!(quoted_string(r#""head head" "side main""#), None);
+        assert_eq!(quoted_string(r#""a"#), None);
+        assert_eq!(quoted_string(r#""""#), Some(""));
+    }
+
+    #[test]
+    fn escaped_commas_and_brackets_stay_in_the_value() {
+        let tree = parse("@el [transition opacity 1s\\, color 1s, content \"]\", width 4\\]] x\n");
+        let NodeKind::Element(line) = &tree.nodes[0].kind else {
+            panic!()
+        };
+        let attrs = &line.chain[0].attrs.as_ref().unwrap().attrs;
+        let raw: Vec<&str> = attrs.iter().map(|a| a.raw.as_str()).collect();
+        assert_eq!(
+            raw,
+            [
+                r"transition opacity 1s\, color 1s",
+                r#"content "]""#,
+                r"width 4\]"
+            ]
+        );
+        assert_eq!(line.text.as_ref().unwrap().raw, "x");
+    }
+
+    #[test]
+    fn a_let_is_quoted_only_when_it_is_one_string() {
+        let tree = parse("@let a \"x \\\" y\"\n@let b \"h h\" \"s m\"\n");
+        let forms: Vec<&LetForm> = tree
+            .nodes
+            .iter()
+            .map(|n| match &n.directive().unwrap().args {
+                DirectiveArgs::Let(def) => &def.form,
+                _ => panic!(),
+            })
+            .collect();
+        assert!(matches!(forms[0], LetForm::Quoted(arg) if arg.raw == r#"x \" y"#));
+        assert!(matches!(forms[1], LetForm::Value(Some(arg)) if arg.raw == r#""h h" "s m""#));
     }
 
     #[test]

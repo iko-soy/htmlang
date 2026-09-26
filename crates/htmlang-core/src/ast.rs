@@ -41,9 +41,24 @@ pub struct Element {
 #[derive(Debug, Clone)]
 pub struct Attribute {
     pub key: String,
+    /// The value as it goes into the output: a style's with the quotes of
+    /// quoted text, an HTML attribute's without them.
     pub value: Option<String>,
     /// Written `key=value`: an HTML attribute rather than a style.
     pub html: bool,
+    /// When the value is quoted text (`"..."`, or a variable holding
+    /// quoted text), both of its forms, for a parameter it binds.
+    pub quoted: Option<Quoted>,
+}
+
+/// Quoted text, which remembers that it was quoted: a CSS value writes it
+/// with its quotes, text and HTML attribute values without them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Quoted {
+    /// What it says: `a"b` for `"a\"b"`.
+    pub text: String,
+    /// As CSS writes it, quotes included: `"a\"b"`.
+    pub css: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]

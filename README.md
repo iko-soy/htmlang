@@ -42,6 +42,9 @@ unless you write some, and nothing is added that you didn't ask for.
   name and value: `padding 20`, `border 1 solid #eee`,
   `grid-template-columns 1fr 2fr`. In lengths, a bare number means pixels.
   Prefixes make a style conditional: `hover:`, `md:`, `dark:`, `first:`.
+  A comma separates attributes, so a comma inside a value is written `\,`
+  (`transition opacity 0.3s\, transform 0.3s`), and quoted text keeps its
+  quotes only in CSS (`before:content "→ "`).
 - **HTML stays HTML.** Elements have their HTML names (`@nav`, `@ul`, `@form`,
   `@details`), and HTML attributes are written `key=value` (`id=main`,
   `type=email`) or bare (`required`).

@@ -68,8 +68,12 @@ An attribute can take one of three forms:
 - A bare word is a **flag**: a layout attribute such as `center-x`, or a
   boolean HTML attribute such as `required`, `disabled` or `open`.
 
-A comma inside `(...)` or `"..."` doesn't split attributes, so a font stack
-is written `font-family "Inter, sans-serif"`.
+A comma inside `(...)` or `"..."` doesn't split attributes. Anywhere else,
+`\,` keeps a comma in the value:
+
+```
+@el [transition opacity 0.3s\, transform 0.3s, font-family "Open Sans"\, sans-serif]
+```
 
 A variable fills an attribute's value (`padding $gap`, `alt=$title`), never
 its name or a whole attribute: attributes come from a
@@ -96,18 +100,32 @@ inline element:
 @section [padding 8] Text after the attributes is content too.
 ```
 
-A backslash makes the next character literal:
+### Escapes
 
-- `\@` and `\--` let a line of text start with `@` or `--`.
-- `\$` writes a `$` that would otherwise start a variable. A `$` that isn't
-  followed by a letter or `_` is text anyway: `$5`, `$$`.
-- `\{` writes a brace that doesn't start an inline element.
-- `\\` writes a backslash.
+A backslash before one of these characters stands for the character itself.
+The table is the same in every htmlang string: text, arguments, attribute
+values, `@let`, `@page` and `@meta`.
+
+| Escape | Writes | For |
+|---|---|---|
+| `\@`, `\--` | `@`, `--` | a line of text that starts with `@` or `--` |
+| `\$` | `$` | a `$` before a name, which would start a variable |
+| `\{`, `\}` | `{`, `}` | braces that don't start or end an inline element |
+| `\[`, `\]` | `[`, `]` | brackets that don't open or close an attribute list |
+| `\,` | `,` | a comma in an attribute's value |
+| `\"` | `"` | a quote that doesn't start or end quoted text |
+| `\\` | `\` | a backslash before one of these characters |
+
+A backslash before any other character is kept as written, so CSS's own
+escapes and patterns pass through: `before:content "\201C"`,
+`pattern=\d{3}`. A `$` that isn't followed by a letter or `_` is text
+anyway: `$5`, `$$`.
 
 ```
 \@htmlang on social media
 @let price 5
-@text \$price is $price dollars
+@paragraph \$price is $price dollars: {@mark \{braces\}}, \[brackets\] and a comma\, too
+@input [type=text, pattern=\d{3}-\d{4}, title=Costs \$5]
 ```
 
 ### Comments
@@ -264,6 +282,12 @@ same name and value as in CSS: `padding 20`, `font-weight bold`,
 `border 1 solid #e5e7eb`, `border-radius 8`, `background red`,
 `grid-template-areas "a b"`, `display none`.
 
+A quoted string in a value is CSS's own, so it keeps its quotes and its
+commas: `font-family "Inter, sans-serif"` names one family called
+"Inter, sans-serif", and the compiler warns about it. A font stack is
+several values with commas between them, written `\,`:
+`font-family Inter\, sans-serif`.
+
 Values mean what they mean in CSS, with one addition: **a bare number in a
 length is pixels**. So `padding 20` is `20px`, `border 1 solid red` is
 `1px solid red`, and `margin 0 auto` is `0 auto`. Values that have a unit,
@@ -392,7 +416,7 @@ and an HTML attribute can share a name, because the `=` tells them apart:
 @let primary #3b82f6
 -- A computed value: `=` makes the rest an expression
 @let gap = 8 * 2
--- A string, with $variables interpolated
+-- Quoted text, with $variables filled in (see Variables for its quotes)
 @let greeting "Hello from $primary"
 -- An attribute bundle, used as [$card]
 @let card [padding 20, background white, border-radius 8]
@@ -444,6 +468,23 @@ is text.
 A name that isn't defined is an error. A field that a record doesn't have
 is empty, so optional fields of `@data` records work: `@if $post.draft` is
 false, and `${default($post.tag, none)}` gives `none`.
+
+**Quoted text remembers that it was quoted.** A value written `"..."` (in a
+`@let`, an attribute or a function's argument) keeps its quotes in a CSS
+value, where CSS needs them, and loses them in text, in HTML attribute
+values and in parameters. It stays quoted when it passes through another
+`@let` or a parameter. Inside a quoted string of a CSS value, it inserts
+what it says, without its own quotes:
+
+```
+@let arrow "→ "
+@let label "Next, please"
+@el [before:content $arrow, after:content " ($label)", aria-label=$label] $label
+```
+
+This gives `content:"→ "`, `content:" (Next, please)"`,
+`aria-label="Next, please"` and the text `Next, please`. A value written
+without quotes is inserted as written everywhere.
 
 ### Functions
 

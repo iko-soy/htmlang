@@ -242,16 +242,44 @@ fn markdown_keeps_paragraphs_rules_and_ordered_lists() {
 }
 
 #[test]
-fn quoted_let_values_are_not_evaluated_as_arithmetic() {
-    let out = compile("@let span \"1 / -1\"\n@el [grid-area $span] x");
+fn let_values_are_not_evaluated_as_arithmetic() {
+    // Quoted text would keep its quotes in CSS: a value is written bare
+    let out = compile("@let span 1 / -1\n@el [grid-area $span] x");
     assert!(out.contains("grid-area:1 / -1"), "{}", out);
 }
 
 #[test]
-fn quoted_font_stack_is_one_attribute() {
-    let out = compile("@el [font-family \"Inter, sans-serif\", font-weight bold] x");
-    assert!(out.contains("font-family:Inter, sans-serif"), "{}", out);
+fn font_stack_keeps_its_commas_escaped() {
+    let out = compile(r#"@el [font-family "Open Sans"\, Inter\, sans-serif, font-weight bold] x"#);
+    assert!(
+        out.contains(r#"font-family:"Open Sans", Inter, sans-serif"#),
+        "{}",
+        out
+    );
     assert!(out.contains("font-weight:bold"), "{}", out);
+}
+
+#[test]
+fn quoted_font_family_is_one_family_and_warns() {
+    let result = parser::parse("@el [font-family \"Inter, sans-serif\"] x");
+    let warning = result
+        .diagnostics
+        .iter()
+        .find(|d| d.code == "invalid-value")
+        .expect("a warning about the quoted font stack");
+    assert!(
+        warning.message.contains(r"font-family Inter\, sans-serif"),
+        "{}",
+        warning.message
+    );
+    assert_eq!(warning.suggestion.as_deref(), Some(r"Inter\, sans-serif"));
+    // CSS means what CSS says: one family
+    let out = codegen::generate(&result.document);
+    assert!(
+        out.contains(r#"font-family:"Inter, sans-serif""#),
+        "{}",
+        out
+    );
 }
 
 #[test]
@@ -915,4 +943,122 @@ fn the_same_problem_in_an_included_file_is_reported_too() {
         .filter(|d| d.code == "undefined-variable")
         .count();
     assert_eq!(undefined, 2, "{:?}", result.diagnostics);
+}
+
+// --- Commas, quotes and backslashes ---
+
+#[test]
+fn escaped_comma_stays_in_the_value() {
+    let out = compile(r"@el [transition opacity 0.3s\, transform 0.3s, color red] x");
+    assert!(
+        out.contains("transition:opacity 0.3s, transform 0.3s;color:red"),
+        "{}",
+        out
+    );
+}
+
+#[test]
+fn escapes_work_in_every_string() {
+    let out = compile(
+        "@page A \\$5\n@meta description costs \\$5\n@let v a\\$b\n@input [type=text, title=a\\$b, placeholder=$v]\n",
+    );
+    assert!(out.contains("<title>A $5</title>"), "{}", out);
+    assert!(out.contains(r#"content="costs $5""#), "{}", out);
+    assert!(out.contains(r#"title="a$b""#), "{}", out);
+    assert!(out.contains(r#"placeholder="a$b""#), "{}", out);
+}
+
+#[test]
+fn a_backslash_before_anything_else_is_kept() {
+    let out = compile(
+        "@el [before:content \"\\201C\"] x\n@input [type=text, pattern=\\d{3}-\\d{4}]\n@text C:\\temp\\",
+    );
+    assert!(out.contains(r#"content:"\201C""#), "{}", out);
+    assert!(out.contains(r#"pattern="\d{3}-\d{4}""#), "{}", out);
+    assert!(out.contains(r"C:\temp\</span>"), "{}", out);
+}
+
+#[test]
+fn escaped_brackets_and_braces_do_not_close() {
+    let out = compile("@el [content \"x\\\"]\", width 4] a\\]b\n@paragraph {@mark a\\}b} c");
+    assert!(out.contains(r#"content:"x\"]""#), "{}", out);
+    assert!(out.contains("width:4px"), "{}", out);
+    assert!(out.contains("a]b"), "{}", out);
+    assert!(out.contains("<mark>a}b</mark> c"), "{}", out);
+}
+
+#[test]
+fn quoted_text_keeps_its_quotes_only_in_css() {
+    let out = compile(
+        "@let arrow \"→ \"\n@let alias $arrow\n@el [before:content $arrow, after:content $alias, aria-label=$arrow] Go $arrow",
+    );
+    assert!(out.contains(r#"::before{content:"→ ";}"#), "{}", out);
+    assert!(out.contains(r#"::after{content:"→ ";}"#), "{}", out);
+    assert!(out.contains(r#"aria-label="→ ""#), "{}", out);
+    assert!(out.contains("Go → </"), "{}", out);
+}
+
+#[test]
+fn quoted_text_inside_a_css_string_is_what_it_says() {
+    let out = compile("@let q \"say \\\"hi\\\"\"\n@el [after:content \"« $q »\"] x\n@text $q");
+    assert!(out.contains(r#"content:"« say \"hi\" »""#), "{}", out);
+    assert!(out.contains("say &quot;hi&quot;"), "{}", out);
+}
+
+#[test]
+fn quoted_arguments_lose_their_quotes_in_text() {
+    let out = compile(
+        "@let card $lede\n  @el [after:content $lede]\n    $lede\n@card [lede \"Fast, simple\"]",
+    );
+    assert!(out.contains("<span>Fast, simple</span>"), "{}", out);
+    assert!(!out.contains("&quot;"), "{}", out);
+    // and keep them in CSS, after passing through the parameter
+    assert!(out.contains(r#"content:"Fast, simple""#), "{}", out);
+}
+
+#[test]
+fn a_let_with_several_quoted_strings_is_kept_whole() {
+    let out = compile(
+        "@let areas \"head head\" \"side main\"\n@el [display grid, grid-template-areas $areas] x",
+    );
+    assert!(
+        out.contains(r#"grid-template-areas:"head head" "side main""#),
+        "{}",
+        out
+    );
+}
+
+#[test]
+fn quoted_custom_property_keeps_its_quotes() {
+    let out = compile("@let --font \"Inter\"\n@el [font-family var(--font)] x");
+    assert!(out.contains(r#"--font:"Inter""#), "{}", out);
+}
+
+#[test]
+fn text_list_items_split_at_unescaped_commas() {
+    let out = compile("@each $x in a\\, b, c\n  @text item $x.");
+    assert!(out.contains("<span>item a, b.</span>"), "{}", out);
+    assert!(out.contains("<span>item c.</span>"), "{}", out);
+}
+
+#[test]
+fn a_loop_variable_forgets_that_a_name_was_quoted() {
+    let out = compile("@let x \"q\"\n@each $x in a, b\n  @el [after:content $x] x");
+    assert!(out.contains("content:a"), "{}", out);
+    assert!(!out.contains(r#"content:"q""#), "{}", out);
+}
+
+#[test]
+fn a_comma_split_value_says_how_to_keep_the_comma() {
+    let result = parser::parse("@el [box-shadow 0 1px 2px red, 0 2px 4px blue] x");
+    let warning = result
+        .diagnostics
+        .iter()
+        .find(|d| d.code == "unknown-attribute")
+        .expect("the rest of the value is an unknown attribute");
+    assert!(
+        warning.message.contains(r"write `\,`"),
+        "{}",
+        warning.message
+    );
 }

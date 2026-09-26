@@ -18,6 +18,9 @@
 //! - A `$` before anything else is text: `$5`, `$$`, a `$` at the end.
 //! - An undefined name is an error. A field that a record doesn't have is
 //!   empty, so optional fields of `@data` records work.
+//! - Quoted text (`@let arrow "→ "`, `@card [quote "→ "]`) remembers its
+//!   quotes: a CSS value gets them (`content $arrow` is `content:"→ "`),
+//!   text and HTML attribute values don't. See [`Sink`].
 
 use crate::expr::{self, Value};
 
@@ -29,6 +32,44 @@ pub trait Scope {
     fn value(&self, path: &str) -> Option<Value>;
     /// Whether `path` is a record or a list, whose fields `.field` reads.
     fn has_fields(&self, path: &str) -> bool;
+    /// When the value of `path` is quoted text, the text as CSS writes it,
+    /// quotes included (`"a\"b"` for the text `a"b`).
+    fn quoted(&self, _path: &str) -> Option<String> {
+        None
+    }
+}
+
+/// Where a slot's value goes, which decides what quoted text inserts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Sink {
+    /// Text, an HTML attribute value, a path, a parameter: quoted text
+    /// inserts what it says, without the quotes.
+    Text,
+    /// A CSS value: quoted text inserts itself with its quotes, or, inside a
+    /// quoted string of the value, what it says with `"` escaped as `\"`.
+    Css,
+}
+
+/// Whether a CSS value is inside a quoted string after `text`, when it
+/// was (`inside`) before it. A backslash inside a string escapes the next
+/// character.
+fn css_string_after(text: &str, mut inside: bool) -> bool {
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' if inside => {
+                chars.next();
+            }
+            '"' => inside = !inside,
+            _ => {}
+        }
+    }
+    inside
+}
+
+/// `text` as it goes inside a CSS string: `"` escaped as `\"`.
+pub fn css_string_body(text: &str) -> String {
+    text.replace('"', "\\\"")
 }
 
 /// A problem found while interpolating, at a byte offset into the text.
@@ -162,18 +203,29 @@ pub fn resolve(path: &str, scope: &dyn Scope) -> Option<Value> {
     scope.has_fields(record).then(|| Value::Str(String::new()))
 }
 
-/// Fill in the `$name`s and `${...}`s of one slot's text. Each one that
-/// can't be filled is left as written and reported.
+/// Fill in the `$name`s and `${...}`s of one slot's text, for text (see
+/// [`Sink::Text`]). Each one that can't be filled is left as written and
+/// reported.
 pub fn interpolate(text: &str, scope: &dyn Scope) -> (String, Vec<Problem>) {
+    interpolate_for(text, scope, Sink::Text)
+}
+
+/// [`interpolate`] for a slot whose value goes to `sink`.
+pub fn interpolate_for(text: &str, scope: &dyn Scope, sink: Sink) -> (String, Vec<Problem>) {
     let mut problems = Vec::new();
     if !text.contains('$') {
         return (text.to_string(), problems);
     }
     let mut out = String::with_capacity(text.len());
     let mut pos = 0;
+    // Whether the CSS value is inside a quoted string at `pos`
+    let mut in_string = false;
     while let Some(found) = text[pos..].find('$') {
         let dollar = pos + found;
         out.push_str(&text[pos..dollar]);
+        if sink == Sink::Css {
+            in_string = css_string_after(&text[pos..dollar], in_string);
+        }
         let after = &text[dollar + 1..];
         let Some((reference, len)) = reference(after, scope) else {
             out.push('$');
@@ -181,9 +233,19 @@ pub fn interpolate(text: &str, scope: &dyn Scope) -> (String, Vec<Problem>) {
             continue;
         };
         let written = &text[dollar..dollar + 1 + len];
+        let insert = |value: String, quoted: Option<String>| match (sink, quoted) {
+            (Sink::Css, Some(css)) if in_string => {
+                // The string's body, without its quotes
+                let body = css.strip_prefix('"').unwrap_or(&css);
+                body.strip_suffix('"').unwrap_or(body).to_string()
+            }
+            (Sink::Css, Some(css)) => css,
+            (Sink::Css, None) if in_string => css_string_body(&value),
+            _ => value,
+        };
         match reference {
             Reference::Var(path) => match resolve(&path, scope) {
-                Some(value) => out.push_str(&value.to_string()),
+                Some(value) => out.push_str(&insert(value.to_string(), scope.quoted(&path))),
                 None => {
                     problems.push(Problem::Undefined {
                         name: path,
@@ -193,7 +255,7 @@ pub fn interpolate(text: &str, scope: &dyn Scope) -> (String, Vec<Problem>) {
                 }
             },
             Reference::Expr(source) => match expr::eval(source, scope) {
-                Ok(value) => out.push_str(&value.to_string()),
+                Ok(value) => out.push_str(&insert(value.to_string(), None)),
                 Err(error) => {
                     problems.push(match error {
                         // At the `${`
@@ -237,6 +299,11 @@ fn collect_name_spans(text: &str, base: usize, found: &mut Vec<std::ops::Range<u
         let after = pos + i + 1;
         let rest = &text[after..];
         pos = after;
+        // `\$` is a dollar sign (and `\\$` a backslash before a name)
+        let backslashes = text[..after - 1].len() - text[..after - 1].trim_end_matches('\\').len();
+        if backslashes % 2 == 1 {
+            continue;
+        }
         if rest.starts_with('{')
             && let Some(close) = matching_brace(rest)
         {
@@ -392,6 +459,38 @@ pub(crate) mod tests {
         );
     }
 
+    /// Variables as [`Map`] stores them, where `q` holds quoted text.
+    struct Quoting(Map);
+
+    impl Scope for Quoting {
+        fn defined(&self, path: &str) -> bool {
+            self.0.defined(path)
+        }
+        fn value(&self, path: &str) -> Option<Value> {
+            self.0.value(path)
+        }
+        fn has_fields(&self, path: &str) -> bool {
+            self.0.has_fields(path)
+        }
+        fn quoted(&self, path: &str) -> Option<String> {
+            (path == "q").then(|| r#""a\"b""#.to_string())
+        }
+    }
+
+    #[test]
+    fn quoted_text_keeps_its_quotes_only_in_css() {
+        let scope = Quoting(Map::new(&[("q", r#"a"b"#), ("n", r#"x"y"#)]));
+        let fill = |text: &str, sink| interpolate_for(text, &scope, sink).0;
+        assert_eq!(fill("$q", Sink::Text), r#"a"b"#);
+        assert_eq!(fill("$q", Sink::Css), r#""a\"b""#);
+        // Inside a CSS string, what it says, escaped as the string needs
+        assert_eq!(
+            fill(r#""($q) $n" $q"#, Sink::Css),
+            r#""(a\"b) x\"y" "a\"b""#
+        );
+        assert_eq!(fill(r#""\" $q""#, Sink::Css), r#""\" a\"b""#);
+    }
+
     #[test]
     fn inserted_values_are_never_read_again() {
         let scope = Map::new(&[("a", "$b"), ("b", "no")]);
@@ -404,6 +503,7 @@ pub(crate) mod tests {
             names("$a.b ${c} ${upper($d)} $5 $--e"),
             ["a", "c", "d", "--e"]
         );
+        assert_eq!(names(r"\$a \\$b \\\$c"), ["b"]);
         assert_eq!(
             name_spans("x ${ size }px ${$n + ${m}} $a- b"),
             [5..9, 17..18, 23..24, 28..29]

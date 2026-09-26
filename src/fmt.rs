@@ -326,6 +326,19 @@ mod tests {
     }
 
     #[test]
+    fn escaped_commas_stay_in_value() {
+        let src = "@el [transition opacity 0.3s ease-in-out\\, transform 0.3s ease-in-out\\, box-shadow 0.3s, font-family \"Open Sans\"\\, sans-serif, content \"a\\\"]\"] hi\n";
+        let out = format(src);
+        assert_eq!(
+            out,
+            "@el [\n  transition opacity 0.3s ease-in-out\\, transform 0.3s ease-in-out\\, box-shadow 0.3s,\n  font-family \"Open Sans\"\\, sans-serif,\n  content \"a\\\"]\"\n] hi\n"
+        );
+        assert_eq!(format(&out), out);
+        let src = "@el [padding 4\\]x, color red] hi\n";
+        assert_eq!(format(src), src);
+    }
+
+    #[test]
     fn attribute_order_is_preserved() {
         let src = "@el [center-x, margin 0, width 200]\n";
         assert_eq!(format(src), src);
