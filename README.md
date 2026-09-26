@@ -110,7 +110,8 @@ media condition:
 `@let` defines values, bundles and functions, in one namespace. A function
 has `@` before its name and its parameters in brackets (`label`, or
 `href #` with a default). It is called like an element: its parameters are
-attributes, and any other attributes style its root element.
+attributes, `name value` (a name alone is `true`), a parameter without a
+default must be passed, and any other attributes style its root element.
 
 ```
 @let --primary #3b82f6

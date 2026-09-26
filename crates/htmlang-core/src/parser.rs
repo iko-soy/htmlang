@@ -27,9 +27,21 @@ type ParseError = Diagnostic;
 
 #[derive(Clone)]
 struct FnDef {
-    params: Vec<String>,
-    defaults: HashMap<String, String>,
+    /// The parameters in the order they are declared; one without a
+    /// default is required.
+    params: Vec<syntax::Param>,
+    /// The definition's line and its text (when it is one physical line),
+    /// and its node, for diagnostics about a default.
+    line: usize,
+    source: Option<String>,
+    node: usize,
     body: Vec<syntax::Node>,
+}
+
+impl FnDef {
+    fn is_param(&self, name: &str) -> bool {
+        self.params.iter().any(|p| p.name == name)
+    }
 }
 
 /// A saved namespace; see `ParseContext::save_scope`.
@@ -374,6 +386,13 @@ impl ParseContext {
             Some(text) => diagnostic.source(text),
             None => diagnostic,
         };
+        self.push_once(diagnostic);
+    }
+
+    /// Report a diagnostic unless the node being evaluated already did,
+    /// so a line evaluated many times (in a loop, in a function) reports
+    /// each problem once.
+    fn push_once(&mut self, diagnostic: Diagnostic) {
         let key = (
             self.current_node,
             diagnostic.line,
@@ -645,6 +664,9 @@ fn check_head(head: &syntax::Head, line: usize, inline: bool, ctx: &mut ParseCon
     let is_function = ctx.namespace.contains(&head.name) || ctx.functions.contains_key(&head.name);
     if is_function && !inline {
         ctx.used_functions.insert(head.name.clone());
+        if let Some(function) = ctx.functions.get(&head.name).cloned() {
+            check_call(&head.name, &function, head.attrs.as_ref(), line, ctx);
+        }
         return;
     }
     if let Err(mut e) = parse_element_kind(&head.name, line, ctx) {
@@ -675,6 +697,38 @@ fn check_head(head: &syntax::Head, line: usize, inline: bool, ctx: &mut ParseCon
             })
             .collect();
         parse_attr_list(&literal, line, ctx, true, &[]);
+    }
+}
+
+/// Check how a call that was never evaluated passes its parameters: none
+/// written `name=value`, and every one without a default passed, when no
+/// bundle or `if()` could pass it.
+fn check_call(
+    name: &str,
+    function: &FnDef,
+    list: Option<&syntax::AttrList>,
+    line: usize,
+    ctx: &mut ParseContext,
+) {
+    let attrs = list.map_or(&[][..], |list| &list.attrs[..]);
+    for attr in attrs {
+        if attr.html && function.is_param(&attr.key) {
+            let value = attr.value.as_deref().unwrap_or("");
+            ctx.diagnostics
+                .push(parameter_form(name, &attr.key, value, line));
+        }
+    }
+    let unknown = attrs
+        .iter()
+        .any(|a| a.raw.starts_with("if(") || (a.key.starts_with('$') && a.value.is_none()));
+    if unknown {
+        return;
+    }
+    for param in function.params.iter().filter(|p| p.default.is_none()) {
+        if !attrs.iter().any(|a| a.key == param.name) {
+            ctx.diagnostics
+                .push(missing_parameter(name, &param.name, line));
+        }
     }
 }
 
@@ -893,7 +947,7 @@ impl Evaluator {
                 ctx.forget(name);
                 match &def.form {
                     LetForm::Function(function) => {
-                        self.define_function(name, &function.params, &node.children, line_num, ctx);
+                        self.define_function(name, &function.params, node, ctx);
                     }
                     // `@let name = EXPR` computes its value (see expr.rs)
                     LetForm::Computed(expression) => {
@@ -1362,10 +1416,11 @@ impl Evaluator {
         &mut self,
         name: &str,
         params: &[syntax::Param],
-        body: &[syntax::Node],
-        line_num: usize,
+        node: &syntax::Node,
         ctx: &mut ParseContext,
     ) {
+        let line_num = node.span.line;
+        let body = &node.children;
         // An @style block at the top of the body is scoped to the
         // function: its rules apply inside a `.hl-NAME` wrapper.
         let (style, body): (Vec<&syntax::Node>, Vec<&syntax::Node>) =
@@ -1386,15 +1441,19 @@ impl Evaluator {
             ctx.scoped_functions.insert(name.to_string());
         }
 
+        // A default is filled in only when a call leaves its parameter
+        // out, so the names in it count as used here
+        for default in params.iter().filter_map(|p| p.default.as_ref()) {
+            track_var_refs(default, &mut ctx.used_variables);
+        }
         ctx.fn_lines.entry(name.to_string()).or_insert(line_num);
         ctx.functions.insert(
             name.to_string(),
             Rc::new(FnDef {
-                params: params.iter().map(|p| p.name.clone()).collect(),
-                defaults: params
-                    .iter()
-                    .filter_map(|p| Some((p.name.clone(), p.default.clone()?)))
-                    .collect(),
+                params: params.to_vec(),
+                line: line_num,
+                source: ctx.current_source.1.clone(),
+                node: node.id,
                 body: body.into_iter().cloned().collect(),
             }),
         );
@@ -1434,7 +1493,7 @@ impl Evaluator {
                 None
             };
             if let Some(function) = ctx.functions.get(&head.name) {
-                let params = function.params.clone();
+                let params: Vec<String> = function.params.iter().map(|p| p.name.clone()).collect();
                 ctx.used_functions.insert(head.name.clone());
                 let args = head.attrs.as_ref().map_or_else(Vec::new, |list| {
                     parse_attr_list(&list.attrs, line_num, ctx, false, &params)
@@ -1531,36 +1590,58 @@ impl Evaluator {
             caller_children.insert(0, Node::Text(text_segments(text, ctx)));
         }
 
-        // Save variable state, inject function parameters
+        // Bind the parameters, by name, in the order they are declared: a
+        // default is filled in at the call, where it sees the parameters
+        // before it.
         let saved = ctx.save_scope();
         let mut consumed = vec![false; args.len()];
-        for (i, param) in fn_def.params.iter().enumerate() {
-            let named = args.iter().position(|a| a.key == *param);
-            // Positional fallback, unless that argument is named for a
-            // different parameter.
-            let positional = args
-                .get(i)
-                .filter(|a| !fn_def.params.contains(&a.key) && a.value.is_some())
-                .map(|_| i);
-            let argument = named
-                .filter(|&j| args[j].value.is_some())
-                .or(positional)
-                .map(|j| {
-                    consumed[j] = true;
-                    let quoted = args[j].quoted.clone();
+        for param in &fn_def.params {
+            let mut passed = None;
+            for (j, arg) in args.iter().enumerate() {
+                if arg.key != param.name {
+                    continue;
+                }
+                consumed[j] = true;
+                if passed.is_some() {
+                    ctx.push_once(
+                        Diagnostic::warning(
+                            code::DUPLICATE_ATTRIBUTE,
+                            line_num,
+                            format!("parameter '{}' of @{} is passed twice", param.name, name),
+                        )
+                        .source(content)
+                        .subject(param.name.as_str()),
+                    );
+                    continue;
+                }
+                if arg.html {
+                    let value = arg.value.as_deref().unwrap_or("");
+                    ctx.push_once(parameter_form(name, &arg.key, value, line_num).source(content));
+                }
+                passed = Some(arg);
+            }
+            let (value, quoted) = match passed {
+                // A parameter's name alone is true: `@post-card [featured]`
+                Some(arg) if arg.value.is_none() => ("true".to_string(), None),
+                Some(arg) => {
+                    let quoted = arg.quoted.clone();
                     let value = match &quoted {
                         Some(quoted) => quoted.text.clone(),
-                        None => args[j].value.clone().unwrap_or_default(),
+                        None => arg.value.clone().unwrap_or_default(),
                     };
                     (value, quoted)
-                });
-            let (value, quoted) = argument
-                .or_else(|| fn_def.defaults.get(param).map(|d| literal_value(d)))
-                .unwrap_or_default();
-            if let Some(j) = named {
-                consumed[j] = true;
-            }
-            assign(&mut ctx.variables, param, value, quoted.as_ref());
+                }
+                None => match &param.default {
+                    Some(default) => fill_default(&fn_def, param, default, ctx),
+                    None => {
+                        ctx.push_once(
+                            missing_parameter(name, &param.name, line_num).source(content),
+                        );
+                        (String::new(), None)
+                    }
+                },
+            };
+            assign(&mut ctx.variables, &param.name, value, quoted.as_ref());
         }
         // Arguments that aren't parameters are attributes for the
         // function's root element, so a function can be styled like an
@@ -1653,19 +1734,61 @@ impl Evaluator {
     }
 }
 
-/// A value as written, with nothing to fill in (a parameter's default):
-/// its escapes stand for themselves, and one `"..."` is quoted text.
-fn literal_value(raw: &str) -> (String, Option<Quoted>) {
-    match syntax::quoted_string(raw) {
-        Some(inner) => {
-            let quoted = Quoted {
-                text: syntax::unescape(inner),
-                css: restore_escapes(&keep_css_string_escapes(&protect_escapes(raw))),
-            };
-            (quoted.text.clone(), Some(quoted))
-        }
-        None => (syntax::unescape(raw), None),
-    }
+/// Fill in the default of a parameter that a call leaves out, like the
+/// value of an attribute passed for it: `if()` chooses, variables are
+/// filled in, and one `"..."` is quoted text. Its problems are reported
+/// at the definition, once.
+fn fill_default(
+    fn_def: &FnDef,
+    param: &syntax::Param,
+    default: &str,
+    ctx: &mut ParseContext,
+) -> (String, Option<Quoted>) {
+    let line = param.span.line;
+    let at_head = line == fn_def.line && fn_def.source.is_some();
+    let column =
+        at_head.then(|| param.span.column + (param.span.end - param.span.start) - default.len());
+    let caller = (
+        std::mem::replace(
+            &mut ctx.current_source,
+            (fn_def.line, fn_def.source.clone()),
+        ),
+        std::mem::replace(&mut ctx.current_node, fn_def.node),
+    );
+    let (raw, column) = match choose_if(default, ctx, line) {
+        Some(branch) => (branch, None),
+        None => (default.to_string(), column),
+    };
+    let (text, quoted, _) = ctx.fill_value(&raw, line, column, Sink::Text);
+    (ctx.current_source, ctx.current_node) = caller;
+    (text, quoted)
+}
+
+/// A parameter passed `name=value`, the form of an HTML attribute.
+fn parameter_form(function: &str, key: &str, value: &str, line: usize) -> Diagnostic {
+    Diagnostic::error(
+        code::PARAMETER_FORM,
+        line,
+        format!(
+            "'{}' is a parameter of @{}: parameters are written `name value`, so write `{} {}`",
+            key, function, key, value
+        ),
+    )
+    .subject(format!("{}=", key))
+    .suggest(Some(format!("{} ", key)))
+}
+
+/// A call that leaves out a parameter without a default.
+fn missing_parameter(function: &str, param: &str, line: usize) -> Diagnostic {
+    Diagnostic::error(
+        code::MISSING_PARAMETER,
+        line,
+        format!(
+            "@{} needs '{}': the parameter has no default, so pass it as `{} VALUE`",
+            function, param, param
+        ),
+    )
+    .subject(param)
 }
 
 /// Define `$name` (and, for `--name`, the CSS custom property, which gets

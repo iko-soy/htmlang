@@ -15,7 +15,8 @@ Syntax highlighting, snippets, and language server support for
   checked, including branches and functions that don't run, and relative
   `@include` and `@data` paths resolve from the file's folder.
 - **Completion** of elements, directives, layout attributes, CSS properties,
-  HTML attributes, prefixes, variables and functions. It triggers on `@`,
+  HTML attributes, prefixes, variables, functions and the parameters a
+  function call hasn't passed yet. It triggers on `@`,
   `$`, `[` and `,`.
 - **Hover** documentation for elements, directives and attributes (CSS
   properties link to MDN), function signatures, variable values, and color
@@ -26,7 +27,8 @@ Syntax highlighting, snippets, and language server support for
 - **Code actions**: fixes keyed on diagnostic codes (replace a misspelled
   name, add a missing `alt` or `type`, include the file that defines an
   unknown function, write a quoted font stack as `A\, B`, drop the `$` from
-  `@let $x` and add it to `@each x`), removing unused
+  `@let $x` and add it to `@each x`, pass a parameter as `name value`
+  instead of `name=value`), removing unused
   definitions, and extracting a selection
   into a `@let` function or attribute bundle.
 - **Outline and symbols**: the document outline, and `Ctrl-T` workspace

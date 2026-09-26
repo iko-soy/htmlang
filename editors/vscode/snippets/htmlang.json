@@ -51,7 +51,7 @@
       "@$1 [$2 ${4:Hello}]",
       "  $0"
     ],
-    "description": "A function with a parameter and @children"
+    "description": "A function with a required parameter and @children"
   },
   "Function with slots": {
     "prefix": "@let-slots",

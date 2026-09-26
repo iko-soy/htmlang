@@ -234,6 +234,33 @@ pub(crate) fn code_actions(
                 }
             }
 
+            // Pass a parameter `name value`, not `name=value`.
+            code::PARAMETER_FORM => {
+                let (Some(subject), Some(suggestion)) = (subject, suggestion) else {
+                    continue;
+                };
+                let is_name = |c: char| c.is_alphanumeric() || c == '-' || c == '_';
+                let found = source_line
+                    .match_indices(subject)
+                    .map(|(at, _)| at)
+                    .find(|&at| !source_line[..at].chars().next_back().is_some_and(is_name));
+                if let Some(col) = found {
+                    let edit = TextEdit {
+                        range: Range::new(
+                            Position::new(line, col as u32),
+                            Position::new(line, (col + subject.len()) as u32),
+                        ),
+                        new_text: suggestion.to_string(),
+                    };
+                    actions.push(quick_fix(
+                        format!("Write '{}' as a parameter", suggestion.trim_end()),
+                        diag,
+                        uri,
+                        vec![edit],
+                    ));
+                }
+            }
+
             // Write a name with or without its `$` as the compiler says:
             // `@let $gap` as `@let gap`, `@each x` as `@each $x`.
             code::INVALID_DEFINITION | code::INVALID_LOOP => {
@@ -1019,17 +1046,27 @@ pub(crate) fn get_signature_help(text: &str, position: Position) -> Option<Signa
         .iter()
         .map(|p| ParameterInformation {
             label: ParameterLabel::Simple(p.name.clone()),
-            documentation: p
-                .default
-                .as_ref()
-                .map(|d| Documentation::String(format!("Default: {}", d))),
+            documentation: Some(Documentation::String(match &p.default {
+                Some(default) => format!("Default: {}", default),
+                None => "Required".to_string(),
+            })),
         })
         .collect();
     let sig_label = format!("@{} {}", fn_name, param_list(&def.params));
 
-    // The active parameter: commas before the cursor inside the brackets,
-    // or the first parameter before the argument list is entered.
-    let active_param = inside_args.map_or(0, |args| args.index as u32);
+    // Parameters are passed by name: the active one is the one being
+    // written, or, until its name is, the first not passed yet.
+    let active_param = inside_args.map_or(0, |args| {
+        let key = crate::completion::attr_key(args.segment);
+        let passed: Vec<&str> = args.previous_keys().collect();
+        let current = def.params.iter().position(|p| p.name == key);
+        let next = || {
+            def.params
+                .iter()
+                .position(|p| !passed.contains(&p.name.as_str()))
+        };
+        current.or_else(next).unwrap_or(0) as u32
+    });
 
     Some(SignatureHelp {
         signatures: vec![SignatureInformation {
@@ -1134,6 +1171,18 @@ mod tests {
     }
 
     #[test]
+    fn a_parameter_passed_with_equals_is_rewritten() {
+        let found = fixes("@let @card [title]\n  @el $title\n@card [subtitle=x, title=Hi]\n");
+        let (_, edits) = found
+            .iter()
+            .find(|(t, _)| t == "Write 'title' as a parameter")
+            .unwrap_or_else(|| panic!("{:?}", found));
+        assert_eq!(edits[0].new_text, "title ");
+        assert_eq!(edits[0].range.start, Position::new(2, 19));
+        assert_eq!(edits[0].range.end, Position::new(2, 25));
+    }
+
+    #[test]
     fn folding_follows_the_tree() {
         let text = "-- a\n-- b\n@el\n  @text x\n\n  @text y\n@style\n  .a {\n  }\n@text z\n";
         let ranges = folding_ranges(&syntax::parse(text));
@@ -1230,5 +1279,11 @@ mod tests {
         assert_eq!(help.active_parameter, Some(1));
         let help = get_signature_help(escaped, Position::new(2, 17)).expect("signature");
         assert_eq!(help.active_parameter, Some(0));
+        // By name, not by position
+        let named = "@let @card [title, tone info]\n  @el $title\n@card [tone x, ";
+        let help = get_signature_help(named, Position::new(2, 15)).expect("signature");
+        assert_eq!(help.active_parameter, Some(0));
+        let help = get_signature_help(named, Position::new(2, 11)).expect("signature");
+        assert_eq!(help.active_parameter, Some(1));
     }
 }

@@ -52,7 +52,12 @@ pub(crate) fn completions(text: &str, position: Position) -> Vec<CompletionItem>
         }
 
         let element = owning_element(text, position);
-        return attr_completions(edit_range, element.as_deref());
+        let mut items = element
+            .as_deref()
+            .map(|name| param_completions(text, name, before, edit_range))
+            .unwrap_or_default();
+        items.extend(attr_completions(edit_range, element.as_deref()));
+        return items;
     }
 
     // $ variable reference outside brackets
@@ -115,17 +120,34 @@ pub(crate) fn in_brackets(text: &str) -> bool {
 pub(crate) struct AttrContext<'a> {
     /// The attribute's text so far: what follows the list's last comma.
     pub segment: &'a str,
-    /// How many attributes come before it in the list.
-    pub index: usize,
+    /// The attributes before it in the list, as written.
+    pub previous: Vec<&'a str>,
+}
+
+impl AttrContext<'_> {
+    /// The names of the attributes before this one (`title` of
+    /// `title Hi` or `title=Hi`).
+    pub fn previous_keys(&self) -> impl Iterator<Item = &str> {
+        self.previous.iter().map(|attr| attr_key(attr))
+    }
+}
+
+/// The name an attribute starts with: up to a space or `=`.
+pub(crate) fn attr_key(attr: &str) -> &str {
+    let attr = attr.trim_start();
+    let end = attr
+        .find(|c: char| c.is_whitespace() || c == '=')
+        .unwrap_or(attr.len());
+    &attr[..end]
 }
 
 /// Where `before` ends inside an open attribute list, read as the compiler
 /// reads one: escapes (`\,`, `\]`) and quoted text (`"a, b"`) don't open,
 /// close or split it, and neither do commas inside `(...)` or `{...}`.
 pub(crate) fn attr_context(before: &str) -> Option<AttrContext<'_>> {
-    // Each open list: where its current attribute starts, how many came
-    // before it, and the `(`/`{` depth inside it
-    let mut lists: Vec<(usize, usize, i32)> = Vec::new();
+    // Each open list: where its current attribute starts, the `(`/`{`
+    // depth inside it, and the attributes before it
+    let mut lists: Vec<(usize, i32, Vec<&str>)> = Vec::new();
     let mut quoted = false;
     let mut i = 0;
     while i < before.len() {
@@ -139,36 +161,36 @@ pub(crate) fn attr_context(before: &str) -> Option<AttrContext<'_>> {
         match c {
             '"' if !lists.is_empty() => quoted = !quoted,
             _ if quoted => {}
-            '[' => lists.push((i + 1, 0, 0)),
+            '[' => lists.push((i + 1, 0, Vec::new())),
             ']' => {
                 lists.pop();
             }
             '(' | '{' => {
                 if let Some(list) = lists.last_mut() {
-                    list.2 += 1;
+                    list.1 += 1;
                 }
             }
             ')' | '}' => {
                 if let Some(list) = lists.last_mut() {
-                    list.2 -= 1;
+                    list.1 -= 1;
                 }
             }
             ',' => {
                 if let Some(list) = lists.last_mut()
-                    && list.2 <= 0
+                    && list.1 <= 0
                 {
+                    list.2.push(&before[list.0..i]);
                     list.0 = i + 1;
-                    list.1 += 1;
                 }
             }
             _ => {}
         }
         i += c.len_utf8();
     }
-    let &(start, index, _) = lists.last()?;
+    let (start, _, previous) = lists.pop()?;
     Some(AttrContext {
         segment: &before[start..],
-        index,
+        previous,
     })
 }
 
@@ -954,6 +976,39 @@ fn variable_completions(text: &str, range: Range) -> Vec<CompletionItem> {
     items
 }
 
+/// The parameters of the function `name` that a call's list doesn't pass
+/// yet, first among its attributes.
+fn param_completions(text: &str, name: &str, before: &str, range: Range) -> Vec<CompletionItem> {
+    let Some(def) = crate::tree::definitions(text)
+        .into_iter()
+        .find(|d| d.kind == DefinitionKind::Function && d.name == name)
+    else {
+        return Vec::new();
+    };
+    let passed: Vec<String> = attr_context(before)
+        .map(|args| args.previous_keys().map(String::from).collect())
+        .unwrap_or_default();
+    def.params
+        .iter()
+        .filter(|p| !passed.contains(&p.name))
+        .map(|p| {
+            let detail = match &p.default {
+                Some(default) => format!("Parameter of @{} (default: {})", name, default),
+                None => format!("Parameter of @{} (required)", name),
+            };
+            let mut completion = item(
+                &p.name,
+                CompletionItemKind::VARIABLE,
+                &detail,
+                &format!("{} ", p.name),
+                range,
+            );
+            completion.sort_text = Some(format!("0_{}", p.name));
+            completion
+        })
+        .collect()
+}
+
 fn function_completions(text: &str, range: Range) -> Vec<CompletionItem> {
     let mut items = Vec::new();
     for def in crate::tree::definitions(text) {
@@ -1102,7 +1157,7 @@ mod tests {
     #[test]
     fn escaped_commas_and_quotes_do_not_start_an_attribute() {
         fn context(before: &str) -> Option<(&str, usize)> {
-            attr_context(before).map(|c| (c.segment, c.index))
+            attr_context(before).map(|c| (c.segment, c.previous.len()))
         }
         assert_eq!(
             context(r"@el [transition opacity 1s\, color 1s, cursor "),
@@ -1133,6 +1188,19 @@ mod tests {
     fn value_completions_after_html_attribute() {
         let items = completions("@input [type=", Position::new(0, 13));
         assert!(items.iter().any(|i| i.label == "email"));
+    }
+
+    #[test]
+    fn a_call_offers_the_parameters_it_does_not_pass_yet() {
+        let text = "@let @card [title, tone info]\n  @el $title\n@card [tone x, ";
+        let items = completions(text, pos(2, 15));
+        let title = items.iter().find(|i| i.label == "title").expect("title");
+        assert_eq!(
+            title.detail.as_deref(),
+            Some("Parameter of @card (required)")
+        );
+        assert!(!items.iter().any(|i| i.label == "tone"));
+        assert!(items.iter().any(|i| i.label == "padding"));
     }
 
     #[test]

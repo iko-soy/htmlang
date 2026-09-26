@@ -878,6 +878,33 @@ fn params(list: &AttrList, source: &str, problems: &mut Vec<Diagnostic>) -> Vec<
             span: attr.span,
         });
     }
+    // A default is filled in when the function is called, with the
+    // parameters before it already bound: a later one isn't there yet.
+    for (i, param) in out.iter().enumerate() {
+        let Some(default) = &param.default else {
+            continue;
+        };
+        for later in &out[i + 1..] {
+            if crate::interp::names(default).contains(&later.name.as_str()) {
+                let diagnostic = Diagnostic::error(
+                    code::INVALID_DEFINITION,
+                    param.span.line,
+                    format!(
+                        "the default of '{}' uses `${}`, a parameter declared after it: \
+                         a default can use only the parameters before it, so declare '{}' \
+                         first",
+                        param.name, later.name, later.name
+                    ),
+                )
+                .source(source)
+                .subject(later.name.clone());
+                problems.push(match param.span.line == list.span.line {
+                    true => diagnostic.column(param.span.column),
+                    false => diagnostic,
+                });
+            }
+        }
+    }
     out
 }
 

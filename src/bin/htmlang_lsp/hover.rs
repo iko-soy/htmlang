@@ -128,7 +128,7 @@ fn hover_user_fn(text: &str, name: &str) -> Option<String> {
             .iter()
             .map(|p| match &p.default {
                 Some(default) => format!("`${}` (default: {})", p.name, default),
-                None => format!("`${}`", p.name),
+                None => format!("`${}` (required)", p.name),
             })
             .collect();
         format!("\n\nParameters: {}", formatted.join(", "))

@@ -497,15 +497,24 @@ without quotes is inserted as written everywhere.
 
 ### Functions
 
-A function's parameters are listed in brackets after its name and read like
-attributes: a name alone (`title`) is a parameter, and a name and a value
-(`tone #f9fafb`) is a parameter with that default. The body uses them as
-`$title` and `$tone`. `@let @name` without brackets takes no parameters.
+A function's parameters are listed in brackets after its name and written
+the way a call passes them: a name alone (`title`) is a required parameter,
+and a name and a value (`tone #f9fafb`) is a parameter with that default.
+The body uses them as `$title` and `$tone`. `@let @name` without brackets
+takes no parameters.
+
+A default is filled in at each call that leaves its parameter out, like a
+value passed for it: it may hold spaces, quotes, escapes, `if()` and
+`$variables`, including the parameters declared before it
+(`[title, heading "About $title"]`). A default that uses a parameter
+declared after it is an error.
 
 A function is called like an element:
 
-- Its parameters are passed as attributes, `name value`. A parameter with a
-  default can be left out.
+- Its parameters are passed by name, as attributes: `name value`, or the
+  name alone for `true`. A parameter with a default can be left out;
+  leaving out one without a default is an error that names it. `=` writes
+  an HTML attribute, so `title=Hi` for a parameter is an error too.
 - Any other attributes style the function's root element, so
   `@panel [title Hi, padding 40]` works the same as styling a built-in
   element.
@@ -532,6 +541,20 @@ A function is called like an element:
   The children go here.
   @slot footer
     @text Updated today
+```
+
+A parameter that is off unless the call names it is a flag: give it the
+default `false`, and name it alone to turn it on.
+
+```
+@let @post-card [post, featured false, label "About $post"]
+  @article [spacing 8, padding if($featured, 24, 0)]
+    @if $featured
+      @text [font-weight bold] Featured
+    @h3 $label
+
+@post-card [post htmlang, featured]
+@post-card [post CSS]
 ```
 
 An `@style` block at the top of a function body is **scoped** to the

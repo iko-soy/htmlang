@@ -92,7 +92,7 @@ pub(crate) const DIRECTIVES: &[Doc] = &[
     ),
     doc(
         "let",
-        "Defines a value, quoted text (`\"...\"`, which keeps its quotes only in CSS), a computed value (`= expr`) or an attribute bundle (`[...]`), used as `$name`; or, with `@` before the name, a function with parameters `[param, param default]` and an indented body, called as `@name`. They share one namespace.",
+        "Defines a value, quoted text (`\"...\"`, which keeps its quotes only in CSS), a computed value (`= expr`) or an attribute bundle (`[...]`), used as `$name`; or, with `@` before the name, a function with parameters `[param, param default]` (a name alone is required) and an indented body, called as `@name [param value]`, or with a parameter's name alone for `true`. They share one namespace.",
         "@let primary #3b82f6\n@let arrow \"→ \"\n@let gap = 8 * 2\n@let card [padding 20]\n@let @button [label]\n  @el [$card] $label",
     ),
     doc("include", "Inserts another `.hl` file here, with its definitions.", "@include header.hl"),

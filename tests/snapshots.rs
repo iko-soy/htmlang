@@ -4801,3 +4801,192 @@ fn each_writes_its_variables_with_a_dollar() {
     let out = compile("@each $x, $i in a, b\n  @text $i:$x\n");
     assert!(out.contains("0:a") && out.contains("1:b"), "{}", out);
 }
+
+// ---------------------------------------------------------------------------
+// Parameters: declared the way they are passed
+// ---------------------------------------------------------------------------
+
+#[test]
+fn snapshot_parameters() {
+    snapshot_test("parameters");
+}
+
+fn coded<'a>(
+    diagnostics: &'a [htmlang::parser::Diagnostic],
+    code: &str,
+) -> Vec<&'a htmlang::parser::Diagnostic> {
+    diagnostics.iter().filter(|d| d.code == code).collect()
+}
+
+#[test]
+fn a_call_without_a_required_parameter_names_it() {
+    let diags = parse_diagnostics(
+        "@let @card [title, tone #f9fafb, kind]\n  @el [background $tone] $title $kind\n@card [tone #eff6ff]\n",
+    );
+    let missing = coded(&diags, "missing-parameter");
+    assert_eq!(missing.len(), 2, "{:?}", diags);
+    assert!(
+        missing
+            .iter()
+            .all(|d| d.severity == htmlang::parser::Severity::Error)
+    );
+    assert_eq!(missing[0].line, 3);
+    assert!(
+        missing[0].message.contains("@card needs 'title'"),
+        "{}",
+        missing[0].message
+    );
+    assert_eq!(missing[0].subject.as_deref(), Some("title"));
+    assert!(
+        missing[1].message.contains("'kind'"),
+        "{}",
+        missing[1].message
+    );
+    // The parameter is still bound (empty), so its uses don't cascade
+    assert!(
+        coded(&diags, "undefined-variable").is_empty(),
+        "{:?}",
+        diags
+    );
+}
+
+#[test]
+fn a_parameter_left_out_in_a_loop_is_reported_once() {
+    let diags =
+        parse_diagnostics("@let @card [title]\n  @el $title\n@each $i in 1, 2, 3\n  @card\n");
+    assert_eq!(coded(&diags, "missing-parameter").len(), 1, "{:?}", diags);
+}
+
+#[test]
+fn a_parameter_left_out_in_code_that_does_not_run_is_reported() {
+    let diags = parse_diagnostics(
+        "@let @card [title]\n  @el $title\n@card [title A]\n@if false\n  @card [padding 4]\n  @card [title=B]\n",
+    );
+    let missing = coded(&diags, "missing-parameter");
+    assert_eq!(missing.len(), 1, "{:?}", diags);
+    assert_eq!(missing[0].line, 5);
+    let form = coded(&diags, "parameter-form");
+    assert_eq!(form.len(), 1, "{:?}", diags);
+    assert_eq!(form[0].line, 6);
+    // A bundle may pass it, so a call with one isn't checked
+    let diags = parse_diagnostics(
+        "@let @card [title]\n  @el $title\n@let t [title A]\n@card [$t]\n@if false\n  @card [$t]\n",
+    );
+    assert!(coded(&diags, "missing-parameter").is_empty(), "{:?}", diags);
+}
+
+#[test]
+fn a_bundle_can_pass_a_parameter() {
+    let out =
+        compile("@let @card [title]\n  @el $title\n@let t [title From a bundle]\n@card [$t]\n");
+    assert!(out.contains("From a bundle"), "{}", out);
+}
+
+#[test]
+fn a_parameter_passed_with_equals_is_an_error() {
+    let diags = parse_diagnostics("@let @card [title]\n  @el $title\n@card [title=Hi]\n");
+    let form = coded(&diags, "parameter-form");
+    assert_eq!(form.len(), 1, "{:?}", diags);
+    assert!(
+        form[0]
+            .message
+            .contains("parameters are written `name value`"),
+        "{}",
+        form[0].message
+    );
+    assert_eq!(form[0].subject.as_deref(), Some("title="));
+    assert_eq!(form[0].suggestion.as_deref(), Some("title "));
+    // Not also reported as missing, and not forwarded as an HTML attribute
+    assert!(coded(&diags, "missing-parameter").is_empty(), "{:?}", diags);
+    let result = htmlang::parser::parse("@let @card [title]\n  @el $title\n@card [title=Hi]\n");
+    let out = htmlang::codegen::generate(&result.document);
+    assert!(out.contains("Hi"), "{}", out);
+    assert!(!out.contains("title=\"Hi\""), "{}", out);
+}
+
+#[test]
+fn an_html_attribute_that_is_not_a_parameter_is_forwarded() {
+    let out = compile("@let @card [title]\n  @el $title\n@card [title Hi, id=main]\n");
+    assert!(out.contains("id=\"main\""), "{}", out);
+}
+
+#[test]
+fn a_parameter_named_alone_is_true() {
+    let src = "@let @post-card [post, featured false]\n  @if $featured\n    @text F:$post\n  @else\n    @text P:$post\n";
+    let out = compile(&format!("{}@post-card [post A, featured]\n", src));
+    assert!(out.contains("F:A"), "{}", out);
+    let out = compile(&format!("{}@post-card [post B]\n", src));
+    assert!(out.contains("P:B"), "{}", out);
+    let out = compile(&format!("{}@post-card [post C, featured false]\n", src));
+    assert!(out.contains("P:C"), "{}", out);
+    // A required parameter named alone is true too
+    let out = compile("@let @flag [on]\n  @text on=$on\n@flag [on]\n");
+    assert!(out.contains("on=true"), "{}", out);
+}
+
+#[test]
+fn unnamed_attributes_are_not_bound_to_parameters_by_position() {
+    let out = compile("@let @box [size 1]\n  @el [padding 4] size=$size\n@box [padding 20]\n");
+    assert!(out.contains("size=1"), "{}", out);
+    assert!(out.contains("padding:20px"), "{}", out);
+}
+
+#[test]
+fn a_default_is_filled_in_at_the_call() {
+    // With the variables of the call's time, spaces, quotes and escapes
+    let out = compile(
+        "@let brand red\n@let @card [tone $brand, label \"Hello there, \\$5\"]\n  @el [color $tone] $label\n@card\n@let brand blue\n@card\n",
+    );
+    assert!(out.contains("color:red"), "{}", out);
+    assert!(out.contains("color:blue"), "{}", out);
+    assert!(out.contains("Hello there, $5"), "{}", out);
+    // With the parameters before it, and if()
+    let out = compile(
+        "@let @card [title, heading \"About $title\", note if($title, yes, no)]\n  @el $heading $note\n@card [title htmlang]\n",
+    );
+    assert!(out.contains("About htmlang yes"), "{}", out);
+}
+
+#[test]
+fn a_quoted_default_keeps_its_quotes_in_css() {
+    let out = compile("@let @q [mark \"→ \"]\n  @el [before:content $mark] $mark|\n@q\n");
+    assert!(out.contains("content:\"→ \""), "{}", out);
+    assert!(out.contains("→ |"), "{}", out);
+}
+
+#[test]
+fn a_default_that_uses_a_later_parameter_is_an_error() {
+    let diags =
+        parse_diagnostics("@let @card [heading $title, title]\n  @el $heading\n@card [title A]\n");
+    let invalid = coded(&diags, "invalid-definition");
+    assert_eq!(invalid.len(), 1, "{:?}", diags);
+    assert!(
+        invalid[0].message.contains("declared after it"),
+        "{}",
+        invalid[0].message
+    );
+    assert_eq!(invalid[0].line, 1);
+    assert_eq!(invalid[0].column, Some(12));
+    // A default may use the parameter's own name: the value outside
+    let out = compile("@let tone red\n@let @card [tone $tone]\n  @el [color $tone] x\n@card\n");
+    assert!(out.contains("color:red"), "{}", out);
+}
+
+#[test]
+fn a_problem_in_a_default_is_reported_at_the_definition_once() {
+    let diags = parse_diagnostics(
+        "@let @card [tone $nosuch]\n  @el [color $tone] x\n@card\n@card\n@card [tone red]\n",
+    );
+    let undefined = coded(&diags, "undefined-variable");
+    assert_eq!(undefined.len(), 1, "{:?}", diags);
+    assert_eq!(undefined[0].line, 1);
+    assert_eq!(undefined[0].column, Some(17));
+}
+
+#[test]
+fn a_variable_used_only_in_a_default_is_used() {
+    let diags = parse_diagnostics(
+        "@let brand red\n@let @card [tone $brand]\n  @el [color $tone] x\n@card [tone blue]\n",
+    );
+    assert!(coded(&diags, "unused-variable").is_empty(), "{:?}", diags);
+}

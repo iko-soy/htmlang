@@ -206,10 +206,10 @@ fn each_else_does_not_leak_variables() {
 #[test]
 fn named_argument_is_not_used_positionally_for_another_param() {
     let out = compile(
-        "@let @card [title, variant primary]\n  @text t=$title v=$variant\n@card [variant danger]",
+        "@let @card [title none, variant primary]\n  @text t=$title v=$variant\n@card [variant danger]",
     );
     assert!(out.contains("v=danger"), "{}", out);
-    assert!(!out.contains("t=danger"), "{}", out);
+    assert!(out.contains("t=none"), "{}", out);
 }
 
 #[test]
@@ -1099,4 +1099,30 @@ fn a_comma_split_value_says_how_to_keep_the_comma() {
         "{:?}",
         result.diagnostics
     );
+}
+
+#[test]
+fn a_required_parameter_left_out_is_not_silently_empty() {
+    let result = parser::parse("@let @greet [who]\n  @text Hello $who\n@greet\n");
+    let missing: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == "missing-parameter")
+        .collect();
+    assert_eq!(missing.len(), 1, "{:?}", result.diagnostics);
+    assert_eq!(missing[0].severity, Severity::Error);
+    assert!(
+        missing[0].message.contains("@greet needs 'who'"),
+        "{}",
+        missing[0].message
+    );
+}
+
+#[test]
+fn a_parameter_default_fills_in_its_variables() {
+    // The default `$brand` used to be passed on as the text `$brand`
+    let out =
+        compile("@let brand #123456\n@let @card [tone $brand]\n  @el [color $tone] x\n@card\n");
+    assert!(out.contains("color:#123456"), "{}", out);
+    assert!(!out.contains("$brand"), "{}", out);
 }

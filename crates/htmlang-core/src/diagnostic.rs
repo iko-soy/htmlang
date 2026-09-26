@@ -108,6 +108,10 @@ pub mod code {
     pub const UNUSED_FUNCTION: &str = "unused-function";
     pub const RECURSIVE_CALL: &str = "recursive-call";
     pub const NO_SINGLE_ROOT: &str = "no-single-root";
+    /// A call that leaves out a parameter without a default.
+    pub const MISSING_PARAMETER: &str = "missing-parameter";
+    /// A parameter passed `name=value`: parameters are written `name value`.
+    pub const PARAMETER_FORM: &str = "parameter-form";
 
     // Files
     pub const UNREADABLE_FILE: &str = "unreadable-file";
@@ -163,6 +167,8 @@ pub mod code {
         UNUSED_FUNCTION,
         RECURSIVE_CALL,
         NO_SINGLE_ROOT,
+        MISSING_PARAMETER,
+        PARAMETER_FORM,
         UNREADABLE_FILE,
         CIRCULAR_INCLUDE,
         UNSET_ENVIRONMENT,
