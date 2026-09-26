@@ -76,8 +76,9 @@ Linux, macOS, and Windows. Your change should pass all three.
    parser-to-HTML pipeline. Pure parser / codegen helpers can live as unit
    tests alongside the code.
 2. Prefer the smallest mechanism: a component belongs in `std.hl`, an HTML
-   element is a row in `TAGS` (and a line in DESIGN.md's table of layouts,
-   which a test checks), and a CSS property needs no code at all. Only
+   element is a row in `TAGS` (and a line in DESIGN.md's table of layouts
+   and a name in the VS Code grammar's element list, which tests check), and
+   a CSS property needs no code at all. Only
    thread a feature through the parser and codegen when it needs to be, and
    describe it in the LSP's `docs.rs`.
 3. Document it in `DESIGN.md` (the examples there are compiled by the tests).

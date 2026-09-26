@@ -6693,3 +6693,29 @@ fn a_function_named_like_a_new_element_shadows_it() {
         result.diagnostics
     );
 }
+
+#[test]
+fn the_new_elements_attributes_are_known_html_attributes() {
+    // Written like a style, each gets "write `key=value`", not a CSS warning
+    for (src, key) in [
+        ("@track [srclang en] a.vtt\n", "srclang"),
+        ("@area [shape rect, alt=x] /x\n", "shape"),
+        ("@area [coords 1, alt=x] /x\n", "coords"),
+    ] {
+        let diags = parse_diagnostics(src);
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.code == "html-attribute-form" && d.message.contains(key)),
+            "{}: {:?}",
+            src,
+            diags
+        );
+        assert!(
+            !diags.iter().any(|d| d.code == "unknown-attribute"),
+            "{}: {:?}",
+            src,
+            diags
+        );
+    }
+}

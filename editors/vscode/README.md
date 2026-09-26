@@ -32,7 +32,7 @@ Syntax highlighting, snippets, and language server support for
   `$variables`, bundles and `@let @name` functions. `@include`, `@markdown` and
   `@data` file paths are links.
 - **Code actions**: fixes keyed on diagnostic codes (replace a misspelled
-  name, prefix or slot name, write a slot name as one word, add a missing `alt` or `type`, include the file that defines an
+  name, prefix or slot name, replace `@a` with `@link`, write a slot name as one word, add a missing `alt` or `type`, include the file that defines an
   unknown function, write a quoted font stack as `A\, B`, drop the `$` from
   `@let $x` and add it to `@each x`, pass a parameter as `name value`
   instead of `name=value`), removing unused

@@ -1160,6 +1160,27 @@ mod tests {
     }
 
     #[test]
+    fn an_html_name_htmlang_writes_otherwise_is_replaced_with_htmlang_s() {
+        // `@a` is an unknown element whose suggestion is `@link`
+        let found = fixes("@el\n  @a /x Home\n");
+        let (_, edits) = found
+            .iter()
+            .find(|(t, _)| t == "Replace with '@link'")
+            .unwrap_or_else(|| panic!("{:?}", found));
+        assert_eq!(edits[0].new_text, "@link");
+        assert_eq!(edits[0].range.start, Position::new(1, 2));
+        assert_eq!(edits[0].range.end, Position::new(1, 4));
+        // Inside a line of text too
+        let found = fixes("@paragraph\n  Read {@span this}.\n");
+        let (_, edits) = found
+            .iter()
+            .find(|(t, _)| t == "Replace with '@text'")
+            .unwrap_or_else(|| panic!("{:?}", found));
+        assert_eq!(edits[0].range.start, Position::new(1, 8));
+        assert_eq!(edits[0].range.end, Position::new(1, 13));
+    }
+
+    #[test]
     fn a_quoted_font_stack_is_fixed_with_escaped_commas() {
         let found = fixes("@el [font-family \"Inter, sans-serif\"] x\n");
         let (_, edits) = found
