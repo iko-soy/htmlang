@@ -2,7 +2,7 @@
   "Page": {
     "prefix": "@page",
     "body": [
-      "@page [lang ${1:en}] ${2:My Page}",
+      "@page [lang=${1:en}] ${2:My Page}",
       "@let --${3:brand} ${4:#3b82f6}",
       "",
       "@el [width fill, max-width ${5:800}, center-x, padding ${6:40}, spacing ${7:20}]",
@@ -13,7 +13,7 @@
   "Page metadata": {
     "prefix": "@page-meta",
     "body": [
-      "@page [lang ${1:en}, favicon ${2:favicon.png}] ${3:My Page}",
+      "@page [lang=${1:en}, favicon ${2:favicon.png}] ${3:My Page}",
       "@meta description ${4:Page description}",
       "@meta og:title $3",
       "@head <link rel=\"canonical\" href=\"${5:https://example.com/}\">",

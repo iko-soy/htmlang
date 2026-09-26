@@ -5,7 +5,7 @@ tree of elements written one per line, with indentation for nesting:
 
 ```
 @page Hello
-@el [max-width 640, center-x, padding 40, spacing 16]
+@el [width fill, max-width 640, center-x, padding 40, spacing 16]
   @h1 Hello
   @paragraph
     This page was written in {@b htmlang}.
@@ -222,7 +222,7 @@ fixed kind of argument and a fixed kind of body:
 
 | Directive | Argument | Body |
 |---|---|---|
-| `@page` | attributes and a title | none |
+| `@page` | attributes (styles for `<body>`, `key=value` for `<html>`) and a title | none |
 | `@let` | a name and a value or bundle, or `@name` and parameters | a function's body |
 | `@include` | a file | none |
 | `@data` | a variable and a source | none |
@@ -284,7 +284,11 @@ flow.**
 | native | `@table`, `@caption`, `@select`, `@pre`, `@textarea`, `@video`, ... | HTML's own layout, which htmlang leaves alone |
 | void | `@input`, `@hr`, `@br`, `@image`, `@source` | Nothing: it takes no content |
 
-The table under [Elements](#elements) gives every element's layout.
+The table under [Elements](#elements) gives every element's layout. The
+page itself is a column too: `@page` is the [root element](#page-and-head),
+`<body>`, so what is written at the top of a page stacks like the children
+of an `@el`, `height fill` there takes the rest of the window and
+`center-y` centres in it.
 
 ```
 @el [spacing 4]
@@ -562,8 +566,9 @@ Every element has one [layout](#rows-columns-and-text):
 | void | `@image`, `@input`, `@hr`, `@br`, `@wbr`, `@col`, `@source`, `@track`, `@embed`, `@area` |
 
 `@fragment`, `@children` and `@slot` have no element of their own: what
-they hold takes the layout of the element they are in. In a native element,
-and at the top of the page, lines of text are separated by a line break,
+they hold takes the layout of the element they are in. The top of a page is
+a column, `<body>` (see [Page and head](#page-and-head)). In a native
+element, and at the top of a fragment, lines of text are separated by a line break,
 which HTML shows as a space except where whitespace is kept, as in `@pre`
 and `@textarea`.
 
@@ -1118,7 +1123,7 @@ the content to show when the list is empty.
 | `@data $name [...]` / `@data $name {...}` | Inline JSON, which may span several lines |
 | `@data $name dir/*.json` | A list with one record per file, in name order. `$item.file` is the file's name |
 | `@data $name env:NAME [default]` | An environment variable |
-| `@include file.hl` | Insert another file: its content and its definitions. A file that holds only `@let`s outputs nothing |
+| `@include file.hl` | Insert another file: its content and its definitions. A file that holds only `@let`s outputs nothing (a [library](#layouts)) |
 | `@markdown` / `@markdown file.md` | Markdown (an indented body or a file), converted to HTML |
 | `@image [inline] file.svg` | Put the file inside the page: SVG as markup (`width`, `height`, `color`, `class=` and `id=` apply to it), other images as base64. `inline` goes only on `@image`, without a prefix |
 
@@ -1148,8 +1153,8 @@ it.
 ```
 -- layout.hl
 @let @layout
-  @page My Site
-  @el [max-width 800, center-x, spacing 24]
+  @page [lang=en, background #f8fafc] My Site
+  @el [width fill, max-width 800, center-x, spacing 24]
     @header
       @slot header
         @text Default header
@@ -1166,22 +1171,50 @@ it.
   @paragraph This fills @children.
 ```
 
+The layout holds the page's `@page`, whose attributes can come from its
+parameters (`@page [background $bg] $title`). A page has one `@page`, so a
+second one is an error (`duplicate-page`): the page's own next to its
+layout's, or a layout called twice. The same `@meta` tag twice is written
+once. A file that holds only `@let`s, such as `layout.hl`, is a library:
+its definitions aren't reported unused, and `htmlang build` and `htmlang
+serve` don't build it into a page of its own.
+
 ## Page and head
 
 `@page TITLE` makes the output a full HTML document. Without it, the output
-is a fragment. The attributes of `@page` set `lang`, and `favicon` (the file
-is embedded in the page); any other is an error. `@meta NAME VALUE` adds a meta tag, and names that
-start with `og:` become Open Graph `property` tags. `@head` holds any other
-raw HTML for the `<head>`, such as a font link, a canonical URL or JSON-LD,
-on its line or in its indented block.
+is a fragment. The page is the root element, and `@page`'s attributes are
+checked like any element's:
+
+- Styles style `<body>`, prefixes included, so a page's colour, font and
+  dark background go on `@page` and cover the whole window.
+- `key=value` attributes go on `<html>`: `lang=en`, `dir=rtl`, `class=x`.
+- `favicon FILE` is its one word of htmlang's own: the file is put into
+  the page as its icon (or linked, when it can't be read).
+
+`<body>` is a column that fills the window (`display: flex;
+flex-direction: column; min-height: 100dvh`, from the reset), so the
+page's top-level elements are laid out like the children of an `@el`:
+they stack, even a line of text or an inline element such as `@text` or
+`@link`, and each takes the full width unless it says otherwise. A
+centred column at the top writes `width fill` like anywhere else (see
+[Rows, columns and text](#rows-columns-and-text)).
+
+`@meta NAME VALUE` adds a meta tag, and names that start with `og:` become
+Open Graph `property` tags; a `@meta viewport` replaces the usual one.
+`@head` holds any other raw HTML for the `<head>`, such as a font link, a
+canonical URL or JSON-LD, on its line or in its indented block.
 
 ```
-@page [lang en, favicon favicon.png] My Site
+@page [lang=en, favicon favicon.png, color #1f2937, dark:background #0b1220, dark:color #e5e7eb] My Site
 @meta description A small site
 @meta og:title My Site
 @head <link rel="canonical" href="https://example.com/">
 @head
   <script type="application/ld+json">{"@type": "WebSite"}</script>
+@header [padding 16] My Site
+@main [height fill, padding 16]
+  The main part takes the rest of the window.
+@footer [padding 16] © 2026
 ```
 
 Translations are a JSON file per locale: `@data $t locales/$lang.json`
@@ -1206,7 +1239,8 @@ for a single rule, on its line:
 
 Each element gets a short generated class for its styles, and elements with
 the same styles share one. The generated rules live in `@layer htmlang`. A
-small reset (`box-sizing`, body margin, block images, unstyled links, a
-focus outline) lives in `@layer hl-reset` before it. CSS outside any layer
+small reset (`box-sizing`, body margin, `<body>` as a column that fills
+the window, block images, unstyled links, a focus outline) lives in
+`@layer hl-reset` before it. CSS outside any layer
 takes precedence over both, so rules in `@style` or `@raw` override the
 generated ones.

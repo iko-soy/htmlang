@@ -111,8 +111,8 @@ pub(crate) const ELEMENTS: &[Doc] = &[
 pub(crate) const DIRECTIVES: &[Doc] = &[
     doc(
         "page",
-        "Produces a full HTML document with this title. Attributes set `lang` and `favicon`.",
-        "@page [lang en] My Site",
+        "Produces a full HTML document with this title. The page is the root element: its styles style `<body>`, a column that fills the window (so top-level elements stack, and `height fill` takes the rest of it); its `key=value` attributes go on `<html>` (`lang=en`, `dir=rtl`, `class=x`); `favicon FILE` puts the file in as the page's icon. A page has one `@page`.",
+        "@page [lang=en, favicon icon.png, background #f8fafc, dark:background #0b1220] My Site",
     ),
     doc(
         "let",
@@ -335,6 +335,13 @@ fn attribute_hover(name: &str) -> Option<String> {
     if let Some(doc) = attribute(name) {
         return Some(markdown(name, doc.summary, doc.usage));
     }
+    if vocab::PAGE_WORDS.contains(&name) {
+        return Some(markdown(
+            name,
+            "On `@page`: the page's icon. The file is put into the page (as a `data:` URI) when it can be read.",
+            "@page [favicon favicon.png] My Site",
+        ));
+    }
     if vocab::HTMLANG_ATTRIBUTES.contains(&name) {
         return Some(markdown(name, "htmlang attribute.", ""));
     }
@@ -504,6 +511,8 @@ mod tests {
         assert!(hover("$truncate").unwrap().contains("bundle"));
         assert!(hover("@nav").unwrap().contains("<nav>"));
         assert!(hover("hidden").unwrap().contains("Boolean"));
+        assert!(hover("favicon").unwrap().contains("@page"));
+        assert!(hover("@page").unwrap().contains("<body>"));
         assert!(hover("--gap").unwrap().contains("as it is"));
         assert!(
             hover("-webkit-tap-highlight-color")

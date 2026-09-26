@@ -14,7 +14,8 @@ Usage: htmlang [options] <file.hl | directory>
 
 Commands:
   build <dir> [-o <out>] [--minify] [--strict]
-                        Compile every .hl file under a directory
+                        Compile every .hl file under a directory, except
+                        libraries (files that hold only @let definitions)
   serve [dir|file] [-p N] [--open]
                         Dev server with live reload
   watch [dir|file] [-o <out>]

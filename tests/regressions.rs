@@ -540,13 +540,15 @@ fn css_values_pass_through() {
 }
 
 #[test]
-fn page_takes_lang_and_favicon_only() {
-    let result = parser::parse("@page [lang en, canonical https://x.dev] T\n");
+fn page_attributes_are_checked_like_any_element_s() {
+    // `canonical` belongs in a `@head` link: on @page it is an unknown CSS
+    // property (for <body>), reported rather than dropped
+    let result = parser::parse("@page [lang=en, canonical https://x.dev] T\n");
     assert!(
         result
             .diagnostics
             .iter()
-            .any(|d| d.message.contains("unknown @page attribute 'canonical'")),
+            .any(|d| d.code == "unknown-attribute" && d.message.contains("'canonical'")),
         "{:?}",
         result.diagnostics
     );

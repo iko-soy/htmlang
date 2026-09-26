@@ -656,6 +656,10 @@ fn minify_html(html: &str) -> String {
 }
 
 fn generate_full_inner(doc: &Document, dev: bool) -> String {
+    // Without `@page` the output is a fragment
+    let Some(page) = &doc.page else {
+        return generate_partial_inner(doc, dev);
+    };
     let mut styles = StyleCollector::new();
     let mut ctx = GenContext {
         dev,
@@ -666,110 +670,97 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
         in_picture: false,
     };
 
-    let mut body = String::new();
+    // The page is the root element: `<body>` is a column (the reset makes
+    // it one, filling the viewport), `@page`'s styles are its class, and
+    // the page's top-level elements are its children
+    let root = Element {
+        kind: ElementKind::El,
+        attrs: page.styles.clone(),
+        argument: None,
+        children: Vec::new(),
+        line_num: 0,
+        function: None,
+    };
+    let mut own = Flow::of(&root);
+    let top = Flow::default();
+    let site = Site {
+        kind: &root.kind,
+        parent: &top,
+        own: &own,
+        has_overlay_children: holds_overlays(&doc.nodes),
+        inline: false,
+        root: true,
+    };
+    let body_class = element_class(&root, &site, &mut styles);
+    own.class = body_class.clone();
+    ctx.flow = own;
 
-    generate_children(&doc.nodes, None, &mut body, &mut styles, &mut ctx);
+    let mut body = String::new();
+    generate_children(
+        &doc.nodes,
+        Some(Layout::Column),
+        &mut body,
+        &mut styles,
+        &mut ctx,
+    );
 
     let element_css = build_element_css(doc, &styles, dev);
+    let nl = if dev { "\n" } else { "" };
 
-    // Build meta tags string
-    let meta_html = if doc.meta_tags.is_empty() {
-        String::new()
-    } else {
-        let mut m = String::new();
-        for (name, content) in &doc.meta_tags {
-            if dev {
-                m.push_str(&format!(
-                    "<meta name=\"{}\" content=\"{}\">\n",
-                    html_escape(name),
-                    html_escape(content)
-                ));
-            } else {
-                m.push_str(&format!(
-                    "<meta name=\"{}\" content=\"{}\">",
-                    html_escape(name),
-                    html_escape(content)
-                ));
-            }
+    let mut meta_html = String::new();
+    // A `@meta viewport` of the page's own replaces the usual one
+    if !doc.meta_tags.iter().any(|(name, _)| name == "viewport") {
+        meta_html.push_str(&format!(
+            "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">{}",
+            nl
+        ));
+    }
+    meta_html.push_str(&format!(
+        "<title>{}</title>{}",
+        html_escape(&page.title),
+        nl
+    ));
+    for (name, content) in &doc.meta_tags {
+        meta_html.push_str(&format!(
+            "<meta name=\"{}\" content=\"{}\">{}",
+            html_escape(name),
+            html_escape(content),
+            nl
+        ));
+    }
+    for (property, content) in &doc.og_tags {
+        meta_html.push_str(&format!(
+            "<meta property=\"og:{}\" content=\"{}\">{}",
+            html_escape(property),
+            html_escape(content),
+            nl
+        ));
+    }
+    if let Some(path) = &page.favicon {
+        meta_html.push_str(&format!(
+            "<link rel=\"icon\" href=\"{}\">{}",
+            favicon_href(path),
+            nl
+        ));
+    }
+    for block in &doc.head_blocks {
+        meta_html.push_str(block);
+        meta_html.push_str(nl);
+    }
+
+    // `@page`'s HTML attributes go on `<html>`
+    let mut html_attrs = String::new();
+    for attr in &page.html_attrs {
+        html_attrs.push(' ');
+        html_attrs.push_str(&attr.key);
+        if attr.html {
+            html_attrs.push_str("=\"");
+            html_attrs.push_str(&html_escape(attr.value.as_deref().unwrap_or("")));
+            html_attrs.push('"');
         }
-        m
-    };
-
-    // Build OG meta tags
-    let og_html = if doc.og_tags.is_empty() {
-        String::new()
-    } else {
-        let mut o = String::new();
-        for (property, content) in &doc.og_tags {
-            if dev {
-                o.push_str(&format!(
-                    "<meta property=\"og:{}\" content=\"{}\">\n",
-                    html_escape(property),
-                    html_escape(content)
-                ));
-            } else {
-                o.push_str(&format!(
-                    "<meta property=\"og:{}\" content=\"{}\">",
-                    html_escape(property),
-                    html_escape(content)
-                ));
-            }
-        }
-        o
-    };
-
-    // Build head blocks string
-    let head_html = if doc.head_blocks.is_empty() {
-        String::new()
-    } else {
-        let mut h = String::new();
-        for block in &doc.head_blocks {
-            h.push_str(block);
-            if dev {
-                h.push('\n');
-            }
-        }
-        h
-    };
-
-    let lang_attr = match &doc.lang {
-        Some(lang) => format!(" lang=\"{}\"", html_escape(lang)),
-        None => String::new(),
-    };
-
-    let favicon_html = match &doc.favicon {
-        Some(path) => {
-            // Try to read and inline the favicon
-            if let Ok(data) = std::fs::read(path) {
-                let mime = if path.ends_with(".ico") {
-                    "image/x-icon"
-                } else if path.ends_with(".png") {
-                    "image/png"
-                } else if path.ends_with(".svg") {
-                    "image/svg+xml"
-                } else {
-                    "image/x-icon"
-                };
-                let b64 = base64_encode(&data);
-                if dev {
-                    format!(
-                        "<link rel=\"icon\" href=\"data:{};base64,{}\">\n",
-                        mime, b64
-                    )
-                } else {
-                    format!("<link rel=\"icon\" href=\"data:{};base64,{}\">", mime, b64)
-                }
-            } else {
-                // Fall back to href
-                if dev {
-                    format!("<link rel=\"icon\" href=\"{}\">\n", html_escape(path))
-                } else {
-                    format!("<link rel=\"icon\" href=\"{}\">", html_escape(path))
-                }
-            }
-        }
-        None => String::new(),
-    };
+    }
+    let mut body_attrs = String::new();
+    emit_class_attr(&mut body_attrs, body_class.as_deref(), None);
 
     // Focus-visible CSS for interactive elements (accessibility)
     let focus_visible_css = if ctx.has_interactive {
@@ -781,64 +772,30 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
     } else {
         ""
     };
-
     let reset_css = reset_css(dev, focus_visible_css);
 
-    match &doc.page_title {
-        Some(title) => {
-            if dev {
-                format!(
-                    "\
-<!DOCTYPE html>
-<html{lang_attr}>
-<head>
-<meta charset=\"utf-8\">
-<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
-<title>{title}</title>
-{meta_html}{og_html}{favicon_html}{head_html}\
-<style>
-{reset_css}{element_css}\
-</style>
-</head>
-<body>
-{body}\
-</body>
-</html>
-",
-                    title = html_escape(title),
-                    lang_attr = lang_attr,
-                    meta_html = meta_html,
-                    favicon_html = favicon_html,
-                    head_html = head_html,
-                    og_html = og_html,
-                    reset_css = reset_css,
-                    element_css = element_css,
-                    body = body,
-                )
+    format!(
+        "<!DOCTYPE html>{nl}<html{html_attrs}>{nl}<head>{nl}<meta charset=\"utf-8\">{nl}\
+         {meta_html}<style>{nl}{reset_css}{element_css}</style>{nl}</head>{nl}\
+         <body{body_attrs}>{nl}{body}</body>{nl}</html>{nl}",
+    )
+}
+
+/// A favicon's `href`: the file itself as a `data:` URI when it can be
+/// read, else the path as written.
+fn favicon_href(path: &str) -> String {
+    match std::fs::read(path) {
+        Ok(data) => {
+            let mime = if path.ends_with(".png") {
+                "image/png"
+            } else if path.ends_with(".svg") {
+                "image/svg+xml"
             } else {
-                format!(
-                    "<!DOCTYPE html><html{lang_attr}><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>{title}</title>{meta_html}{og_html}{favicon_html}{head_html}<style>{reset_css}{element_css}</style></head><body>{body}</body></html>",
-                    title = html_escape(title),
-                    lang_attr = lang_attr,
-                    meta_html = meta_html,
-                    og_html = og_html,
-                    favicon_html = favicon_html,
-                    head_html = head_html,
-                    reset_css = reset_css,
-                    element_css = element_css,
-                    body = body,
-                )
-            }
+                "image/x-icon"
+            };
+            format!("data:{};base64,{}", mime, base64_encode(&data))
         }
-        None => {
-            if element_css.is_empty() {
-                body
-            } else if dev {
-                format!("<style>\n{}</style>\n{}", element_css, body)
-            } else {
-                format!("<style>{}</style>{}", element_css, body)
-            }
-        }
+        Err(_) => html_escape(path),
     }
 }
 
@@ -901,9 +858,9 @@ fn build_element_css(doc: &Document, styles: &StyleCollector, dev: bool) -> Stri
 /// `@link [color red]`.
 fn reset_css(dev: bool, focus_visible_css: &str) -> String {
     let base = if dev {
-        "*, *::before, *::after { box-sizing: border-box; }\nbody { margin: 0; font-family: system-ui, -apple-system, sans-serif; }\nimg { display: block; }\na { text-decoration: none; color: inherit; }\n"
+        "*, *::before, *::after { box-sizing: border-box; }\nbody { margin: 0; font-family: system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; min-height: 100dvh; }\nimg { display: block; }\na { text-decoration: none; color: inherit; }\n"
     } else {
-        "*,*::before,*::after{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,sans-serif}img{display:block}a{text-decoration:none;color:inherit}"
+        "*,*::before,*::after{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,sans-serif;display:flex;flex-direction:column;min-height:100dvh}img{display:block}a{text-decoration:none;color:inherit}"
     };
     let rules = format!("{}{}", base, focus_visible_css);
     if dev {
@@ -1114,7 +1071,11 @@ fn emit_html_attrs(out: &mut String, attrs: &[Attribute]) {
 // as absolutely positioned overlays, so the parent automatically becomes a
 // positioning context (position:relative + isolation:isolate).
 fn has_overlay_children(elem: &Element) -> bool {
-    elem.children.iter().any(|child| {
+    holds_overlays(&elem.children)
+}
+
+fn holds_overlays(children: &[Node]) -> bool {
+    children.iter().any(|child| {
         matches!(
             child,
             Node::Element(e) if e.kind.is_tag("in-front") || e.kind.is_tag("behind")
@@ -1603,6 +1564,8 @@ struct Site<'a> {
     has_overlay_children: bool,
     /// A row, column or grid inside text, laid out inline.
     inline: bool,
+    /// The page's `<body>`, which the reset already makes a column.
+    root: bool,
 }
 
 impl Site<'_> {
@@ -1620,6 +1583,7 @@ impl Site<'_> {
             own,
             has_overlay_children: has_overlay_children(elem),
             inline: layout == Some(Layout::Text) && elem.kind.layout().is_container(),
+            root: false,
         }
     }
 }
@@ -2047,7 +2011,9 @@ fn attrs_to_css(attrs: &[Attribute], state_prefix: &str, site: &Site) -> String 
         if site.has_overlay_children {
             css.push_str("position:relative;isolation:isolate;");
         }
-        css.push_str(layout_css(kind.layout(), site.inline));
+        if !site.root {
+            css.push_str(layout_css(kind.layout(), site.inline));
+        }
         css.push_str(kind.css());
     }
     // htmlang's words for laying out children (`spacing`, `wrap`,

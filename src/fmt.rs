@@ -498,10 +498,10 @@ mod tests {
 
     #[test]
     fn heads_are_normalized() {
-        let src = "@el[padding 4]  >  @link /x Go\n@let card [padding 4,color red]\n@page [lang en]  Home\n";
+        let src = "@el[padding 4]  >  @link /x Go\n@let card [padding 4,color red]\n@page [lang=en]  Home\n";
         assert_eq!(
             format(src),
-            "@el [padding 4] > @link /x Go\n@let card [padding 4, color red]\n@page [lang en] Home\n"
+            "@el [padding 4] > @link /x Go\n@let card [padding 4, color red]\n@page [lang=en] Home\n"
         );
     }
 }

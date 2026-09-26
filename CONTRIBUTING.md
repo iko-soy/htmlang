@@ -34,6 +34,9 @@ Linux, macOS, and Windows. Your change should pass all three.
     direction its CSS sets, with the changes under media and container
     prefixes) is what its children's `fill` and `shrink` compile against;
     the rules for a change are keyed on the parent's class in that block.
+    A page's `<body>` is written like an `@el` whose styles are `@page`'s
+    (the reset makes it the column), so the top level of a page is laid
+    out like any column; a fragment's top level has no layout of its own.
   - `ast.rs` — the element kinds; every plain HTML element is one row in
     `TAGS` with its one `Layout` (column, row, grid, text, native or void,
     which decides its text lines, `spacing` and its children's layout
@@ -49,7 +52,7 @@ Linux, macOS, and Windows. Your change should pass all three.
     `span`, `p` and `div` to htmlang's own names for the unknown-element
     suggestion only.
   - `vocab.rs` — the attribute vocabulary (htmlang attributes, CSS properties,
-    HTML attributes) and the state/media prefixes.
+    HTML attributes, `@page`'s own `favicon`) and the state/media prefixes.
   - `expr.rs` — the expression language for conditions, computed values and
     `${...}`. It evaluates only what decides the result (the branch `if()`
     takes, the side of `and`/`or` that decides) and only reads the rest.
@@ -72,7 +75,7 @@ Linux, macOS, and Windows. Your change should pass all three.
 - `tests/snapshots.rs` — integration / snapshot tests for the compiler.
 - `tests/regressions.rs` — one test per fixed bug.
 - `tests/docs.rs` — compiles every example in `DESIGN.md` and `README.md`,
-  and every page in `examples/`.
+  and every page in `examples/`: any diagnostic fails it.
 - `tests/fmt.rs` — formats every example and snapshot input: the result is
   stable, compiles to the same HTML and keeps every comment.
 - `examples/` — complete pages: a landing page, a blog, a docs page, and a

@@ -447,6 +447,23 @@ pub fn leading_token_len(s: &str) -> usize {
 }
 
 impl Tree {
+    /// Whether the file holds only definitions: at its top level, `@let`s
+    /// (at least one), comments and blank lines. Such a file is a library,
+    /// such as a layout, whose definitions are for the files that
+    /// `@include` it: it isn't built into a page of its own, and its
+    /// definitions aren't reported unused.
+    pub fn is_library(&self) -> bool {
+        let mut lets = 0;
+        for node in &self.nodes {
+            match &node.kind {
+                NodeKind::Blank | NodeKind::Comment => {}
+                _ if node.is_directive("let") => lets += 1,
+                _ => return false,
+            }
+        }
+        lets > 0
+    }
+
     /// Visit every node, in source order.
     pub fn walk<'a>(&'a self, f: &mut impl FnMut(&'a Node)) {
         for node in &self.nodes {
@@ -2406,6 +2423,20 @@ mod tests {
         assert_eq!(names(1), Vec::<String>::new());
         let kinds: Vec<VisibleKind> = tree.visible_at(9).iter().map(|v| v.kind).collect();
         assert_eq!(kinds[2], VisibleKind::Loop);
+    }
+
+    #[test]
+    fn a_file_of_definitions_only_is_a_library() {
+        let library = |src: &str| parse(src).is_library();
+        assert!(library(
+            "-- layout\n@let @layout\n  @page Home\n  @children\n\n@let gap 8\n"
+        ));
+        assert!(library("@let card [\n  padding 8,\n  color red\n]\n"));
+        assert!(!library("@let gap 8\n@text $gap\n"));
+        assert!(!library("@page Home\n@let gap 8\n"));
+        assert!(!library("@include layout.hl\n"));
+        assert!(!library("-- nothing\n\n"));
+        assert!(!library(""));
     }
 
     #[test]

@@ -10,7 +10,7 @@
 @layer hl-reset, htmlang;
 @layer hl-reset {
 *, *::before, *::after { box-sizing: border-box; }
-body { margin: 0; font-family: system-ui, -apple-system, sans-serif; }
+body { margin: 0; font-family: system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; min-height: 100dvh; }
 img { display: block; }
 a { text-decoration: none; color: inherit; }
 a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
@@ -23,118 +23,119 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
   --subtle: #f8fafc;
 }
 @layer htmlang {
-  .a {display:flex;flex-direction:column;max-width:960px;padding:24px;color:var(--ink);line-height:1.5;margin-left:auto;margin-right:auto;}
-  .b {display:flex;flex-direction:column;gap:8px;padding-block:24px;animation:rise 0.4s ease;}
-  .c {font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;}
-  .d {margin:0;font-size:44px;line-height:1.1;letter-spacing:-1px;}
-  .e {margin:0;font-size:18px;color:var(--muted);max-width:620px;}
-  .f {font-weight:700;color:var(--brand);}
-  .g {font-family:ui-monospace,monospace;}
-  .h {display:flex;flex-direction:column;gap:16px;padding-block:24px;border-top:1px solid var(--line);}
-  .i {display:flex;flex-direction:row;gap:8px;align-items:baseline;}
-  .j {color:var(--brand);font-weight:700;}
-  .k {margin:0;font-size:26px;}
-  .l {margin:0;}
-  .m {display:flex;flex-direction:row;gap:8px;flex-wrap:wrap;}
-  .n {display:flex;flex-direction:column;padding:16px;background:white;border:1px solid var(--line);border-radius:8px;flex:1;min-width:0;}
-  .o {display:flex;flex-direction:column;padding:16px;background:white;border:1px solid var(--line);border-radius:8px;width:160px;}
-  .p {display:flex;flex-direction:row;padding:16px;background:white;border:1px solid var(--line);border-radius:8px;gap:8px;align-items:center;}
-  .q {font-weight:700;}
-  .r {display:flex;flex-direction:column;flex:1;}
-  .s {display:flex;flex-direction:column;gap:8px;}
-  .t {display:flex;flex-direction:column;padding:16px;background:white;border:1px solid var(--line);border-radius:8px;width:100%;}
-  .u {display:flex;flex-direction:row;gap:8px;height:120px;}
-  .v {display:flex;flex-direction:column;padding:16px;background:white;border:1px solid var(--line);border-radius:8px;margin-bottom:auto;}
-  .w {display:flex;flex-direction:column;padding:16px;background:white;border:1px solid var(--line);border-radius:8px;margin-top:auto;margin-bottom:auto;}
-  .x {display:flex;flex-direction:column;padding:16px;background:white;border:1px solid var(--line);border-radius:8px;margin-top:auto;}
-  .y {display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
-  .z {display:flex;flex-direction:column;padding:16px;background:white;border:1px solid var(--line);border-radius:8px;text-align:center;grid-column:span 2;}
-  .aa {display:flex;flex-direction:column;padding:16px;background:white;border:1px solid var(--line);border-radius:8px;text-align:center;}
-  .ab {position:relative;isolation:isolate;display:flex;flex-direction:column;padding:16px;background:white;border:1px solid var(--line);border-radius:8px;height:120px;overflow:hidden;}
-  .ac {display:flex;flex-direction:column;position:absolute;inset:0;z-index:-1;}
-  .ad {display:flex;flex-direction:column;background:linear-gradient(135deg, #dbeafe, #fae8ff);flex:1;min-height:0;justify-content:flex-end;padding:8px;}
-  .ae {display:flex;flex-direction:column;position:absolute;inset:0;}
-  .af {padding:8px;font-size:12px;color:var(--muted);margin-left:auto;margin-top:auto;}
-  .ag {margin:0;max-width:640px;}
-  .ah {color:var(--brand);text-decoration:underline;}
-  .ai {font-family:ui-monospace,monospace;padding:1px 6px;border:1px solid var(--line);border-radius:4px;}
-  .aj {display:flex;flex-direction:column;padding:12px 20px;background:var(--brand);border-radius:8px;margin-right:auto;}
-  .ak {color:white;font-weight:700;}
-  .al {display:flex;flex-direction:column;margin:0;padding-inline-start:16px;border-left:3px solid var(--brand);color:var(--muted);font-style:italic;}
-  .am {display:flex;flex-direction:column;padding:16px;background:white;border:1px solid var(--line);border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.1), 0 8px 24px rgba(0,0,0,0.08);transform:rotate(-2deg);}
-  .an {display:flex;flex-direction:column;padding:16px;background:white;border:1px solid var(--line);border-radius:8px;transition:all 0.15s ease;cursor:pointer;}
-  .ao,.ap,.as,.bw {display:flex;flex-direction:column;padding:16px;background:white;border:1px solid var(--line);border-radius:8px;}
-  .aq {display:flex;flex-direction:column;margin:0;padding-left:0;list-style:none;padding:16px;background:white;border:1px solid var(--line);border-radius:8px;gap:4px;}
-  .ar {display:flex;flex-direction:column;border-radius:4px;}
-  .at {cursor:pointer;}
-  .au {margin-inline-end:8px;}
-  .av {font-family:ui-monospace,monospace;padding:1px 6px;border:1px solid var(--line);border-radius:4px;font-size:13px;}
-  .aw {display:flex;flex-direction:column;padding:16px;background:white;border:1px solid var(--line);border-radius:8px;gap:4px;flex:1 1 160px;}
-  .ax {font-size:32px;font-weight:800;color:var(--brand);}
-  .ay {color:var(--muted);}
-  .az {font-size:32px;font-weight:800;color:#10b981;}
-  .a0 {display:flex;flex-direction:column;padding:16px;border:1px solid var(--line);border-radius:8px;gap:4px;flex:1 1 160px;background:var(--subtle);}
-  .a1 {font-size:32px;font-weight:800;color:#a855f7;}
-  .a2 {display:flex;flex-direction:column;padding:16px;background:white;border:1px solid var(--line);border-radius:8px;gap:8px;}
-  .a3 {display:flex;flex-direction:row;align-items:center;}
-  .a4 {margin:0;font-size:18px;}
-  .a5 {color:var(--brand);font-size:14px;}
-  .a6 {font-size:13px;color:var(--muted);}
-  .a7 {display:flex;flex-direction:row;gap:8px;}
-  .a8 {display:flex;flex-direction:row;gap:6px;padding:2px 10px;border-radius:999px;background:var(--subtle);font-size:13px;}
-  .a9 {display:flex;flex-direction:column;padding:16px;border-radius:8px;color:white;background:#3b82f6;}
-  .ba {display:flex;flex-direction:column;padding:16px;border-radius:8px;color:white;background:#3575dd;}
-  .bb {display:flex;flex-direction:column;padding:16px;border-radius:8px;color:white;background:#2f68c5;}
-  .bc {display:flex;flex-direction:column;padding:16px;border-radius:8px;color:white;background:#295bac;}
-  .bd {display:flex;flex-direction:column;padding:16px;border-radius:8px;background:#3b82f633;}
-  .be {display:flex;flex-direction:column;padding:16px;border-radius:8px;background:#9861aa;}
-  .bf {border-collapse:collapse;width:100%;}
-  .bg {text-align:left;color:var(--muted);font-size:13px;}
-  .bh {padding:8px;}
-  .bi {border-top:1px solid var(--line);}
-  .bj {padding:8px;font-weight:600;}
-  .bk {padding:8px;color:#10b981;}
-  .bl {padding:8px;color:var(--muted);}
-  .bm {display:flex;flex-direction:row;gap:4px;}
-  .bn {background:white;border:1px solid var(--line);border-radius:8px;padding:4px 10px;}
-  .bo {color:var(--muted);font-style:italic;}
-  .bp {display:flex;flex-direction:row;gap:24px;flex-wrap:wrap;align-items:flex-start;}
-  .bq {display:flex;flex-direction:column;padding:16px;background:white;border:1px solid var(--line);border-radius:8px;gap:8px;flex:1 1 280px;}
-  .br {font-weight:600;}
-  .bs {padding:10px;border:1px solid var(--line);border-radius:6px;}
-  .bt {padding:10px;border-radius:6px;}
-  .bu {padding:10px;border:0;border-radius:6px;background:var(--brand);color:white;font-weight:700;cursor:pointer;}
-  .bv {display:flex;flex-direction:column;gap:8px;flex:1 1 280px;}
-  .bx {font-weight:600;cursor:pointer;}
-  .by {margin:0;color:var(--muted);padding-block-start:8px;}
-  .bz {padding:16px;background:white;border:1px solid var(--line);border-radius:8px;cursor:pointer;}
-  .b0 {display:flex;flex-direction:column;padding:16px;background:white;border:1px solid var(--line);border-radius:8px;max-width:320px;}
-  .b1 {display:flex;flex-direction:row;gap:8px;align-items:center;font-size:14px;color:var(--muted);}
-  .b2 {display:flex;flex-direction:column;margin:0;gap:4px;}
-  .b3 {border-radius:8px;width:100%;}
-  .b4 {display:flex;flex-direction:row;gap:8px;padding-block:24px;color:var(--muted);font-size:14px;}
-  .an:hover {background:#eff6ff;border-color:var(--brand);}
-  .bu:hover {background:#3575dd;}
-  .b5:hover {color:var(--brand);}
-  .ap::before {content:"→ ";color:var(--brand);}
-  .aq > * {padding:4px 8px;}
-  .ar:first-child {font-weight:700;}
-  .ar:nth-child(odd) {background:var(--subtle);}
-  .as:has(input:checked) {border-color:var(--brand);background:#eff6ff;}
-  .bs:focus {outline:2px solid solid var(--brand);}
-  .bs:invalid {border-color:#ef4444;}
+  .a {color:var(--ink);line-height:1.5;}
+  .b {display:flex;flex-direction:column;width:100%;max-width:960px;padding:24px;margin-left:auto;margin-right:auto;}
+  .c {display:flex;flex-direction:column;gap:8px;padding-block:24px;animation:rise 0.4s ease;}
+  .d {font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;}
+  .e {margin:0;font-size:44px;line-height:1.1;letter-spacing:-1px;}
+  .f {margin:0;font-size:18px;color:var(--muted);max-width:620px;}
+  .g {font-weight:700;color:var(--brand);}
+  .h {font-family:ui-monospace,monospace;}
+  .i {display:flex;flex-direction:column;gap:16px;padding-block:24px;border-top:1px solid var(--line);}
+  .j {display:flex;flex-direction:row;gap:8px;align-items:baseline;}
+  .k {color:var(--brand);font-weight:700;}
+  .l {margin:0;font-size:26px;}
+  .m {margin:0;}
+  .n {display:flex;flex-direction:row;gap:8px;flex-wrap:wrap;}
+  .o {display:flex;flex-direction:column;padding:16px;background:white;border:1px solid var(--line);border-radius:8px;flex:1;min-width:0;}
+  .p {display:flex;flex-direction:column;padding:16px;background:white;border:1px solid var(--line);border-radius:8px;width:160px;}
+  .q {display:flex;flex-direction:row;padding:16px;background:white;border:1px solid var(--line);border-radius:8px;gap:8px;align-items:center;}
+  .r {font-weight:700;}
+  .s {display:flex;flex-direction:column;flex:1;}
+  .t {display:flex;flex-direction:column;gap:8px;}
+  .u {display:flex;flex-direction:column;padding:16px;background:white;border:1px solid var(--line);border-radius:8px;width:100%;}
+  .v {display:flex;flex-direction:row;gap:8px;height:120px;}
+  .w {display:flex;flex-direction:column;padding:16px;background:white;border:1px solid var(--line);border-radius:8px;margin-bottom:auto;}
+  .x {display:flex;flex-direction:column;padding:16px;background:white;border:1px solid var(--line);border-radius:8px;margin-top:auto;margin-bottom:auto;}
+  .y {display:flex;flex-direction:column;padding:16px;background:white;border:1px solid var(--line);border-radius:8px;margin-top:auto;}
+  .z {display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
+  .aa {display:flex;flex-direction:column;padding:16px;background:white;border:1px solid var(--line);border-radius:8px;text-align:center;grid-column:span 2;}
+  .ab {display:flex;flex-direction:column;padding:16px;background:white;border:1px solid var(--line);border-radius:8px;text-align:center;}
+  .ac {position:relative;isolation:isolate;display:flex;flex-direction:column;padding:16px;background:white;border:1px solid var(--line);border-radius:8px;height:120px;overflow:hidden;}
+  .ad {display:flex;flex-direction:column;position:absolute;inset:0;z-index:-1;}
+  .ae {display:flex;flex-direction:column;background:linear-gradient(135deg, #dbeafe, #fae8ff);flex:1;min-height:0;justify-content:flex-end;padding:8px;}
+  .af {display:flex;flex-direction:column;position:absolute;inset:0;}
+  .ag {padding:8px;font-size:12px;color:var(--muted);margin-left:auto;margin-top:auto;}
+  .ah {margin:0;max-width:640px;}
+  .ai {color:var(--brand);text-decoration:underline;}
+  .aj {font-family:ui-monospace,monospace;padding:1px 6px;border:1px solid var(--line);border-radius:4px;}
+  .ak {display:flex;flex-direction:column;padding:12px 20px;background:var(--brand);border-radius:8px;margin-right:auto;}
+  .al {color:white;font-weight:700;}
+  .am {display:flex;flex-direction:column;margin:0;padding-inline-start:16px;border-left:3px solid var(--brand);color:var(--muted);font-style:italic;}
+  .an {display:flex;flex-direction:column;padding:16px;background:white;border:1px solid var(--line);border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.1), 0 8px 24px rgba(0,0,0,0.08);transform:rotate(-2deg);}
+  .ao {display:flex;flex-direction:column;padding:16px;background:white;border:1px solid var(--line);border-radius:8px;transition:all 0.15s ease;cursor:pointer;}
+  .ap,.aq,.at,.bx {display:flex;flex-direction:column;padding:16px;background:white;border:1px solid var(--line);border-radius:8px;}
+  .ar {display:flex;flex-direction:column;margin:0;padding-left:0;list-style:none;padding:16px;background:white;border:1px solid var(--line);border-radius:8px;gap:4px;}
+  .as {display:flex;flex-direction:column;border-radius:4px;}
+  .au {cursor:pointer;}
+  .av {margin-inline-end:8px;}
+  .aw {font-family:ui-monospace,monospace;padding:1px 6px;border:1px solid var(--line);border-radius:4px;font-size:13px;}
+  .ax {display:flex;flex-direction:column;padding:16px;background:white;border:1px solid var(--line);border-radius:8px;gap:4px;flex:1 1 160px;}
+  .ay {font-size:32px;font-weight:800;color:var(--brand);}
+  .az {color:var(--muted);}
+  .a0 {font-size:32px;font-weight:800;color:#10b981;}
+  .a1 {display:flex;flex-direction:column;padding:16px;border:1px solid var(--line);border-radius:8px;gap:4px;flex:1 1 160px;background:var(--subtle);}
+  .a2 {font-size:32px;font-weight:800;color:#a855f7;}
+  .a3 {display:flex;flex-direction:column;padding:16px;background:white;border:1px solid var(--line);border-radius:8px;gap:8px;}
+  .a4 {display:flex;flex-direction:row;align-items:center;}
+  .a5 {margin:0;font-size:18px;}
+  .a6 {color:var(--brand);font-size:14px;}
+  .a7 {font-size:13px;color:var(--muted);}
+  .a8 {display:flex;flex-direction:row;gap:8px;}
+  .a9 {display:flex;flex-direction:row;gap:6px;padding:2px 10px;border-radius:999px;background:var(--subtle);font-size:13px;}
+  .ba {display:flex;flex-direction:column;padding:16px;border-radius:8px;color:white;background:#3b82f6;}
+  .bb {display:flex;flex-direction:column;padding:16px;border-radius:8px;color:white;background:#3575dd;}
+  .bc {display:flex;flex-direction:column;padding:16px;border-radius:8px;color:white;background:#2f68c5;}
+  .bd {display:flex;flex-direction:column;padding:16px;border-radius:8px;color:white;background:#295bac;}
+  .be {display:flex;flex-direction:column;padding:16px;border-radius:8px;background:#3b82f633;}
+  .bf {display:flex;flex-direction:column;padding:16px;border-radius:8px;background:#9861aa;}
+  .bg {border-collapse:collapse;width:100%;}
+  .bh {text-align:left;color:var(--muted);font-size:13px;}
+  .bi {padding:8px;}
+  .bj {border-top:1px solid var(--line);}
+  .bk {padding:8px;font-weight:600;}
+  .bl {padding:8px;color:#10b981;}
+  .bm {padding:8px;color:var(--muted);}
+  .bn {display:flex;flex-direction:row;gap:4px;}
+  .bo {background:white;border:1px solid var(--line);border-radius:8px;padding:4px 10px;}
+  .bp {color:var(--muted);font-style:italic;}
+  .bq {display:flex;flex-direction:row;gap:24px;flex-wrap:wrap;align-items:flex-start;}
+  .br {display:flex;flex-direction:column;padding:16px;background:white;border:1px solid var(--line);border-radius:8px;gap:8px;flex:1 1 280px;}
+  .bs {font-weight:600;}
+  .bt {padding:10px;border:1px solid var(--line);border-radius:6px;}
+  .bu {padding:10px;border-radius:6px;}
+  .bv {padding:10px;border:0;border-radius:6px;background:var(--brand);color:white;font-weight:700;cursor:pointer;}
+  .bw {display:flex;flex-direction:column;gap:8px;flex:1 1 280px;}
+  .by {font-weight:600;cursor:pointer;}
+  .bz {margin:0;color:var(--muted);padding-block-start:8px;}
+  .b0 {padding:16px;background:white;border:1px solid var(--line);border-radius:8px;cursor:pointer;}
+  .b1 {display:flex;flex-direction:column;padding:16px;background:white;border:1px solid var(--line);border-radius:8px;max-width:320px;}
+  .b2 {display:flex;flex-direction:row;gap:8px;align-items:center;font-size:14px;color:var(--muted);}
+  .b3 {display:flex;flex-direction:column;margin:0;gap:4px;}
+  .b4 {border-radius:8px;width:100%;}
+  .b5 {display:flex;flex-direction:row;gap:8px;padding-block:24px;color:var(--muted);font-size:14px;}
+  .ao:hover {background:#eff6ff;border-color:var(--brand);}
+  .bv:hover {background:#3575dd;}
+  .b6:hover {color:var(--brand);}
+  .aq::before {content:"→ ";color:var(--brand);}
+  .ar > * {padding:4px 8px;}
+  .as:first-child {font-weight:700;}
+  .as:nth-child(odd) {background:var(--subtle);}
+  .at:has(input:checked) {border-color:var(--brand);background:#eff6ff;}
+  .bt:focus {outline:2px solid solid var(--brand);}
+  .bt:invalid {border-color:#ef4444;}
 @media (min-width: 768px) {
-  :where(.s)>.t {width:auto;flex:1;min-width:0;}
-  .s {flex-direction:row;}
-  .ao {background:#ecfdf5;}
+  :where(.t)>.u {width:auto;flex:1;min-width:0;}
+  .t {flex-direction:row;}
+  .ap {background:#ecfdf5;}
 }
 @media (prefers-color-scheme: dark) {
   .a {background:#030712;color:#e5e7eb;}
-  .n,.o,.p,.t,.v,.w,.x,.z,.aa,.ab,.am,.an,.ap,.aq,.as,.aw,.a0,.a2,.bn,.bq,.bw,.bz,.b0 {background:#111827;border-color:#1f2937;}
-  .ao {border-color:#1f2937;background:#064e3b;}
+  .o,.p,.q,.u,.w,.x,.y,.aa,.ab,.ac,.an,.ao,.aq,.ar,.at,.ax,.a1,.a3,.bo,.br,.bx,.b0,.b1 {background:#111827;border-color:#1f2937;}
+  .ap {border-color:#1f2937;background:#064e3b;}
 }
 @media print {
-  .b4 {display:none;}
+  .b5 {display:none;}
 }
 }
 @keyframes rise {
@@ -147,531 +148,541 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 }
 </style>
 </head>
-<body>
-<!-- @el line 46 -->
-<div class="a" data-hl-line="46" data-hl-el="el">
-  <!-- @header line 55 -->
-  <header class="b" data-hl-line="55" data-hl-el="header">
-    <!-- @text line 56 -->
-    <span class="c" data-hl-line="56" data-hl-el="text">
+<body class="a">
+<!-- @el line 52 -->
+<div class="b" data-hl-line="52" data-hl-el="el">
+  <!-- @header line 53 -->
+  <header class="c" data-hl-line="53" data-hl-el="header">
+    <!-- @text line 54 -->
+    <span class="d" data-hl-line="54" data-hl-el="text">
 A one-page tour    </span>
-    <!-- @h1 line 57 -->
-    <h1 class="d" data-hl-line="57" data-hl-el="h1">
+    <!-- @h1 line 55 -->
+    <h1 class="e" data-hl-line="55" data-hl-el="h1">
 Welcome to htmlang    </h1>
-    <!-- @paragraph line 58 -->
-    <p class="e" data-hl-line="58" data-hl-el="paragraph">
-A small layout language that compiles to       <!-- @text line 60 -->
-      <span class="f" data-hl-line="60" data-hl-el="text">
-one static HTML file      </span>. Structure starts with       <!-- @code line 61 -->
-      <code class="g" data-hl-line="61" data-hl-el="code">
+    <!-- @paragraph line 56 -->
+    <p class="f" data-hl-line="56" data-hl-el="paragraph">
+A small layout language that compiles to       <!-- @text line 58 -->
+      <span class="g" data-hl-line="58" data-hl-el="text">
+one static HTML file      </span>. Structure starts with       <!-- @code line 59 -->
+      <code class="h" data-hl-line="59" data-hl-el="code">
 @      </code>, everything else is content.    </p>
   </header>
-  <!-- @section line 64 -->
-  <section class="h" data-hl-line="64" data-hl-el="section">
-    <!-- @row line 64 -->
-    <div class="i" data-hl-line="64" data-hl-el="row">
-      <!-- @text line 64 -->
-      <span class="j" data-hl-line="64" data-hl-el="text">
+  <!-- @section line 62 -->
+  <section class="i" data-hl-line="62" data-hl-el="section">
+    <!-- @row line 62 -->
+    <div class="j" data-hl-line="62" data-hl-el="row">
+      <!-- @text line 62 -->
+      <span class="k" data-hl-line="62" data-hl-el="text">
 1.      </span>
-      <!-- @h2 line 64 -->
-      <h2 class="k" data-hl-line="64" data-hl-el="h2">
+      <!-- @h2 line 62 -->
+      <h2 class="l" data-hl-line="62" data-hl-el="h2">
 Layout      </h2>
     </div>
-    <!-- @paragraph line 65 -->
-    <p class="l" data-hl-line="65" data-hl-el="paragraph">
-      <!-- @code line 66 -->
-      <code class="g" data-hl-line="66" data-hl-el="code">
-@el      </code> stacks its children in a column and       <!-- @code line 66 -->
-      <code class="g" data-hl-line="66" data-hl-el="code">
-@row      </code> lays them out side by side.       <!-- @code line 67 -->
-      <code class="g" data-hl-line="67" data-hl-el="code">
-spacing      </code> is the gap between children.       <!-- @code line 68 -->
-      <code class="g" data-hl-line="68" data-hl-el="code">
-flex-direction row      </code> makes any column a row, also from a width up (      <!-- @code line 69 -->
-      <code class="g" data-hl-line="69" data-hl-el="code">
-md:flex-direction row      </code>), and the children's       <!-- @code line 70 -->
-      <code class="g" data-hl-line="70" data-hl-el="code">
+    <!-- @paragraph line 63 -->
+    <p class="m" data-hl-line="63" data-hl-el="paragraph">
+      <!-- @code line 64 -->
+      <code class="h" data-hl-line="64" data-hl-el="code">
+@el      </code> stacks its children in a column and       <!-- @code line 64 -->
+      <code class="h" data-hl-line="64" data-hl-el="code">
+@row      </code> lays them out side by side.       <!-- @code line 65 -->
+      <code class="h" data-hl-line="65" data-hl-el="code">
+spacing      </code> is the gap between children.       <!-- @code line 66 -->
+      <code class="h" data-hl-line="66" data-hl-el="code">
+flex-direction row      </code> makes any column a row, also from a width up (      <!-- @code line 67 -->
+      <code class="h" data-hl-line="67" data-hl-el="code">
+md:flex-direction row      </code>), and the children's       <!-- @code line 68 -->
+      <code class="h" data-hl-line="68" data-hl-el="code">
 width fill      </code> follows it.    </p>
-    <!-- @row line 71 -->
-    <div class="m" data-hl-line="71" data-hl-el="row">
-      <!-- @el line 72 -->
-      <div class="n" data-hl-line="72" data-hl-el="el">
+    <!-- @row line 69 -->
+    <div class="n" data-hl-line="69" data-hl-el="row">
+      <!-- @el line 70 -->
+      <div class="o" data-hl-line="70" data-hl-el="el">
         <span>width fill</span>
       </div>
-      <!-- @el line 73 -->
-      <div class="n" data-hl-line="73" data-hl-el="el">
+      <!-- @el line 71 -->
+      <div class="o" data-hl-line="71" data-hl-el="el">
         <span>shares the row</span>
       </div>
-      <!-- @el line 74 -->
-      <div class="o" data-hl-line="74" data-hl-el="el">
+      <!-- @el line 72 -->
+      <div class="p" data-hl-line="72" data-hl-el="el">
         <span>width 160</span>
       </div>
     </div>
-    <!-- @row line 75 -->
-    <div class="p" data-hl-line="75" data-hl-el="row">
-      <!-- @text line 76 -->
-      <span class="q" data-hl-line="76" data-hl-el="text">
+    <!-- @row line 73 -->
+    <div class="q" data-hl-line="73" data-hl-el="row">
+      <!-- @text line 74 -->
+      <span class="r" data-hl-line="74" data-hl-el="text">
 Logo      </span>
-      <!-- @el line 77 -->
-      <div class="r" data-hl-line="77" data-hl-el="el">
+      <!-- @el line 75 -->
+      <div class="s" data-hl-line="75" data-hl-el="el">
       </div>
-      <!-- @text line 78 -->
-      <span data-hl-line="78" data-hl-el="text">
+      <!-- @text line 76 -->
+      <span data-hl-line="76" data-hl-el="text">
 @spacer pushes this to the end      </span>
     </div>
-    <!-- @el line 79 -->
-    <div class="s" data-hl-line="79" data-hl-el="el">
-      <!-- @el line 80 -->
-      <div class="t" data-hl-line="80" data-hl-el="el">
+    <!-- @el line 77 -->
+    <div class="t" data-hl-line="77" data-hl-el="el">
+      <!-- @el line 78 -->
+      <div class="u" data-hl-line="78" data-hl-el="el">
         <span>Stacked on a phone</span>
       </div>
-      <!-- @el line 81 -->
-      <div class="t" data-hl-line="81" data-hl-el="el">
+      <!-- @el line 79 -->
+      <div class="u" data-hl-line="79" data-hl-el="el">
         <span>side by side from md up</span>
       </div>
     </div>
-    <!-- @row line 82 -->
-    <div class="u" data-hl-line="82" data-hl-el="row">
-      <!-- @el line 83 -->
-      <div class="v" data-hl-line="83" data-hl-el="el">
+    <!-- @row line 80 -->
+    <div class="v" data-hl-line="80" data-hl-el="row">
+      <!-- @el line 81 -->
+      <div class="w" data-hl-line="81" data-hl-el="el">
         <span>align-top</span>
       </div>
-      <!-- @el line 84 -->
-      <div class="w" data-hl-line="84" data-hl-el="el">
+      <!-- @el line 82 -->
+      <div class="x" data-hl-line="82" data-hl-el="el">
         <span>center-y</span>
       </div>
-      <!-- @el line 85 -->
-      <div class="x" data-hl-line="85" data-hl-el="el">
+      <!-- @el line 83 -->
+      <div class="y" data-hl-line="83" data-hl-el="el">
         <span>align-bottom</span>
       </div>
     </div>
-    <!-- @grid line 86 -->
-    <div class="y" data-hl-line="86" data-hl-el="grid">
-      <!-- @el line 88 -->
-      <div class="z" data-hl-line="88" data-hl-el="el">
+    <!-- @grid line 84 -->
+    <div class="z" data-hl-line="84" data-hl-el="grid">
+      <!-- @el line 86 -->
+      <div class="aa" data-hl-line="86" data-hl-el="el">
         <span>Cell 1</span>
       </div>
-      <!-- @el line 88 -->
-      <div class="aa" data-hl-line="88" data-hl-el="el">
+      <!-- @el line 86 -->
+      <div class="ab" data-hl-line="86" data-hl-el="el">
         <span>Cell 2</span>
       </div>
-      <!-- @el line 88 -->
-      <div class="aa" data-hl-line="88" data-hl-el="el">
+      <!-- @el line 86 -->
+      <div class="ab" data-hl-line="86" data-hl-el="el">
         <span>Cell 3</span>
       </div>
-      <!-- @el line 88 -->
-      <div class="aa" data-hl-line="88" data-hl-el="el">
+      <!-- @el line 86 -->
+      <div class="ab" data-hl-line="86" data-hl-el="el">
         <span>Cell 4</span>
       </div>
-      <!-- @el line 88 -->
-      <div class="aa" data-hl-line="88" data-hl-el="el">
+      <!-- @el line 86 -->
+      <div class="ab" data-hl-line="86" data-hl-el="el">
         <span>Cell 5</span>
       </div>
-      <!-- @el line 88 -->
-      <div class="aa" data-hl-line="88" data-hl-el="el">
+      <!-- @el line 86 -->
+      <div class="ab" data-hl-line="86" data-hl-el="el">
         <span>Cell 6</span>
       </div>
     </div>
-    <!-- @el line 89 -->
-    <div class="ab" data-hl-line="89" data-hl-el="el">
-      <!-- @behind line 90 -->
-      <div class="ac" data-hl-line="90" data-hl-el="behind">
-        <!-- @el line 91 -->
-        <div class="ad" data-hl-line="91" data-hl-el="el">
+    <!-- @el line 87 -->
+    <div class="ac" data-hl-line="87" data-hl-el="el">
+      <!-- @behind line 88 -->
+      <div class="ad" data-hl-line="88" data-hl-el="behind">
+        <!-- @el line 89 -->
+        <div class="ae" data-hl-line="89" data-hl-el="el">
           <span>(behind)</span>
         </div>
       </div>
-      <!-- @text line 92 -->
-      <span class="q" data-hl-line="92" data-hl-el="text">
+      <!-- @text line 90 -->
+      <span class="r" data-hl-line="90" data-hl-el="text">
 @in-front and @behind layer content      </span>
-      <!-- @in-front line 93 -->
-      <div class="ae" data-hl-line="93" data-hl-el="in-front">
-        <!-- @text line 94 -->
-        <span class="af" data-hl-line="94" data-hl-el="text">
+      <!-- @in-front line 91 -->
+      <div class="af" data-hl-line="91" data-hl-el="in-front">
+        <!-- @text line 92 -->
+        <span class="ag" data-hl-line="92" data-hl-el="text">
 painted on top        </span>
       </div>
     </div>
   </section>
-  <!-- @section line 97 -->
-  <section class="h" data-hl-line="97" data-hl-el="section">
-    <!-- @row line 97 -->
-    <div class="i" data-hl-line="97" data-hl-el="row">
-      <!-- @text line 97 -->
-      <span class="j" data-hl-line="97" data-hl-el="text">
+  <!-- @section line 95 -->
+  <section class="i" data-hl-line="95" data-hl-el="section">
+    <!-- @row line 95 -->
+    <div class="j" data-hl-line="95" data-hl-el="row">
+      <!-- @text line 95 -->
+      <span class="k" data-hl-line="95" data-hl-el="text">
 2.      </span>
-      <!-- @h2 line 97 -->
-      <h2 class="k" data-hl-line="97" data-hl-el="h2">
+      <!-- @h2 line 95 -->
+      <h2 class="l" data-hl-line="95" data-hl-el="h2">
 Text      </h2>
     </div>
-    <!-- @paragraph line 98 -->
-    <p class="ag" data-hl-line="98" data-hl-el="paragraph">
-Lines without an       <!-- @code line 99 -->
-      <code class="g" data-hl-line="99" data-hl-el="code">
-@      </code> are text. Braces put elements inside a line:       <!-- @b line 100 -->
-      <b data-hl-line="100" data-hl-el="b">
-bold      </b>,       <!-- @i line 100 -->
-      <i data-hl-line="100" data-hl-el="i">
-italic      </i>,       <!-- @strong line 100 -->
-      <strong data-hl-line="100" data-hl-el="strong">
-important      </strong>, H      <!-- @sub line 100 -->
-      <sub data-hl-line="100" data-hl-el="sub">
-2      </sub>O,       <!-- @mark line 101 -->
-      <mark data-hl-line="101" data-hl-el="mark">
-highlighted      </mark>,       <!-- @link line 101 -->
-      <a href="https://example.com" class="ah" data-hl-line="101" data-hl-el="link">
-a link      </a>, and       <!-- @kbd line 102 -->
-      <kbd class="ai" data-hl-line="102" data-hl-el="kbd">
+    <!-- @paragraph line 96 -->
+    <p class="ah" data-hl-line="96" data-hl-el="paragraph">
+Lines without an       <!-- @code line 97 -->
+      <code class="h" data-hl-line="97" data-hl-el="code">
+@      </code> are text. Braces put elements inside a line:       <!-- @b line 98 -->
+      <b data-hl-line="98" data-hl-el="b">
+bold      </b>,       <!-- @i line 98 -->
+      <i data-hl-line="98" data-hl-el="i">
+italic      </i>,       <!-- @strong line 98 -->
+      <strong data-hl-line="98" data-hl-el="strong">
+important      </strong>, H      <!-- @sub line 98 -->
+      <sub data-hl-line="98" data-hl-el="sub">
+2      </sub>O,       <!-- @mark line 99 -->
+      <mark data-hl-line="99" data-hl-el="mark">
+highlighted      </mark>,       <!-- @link line 99 -->
+      <a href="https://example.com" class="ai" data-hl-line="99" data-hl-el="link">
+a link      </a>, and       <!-- @kbd line 100 -->
+      <kbd class="aj" data-hl-line="100" data-hl-el="kbd">
 Ctrl+K      </kbd>.    </p>
-    <!-- @paragraph line 103 -->
-    <p class="l" data-hl-line="103" data-hl-el="paragraph">
+    <!-- @paragraph line 101 -->
+    <p class="m" data-hl-line="101" data-hl-el="paragraph">
 A backslash escapes: @ at the start of a line, $price, and {braces}.    </p>
-    <!-- @el line 106 -->
-    <div class="aj" data-hl-line="106" data-hl-el="el">
-      <!-- @link line 106 -->
-      <a href="/start" data-hl-line="106" data-hl-el="link">
-        <!-- @text line 107 -->
-        <span class="ak" data-hl-line="107" data-hl-el="text">
+    <!-- @el line 104 -->
+    <div class="ak" data-hl-line="104" data-hl-el="el">
+      <!-- @link line 104 -->
+      <a href="/start" data-hl-line="104" data-hl-el="link">
+        <!-- @text line 105 -->
+        <span class="al" data-hl-line="105" data-hl-el="text">
 Get started        </span>
       </a>
     </div>
-    <!-- @blockquote line 108 -->
-    <blockquote class="al" data-hl-line="108" data-hl-el="blockquote">
+    <!-- @blockquote line 106 -->
+    <blockquote class="am" data-hl-line="106" data-hl-el="blockquote">
       <span>Layout is code. Style is code. Everything should compose.</span>
-      <!-- @cite line 110 -->
-      <cite data-hl-line="110" data-hl-el="cite">
+      <!-- @cite line 108 -->
+      <cite data-hl-line="108" data-hl-el="cite">
 — Anonymous      </cite>
     </blockquote>
   </section>
-  <!-- @section line 113 -->
-  <section class="h" data-hl-line="113" data-hl-el="section">
-    <!-- @row line 113 -->
-    <div class="i" data-hl-line="113" data-hl-el="row">
-      <!-- @text line 113 -->
-      <span class="j" data-hl-line="113" data-hl-el="text">
+  <!-- @section line 111 -->
+  <section class="i" data-hl-line="111" data-hl-el="section">
+    <!-- @row line 111 -->
+    <div class="j" data-hl-line="111" data-hl-el="row">
+      <!-- @text line 111 -->
+      <span class="k" data-hl-line="111" data-hl-el="text">
 3.      </span>
-      <!-- @h2 line 113 -->
-      <h2 class="k" data-hl-line="113" data-hl-el="h2">
+      <!-- @h2 line 111 -->
+      <h2 class="l" data-hl-line="111" data-hl-el="h2">
 Style      </h2>
     </div>
-    <!-- @paragraph line 114 -->
-    <p class="l" data-hl-line="114" data-hl-el="paragraph">
+    <!-- @paragraph line 112 -->
+    <p class="m" data-hl-line="112" data-hl-el="paragraph">
 Besides the layout attributes, every attribute is a CSS property with its CSS name and value. A bare number is pixels for lengths, and \, keeps a comma in a value.    </p>
-    <!-- @row line 117 -->
-    <div class="m" data-hl-line="117" data-hl-el="row">
-      <!-- @el line 118 -->
-      <div class="am" data-hl-line="118" data-hl-el="el">
+    <!-- @row line 115 -->
+    <div class="n" data-hl-line="115" data-hl-el="row">
+      <!-- @el line 116 -->
+      <div class="an" data-hl-line="116" data-hl-el="el">
         <span>Any CSS property</span>
       </div>
-      <!-- @el line 119 -->
-      <div class="an" data-hl-line="119" data-hl-el="el">
+      <!-- @el line 117 -->
+      <div class="ao" data-hl-line="117" data-hl-el="el">
         <span>hover:</span>
       </div>
-      <!-- @el line 120 -->
-      <div class="ao" data-hl-line="120" data-hl-el="el">
+      <!-- @el line 118 -->
+      <div class="ap" data-hl-line="118" data-hl-el="el">
         <span>md: and dark:</span>
       </div>
-      <!-- @el line 121 -->
-      <div class="ap" data-hl-line="121" data-hl-el="el">
+      <!-- @el line 119 -->
+      <div class="aq" data-hl-line="119" data-hl-el="el">
         <span>before:</span>
       </div>
     </div>
-    <!-- @ul line 122 -->
-    <ul class="aq" data-hl-line="122" data-hl-el="ul">
-      <!-- @li line 124 -->
-      <li class="ar" data-hl-line="124" data-hl-el="li">
+    <!-- @ul line 120 -->
+    <ul class="ar" data-hl-line="120" data-hl-el="ul">
+      <!-- @li line 122 -->
+      <li class="as" data-hl-line="122" data-hl-el="li">
         <span>first: bolds this one</span>
       </li>
-      <!-- @li line 124 -->
-      <li class="ar" data-hl-line="124" data-hl-el="li">
+      <!-- @li line 122 -->
+      <li class="as" data-hl-line="122" data-hl-el="li">
         <span>odd: shades every other row</span>
       </li>
-      <!-- @li line 124 -->
-      <li class="ar" data-hl-line="124" data-hl-el="li">
+      <!-- @li line 122 -->
+      <li class="as" data-hl-line="122" data-hl-el="li">
         <span>children: pads them all</span>
       </li>
     </ul>
-    <!-- @el line 125 -->
-    <div class="as" data-hl-line="125" data-hl-el="el">
-      <!-- @label line 126 -->
-      <label class="at" data-hl-line="126" data-hl-el="label">
-        <!-- @input line 127 -->
-        <input class="au" type="checkbox" data-hl-line="127" data-hl-el="input">
+    <!-- @el line 123 -->
+    <div class="at" data-hl-line="123" data-hl-el="el">
+      <!-- @label line 124 -->
+      <label class="au" data-hl-line="124" data-hl-el="label">
+        <!-- @input line 125 -->
+        <input class="av" type="checkbox" data-hl-line="125" data-hl-el="input">
  Tick the box: has() styles the card around it      </label>
     </div>
   </section>
-  <!-- @section line 164 -->
-  <section class="h" data-hl-line="164" data-hl-el="section">
-    <!-- @row line 164 -->
-    <div class="i" data-hl-line="164" data-hl-el="row">
-      <!-- @text line 164 -->
-      <span class="j" data-hl-line="164" data-hl-el="text">
+  <!-- @section line 162 -->
+  <section class="i" data-hl-line="162" data-hl-el="section">
+    <!-- @row line 162 -->
+    <div class="j" data-hl-line="162" data-hl-el="row">
+      <!-- @text line 162 -->
+      <span class="k" data-hl-line="162" data-hl-el="text">
 4.      </span>
-      <!-- @h2 line 164 -->
-      <h2 class="k" data-hl-line="164" data-hl-el="h2">
+      <!-- @h2 line 162 -->
+      <h2 class="l" data-hl-line="162" data-hl-el="h2">
 Functions      </h2>
     </div>
-    <!-- @paragraph line 165 -->
-    <p class="l" data-hl-line="165" data-hl-el="paragraph">
-Functions are       <!-- @code line 166 -->
-      <code class="g" data-hl-line="166" data-hl-el="code">
+    <!-- @paragraph line 163 -->
+    <p class="m" data-hl-line="163" data-hl-el="paragraph">
+Functions are       <!-- @code line 164 -->
+      <code class="h" data-hl-line="164" data-hl-el="code">
 @let @name      </code> with a body. Their parameters are listed and passed like attributes, a name alone passes true, and a body can be text like this one.    </p>
-    <!-- @paragraph line 167 -->
-    <p class="l" data-hl-line="167" data-hl-el="paragraph">
-A call works wherever an element does, even inside a sentence: press       <!-- @kbd line 169 -->
-      <kbd class="av" data-hl-line="169" data-hl-el="kbd">
-Ctrl      </kbd>       <!-- @kbd line 169 -->
-      <kbd class="av" data-hl-line="169" data-hl-el="kbd">
+    <!-- @paragraph line 165 -->
+    <p class="m" data-hl-line="165" data-hl-el="paragraph">
+A call works wherever an element does, even inside a sentence: press       <!-- @kbd line 167 -->
+      <kbd class="aw" data-hl-line="167" data-hl-el="kbd">
+Ctrl      </kbd>       <!-- @kbd line 167 -->
+      <kbd class="aw" data-hl-line="167" data-hl-el="kbd">
 K      </kbd> to search.    </p>
-    <!-- @row line 170 -->
-    <div class="m" data-hl-line="170" data-hl-el="row">
-      <!-- @el line 171 -->
-      <div class="aw" data-hl-line="171" data-hl-el="el">
-        <!-- @text line 171 -->
-        <span class="ax" data-hl-line="171" data-hl-el="text">
+    <!-- @row line 168 -->
+    <div class="n" data-hl-line="168" data-hl-el="row">
+      <!-- @el line 169 -->
+      <div class="ax" data-hl-line="169" data-hl-el="el">
+        <!-- @text line 169 -->
+        <span class="ay" data-hl-line="169" data-hl-el="text">
 1        </span>
-        <!-- @text line 171 -->
-        <span class="ay" data-hl-line="171" data-hl-el="text">
+        <!-- @text line 169 -->
+        <span class="az" data-hl-line="169" data-hl-el="text">
 output file        </span>
       </div>
-      <!-- @el line 172 -->
-      <div class="aw" data-hl-line="172" data-hl-el="el">
-        <!-- @text line 172 -->
-        <span class="az" data-hl-line="172" data-hl-el="text">
+      <!-- @el line 170 -->
+      <div class="ax" data-hl-line="170" data-hl-el="el">
+        <!-- @text line 170 -->
+        <span class="a0" data-hl-line="170" data-hl-el="text">
 0        </span>
-        <!-- @text line 172 -->
-        <span class="ay" data-hl-line="172" data-hl-el="text">
+        <!-- @text line 170 -->
+        <span class="az" data-hl-line="170" data-hl-el="text">
 lines of JavaScript        </span>
       </div>
-      <!-- @el line 173 -->
-      <div class="a0" data-hl-line="173" data-hl-el="el">
-        <!-- @text line 173 -->
-        <span class="a1" data-hl-line="173" data-hl-el="text">
+      <!-- @el line 171 -->
+      <div class="a1" data-hl-line="171" data-hl-el="el">
+        <!-- @text line 171 -->
+        <span class="a2" data-hl-line="171" data-hl-el="text">
 ∞        </span>
-        <!-- @text line 173 -->
-        <span class="ay" data-hl-line="173" data-hl-el="text">
+        <!-- @text line 171 -->
+        <span class="az" data-hl-line="171" data-hl-el="text">
 components        </span>
       </div>
     </div>
-    <!-- @article line 174 -->
-    <article class="a2" data-hl-line="174" data-hl-el="article">
-      <!-- @row line 174 -->
-      <div class="a3" data-hl-line="174" data-hl-el="row">
-        <!-- @h3 line 174 -->
-        <h3 class="a4" data-hl-line="174" data-hl-el="h3">
+    <!-- @article line 172 -->
+    <article class="a3" data-hl-line="172" data-hl-el="article">
+      <!-- @row line 172 -->
+      <div class="a4" data-hl-line="172" data-hl-el="row">
+        <!-- @h3 line 172 -->
+        <h3 class="a5" data-hl-line="172" data-hl-el="h3">
 Named slots        </h3>
-        <!-- @el line 174 -->
-        <div class="r" data-hl-line="174" data-hl-el="el">
+        <!-- @el line 172 -->
+        <div class="s" data-hl-line="172" data-hl-el="el">
         </div>
-        <!-- @link line 176 -->
-        <a href="/edit" class="a5" data-hl-line="176" data-hl-el="link">
+        <!-- @link line 174 -->
+        <a href="/edit" class="a6" data-hl-line="174" data-hl-el="link">
 Edit        </a>
       </div>
-      <!-- @paragraph line 177 -->
-      <p class="l" data-hl-line="177" data-hl-el="paragraph">
-Children fill         <!-- @code line 178 -->
-        <code class="g" data-hl-line="178" data-hl-el="code">
-@children        </code>;         <!-- @code line 178 -->
-        <code class="g" data-hl-line="178" data-hl-el="code">
+      <!-- @paragraph line 175 -->
+      <p class="m" data-hl-line="175" data-hl-el="paragraph">
+Children fill         <!-- @code line 176 -->
+        <code class="h" data-hl-line="176" data-hl-el="code">
+@children        </code>;         <!-- @code line 176 -->
+        <code class="h" data-hl-line="176" data-hl-el="code">
 @slot        </code> blocks fill slots by name, and a slot name the panel doesn't have is an error.      </p>
-      <!-- @text line 174 -->
-      <span class="a6" data-hl-line="174" data-hl-el="text">
+      <!-- @text line 172 -->
+      <span class="a7" data-hl-line="172" data-hl-el="text">
 Default footer      </span>
     </article>
-    <!-- @row line 180 -->
-    <div class="a7" data-hl-line="180" data-hl-el="row">
-      <!-- @row line 181 -->
-      <div class="a8 hl-badge" data-hl-line="181" data-hl-el="row">
-        <!-- @text line 181 -->
-        <span class="dot" data-hl-line="181" data-hl-el="text">
+    <!-- @row line 178 -->
+    <div class="a8" data-hl-line="178" data-hl-el="row">
+      <!-- @row line 179 -->
+      <div class="a9 hl-badge" data-hl-line="179" data-hl-el="row">
+        <!-- @text line 179 -->
+        <span class="dot" data-hl-line="179" data-hl-el="text">
 •        </span>
         <span>scoped style</span>
       </div>
-      <!-- @row line 182 -->
-      <div class="a8 hl-badge" data-hl-line="182" data-hl-el="row">
+      <!-- @row line 180 -->
+      <div class="a9 hl-badge" data-hl-line="180" data-hl-el="row">
         <span>same function</span>
       </div>
     </div>
   </section>
-  <!-- @section line 188 -->
-  <section class="h" data-hl-line="188" data-hl-el="section">
-    <!-- @row line 188 -->
-    <div class="i" data-hl-line="188" data-hl-el="row">
-      <!-- @text line 188 -->
-      <span class="j" data-hl-line="188" data-hl-el="text">
+  <!-- @section line 186 -->
+  <section class="i" data-hl-line="186" data-hl-el="section">
+    <!-- @row line 186 -->
+    <div class="j" data-hl-line="186" data-hl-el="row">
+      <!-- @text line 186 -->
+      <span class="k" data-hl-line="186" data-hl-el="text">
 5.      </span>
-      <!-- @h2 line 188 -->
-      <h2 class="k" data-hl-line="188" data-hl-el="h2">
+      <!-- @h2 line 186 -->
+      <h2 class="l" data-hl-line="186" data-hl-el="h2">
 Expressions      </h2>
     </div>
-    <!-- @paragraph line 189 -->
-    <p class="l" data-hl-line="189" data-hl-el="paragraph">
+    <!-- @paragraph line 187 -->
+    <p class="m" data-hl-line="187" data-hl-el="paragraph">
 $name inserts a value and ${...} any expression: HTMLANG has 7 letters and 3 tags.    </p>
-    <!-- @row line 192 -->
-    <div class="m" data-hl-line="192" data-hl-el="row">
-      <!-- @el line 194 -->
-      <div class="a9" data-hl-line="194" data-hl-el="el">
+    <!-- @row line 190 -->
+    <div class="n" data-hl-line="190" data-hl-el="row">
+      <!-- @el line 192 -->
+      <div class="ba" data-hl-line="192" data-hl-el="el">
         <span>darken 0%</span>
       </div>
-      <!-- @el line 194 -->
-      <div class="ba" data-hl-line="194" data-hl-el="el">
+      <!-- @el line 192 -->
+      <div class="bb" data-hl-line="192" data-hl-el="el">
         <span>darken 10%</span>
       </div>
-      <!-- @el line 194 -->
-      <div class="bb" data-hl-line="194" data-hl-el="el">
+      <!-- @el line 192 -->
+      <div class="bc" data-hl-line="192" data-hl-el="el">
         <span>darken 20%</span>
       </div>
-      <!-- @el line 194 -->
-      <div class="bc" data-hl-line="194" data-hl-el="el">
+      <!-- @el line 192 -->
+      <div class="bd" data-hl-line="192" data-hl-el="el">
         <span>darken 30%</span>
       </div>
-      <!-- @el line 201 -->
-      <div class="bd" data-hl-line="201" data-hl-el="el">
+      <!-- @el line 199 -->
+      <div class="be" data-hl-line="199" data-hl-el="el">
         <span>alpha 0.2</span>
       </div>
-      <!-- @el line 202 -->
-      <div class="be" data-hl-line="202" data-hl-el="el">
+      <!-- @el line 200 -->
+      <div class="bf" data-hl-line="200" data-hl-el="el">
         <span>mix</span>
       </div>
     </div>
-    <!-- @text line 204 -->
-    <span class="ay" data-hl-line="204" data-hl-el="text">
+    <!-- @text line 202 -->
+    <span class="az" data-hl-line="202" data-hl-el="text">
 contains($tags, css) is true    </span>
   </section>
-  <!-- @section line 213 -->
-  <section class="h" data-hl-line="213" data-hl-el="section">
-    <!-- @row line 213 -->
-    <div class="i" data-hl-line="213" data-hl-el="row">
-      <!-- @text line 213 -->
-      <span class="j" data-hl-line="213" data-hl-el="text">
+  <!-- @section line 211 -->
+  <section class="i" data-hl-line="211" data-hl-el="section">
+    <!-- @row line 211 -->
+    <div class="j" data-hl-line="211" data-hl-el="row">
+      <!-- @text line 211 -->
+      <span class="k" data-hl-line="211" data-hl-el="text">
 6.      </span>
-      <!-- @h2 line 213 -->
-      <h2 class="k" data-hl-line="213" data-hl-el="h2">
+      <!-- @h2 line 211 -->
+      <h2 class="l" data-hl-line="211" data-hl-el="h2">
 Control flow      </h2>
     </div>
-    <!-- @table line 214 -->
-    <table class="bf" data-hl-line="214" data-hl-el="table">
-      <!-- @thead line 215 -->
-      <thead data-hl-line="215" data-hl-el="thead">
-        <!-- @tr line 216 -->
-        <tr class="bg" data-hl-line="216" data-hl-el="tr">
-          <!-- @th line 217 -->
-          <th class="bh" data-hl-line="217" data-hl-el="th">
+    <!-- @table line 212 -->
+    <table class="bg" data-hl-line="212" data-hl-el="table">
+      <!-- @thead line 213 -->
+      <thead data-hl-line="213" data-hl-el="thead">
+        <!-- @tr line 214 -->
+        <tr class="bh" data-hl-line="214" data-hl-el="tr">
+          <!-- @th line 215 -->
+          <th class="bi" data-hl-line="215" data-hl-el="th">
 #          </th>
-          <!-- @th line 218 -->
-          <th class="bh" data-hl-line="218" data-hl-el="th">
+          <!-- @th line 216 -->
+          <th class="bi" data-hl-line="216" data-hl-el="th">
 Name          </th>
-          <!-- @th line 219 -->
-          <th class="bh" data-hl-line="219" data-hl-el="th">
+          <!-- @th line 217 -->
+          <th class="bi" data-hl-line="217" data-hl-el="th">
 Role          </th>
-          <!-- @th line 220 -->
-          <th class="bh" data-hl-line="220" data-hl-el="th">
+          <!-- @th line 218 -->
+          <th class="bi" data-hl-line="218" data-hl-el="th">
 Status          </th>
         </tr>
       </thead>
-      <!-- @tbody line 221 -->
-      <tbody data-hl-line="221" data-hl-el="tbody">
-        <!-- @tr line 223 -->
-        <tr class="bi" data-hl-line="223" data-hl-el="tr">
-          <!-- @td line 224 -->
-          <td class="bh" data-hl-line="224" data-hl-el="td">
+      <!-- @tbody line 219 -->
+      <tbody data-hl-line="219" data-hl-el="tbody">
+        <!-- @tr line 221 -->
+        <tr class="bj" data-hl-line="221" data-hl-el="tr">
+          <!-- @td line 222 -->
+          <td class="bi" data-hl-line="222" data-hl-el="td">
 1          </td>
-          <!-- @td line 225 -->
-          <td class="bj" data-hl-line="225" data-hl-el="td">
+          <!-- @td line 223 -->
+          <td class="bk" data-hl-line="223" data-hl-el="td">
 Ada          </td>
-          <!-- @td line 226 -->
-          <td class="bh" data-hl-line="226" data-hl-el="td">
+          <!-- @td line 224 -->
+          <td class="bi" data-hl-line="224" data-hl-el="td">
 Engineering          </td>
-          <!-- @td line 227 -->
-          <td class="bk" data-hl-line="227" data-hl-el="td">
+          <!-- @td line 225 -->
+          <td class="bl" data-hl-line="225" data-hl-el="td">
 Active          </td>
         </tr>
-        <!-- @tr line 223 -->
-        <tr class="bi" data-hl-line="223" data-hl-el="tr">
-          <!-- @td line 224 -->
-          <td class="bh" data-hl-line="224" data-hl-el="td">
+        <!-- @tr line 221 -->
+        <tr class="bj" data-hl-line="221" data-hl-el="tr">
+          <!-- @td line 222 -->
+          <td class="bi" data-hl-line="222" data-hl-el="td">
 2          </td>
-          <!-- @td line 225 -->
-          <td class="bj" data-hl-line="225" data-hl-el="td">
+          <!-- @td line 223 -->
+          <td class="bk" data-hl-line="223" data-hl-el="td">
 Grace          </td>
-          <!-- @td line 226 -->
-          <td class="bh" data-hl-line="226" data-hl-el="td">
+          <!-- @td line 224 -->
+          <td class="bi" data-hl-line="224" data-hl-el="td">
 Design, research          </td>
-          <!-- @td line 227 -->
-          <td class="bk" data-hl-line="227" data-hl-el="td">
+          <!-- @td line 225 -->
+          <td class="bl" data-hl-line="225" data-hl-el="td">
 Active          </td>
         </tr>
-        <!-- @tr line 223 -->
-        <tr class="bi" data-hl-line="223" data-hl-el="tr">
-          <!-- @td line 224 -->
-          <td class="bh" data-hl-line="224" data-hl-el="td">
+        <!-- @tr line 221 -->
+        <tr class="bj" data-hl-line="221" data-hl-el="tr">
+          <!-- @td line 222 -->
+          <td class="bi" data-hl-line="222" data-hl-el="td">
 3          </td>
-          <!-- @td line 225 -->
-          <td class="bj" data-hl-line="225" data-hl-el="td">
+          <!-- @td line 223 -->
+          <td class="bk" data-hl-line="223" data-hl-el="td">
 Linus          </td>
-          <!-- @td line 226 -->
-          <td class="bh" data-hl-line="226" data-hl-el="td">
+          <!-- @td line 224 -->
+          <td class="bi" data-hl-line="224" data-hl-el="td">
 Operations          </td>
-          <!-- @td line 227 -->
-          <td class="bl" data-hl-line="227" data-hl-el="td">
+          <!-- @td line 225 -->
+          <td class="bm" data-hl-line="225" data-hl-el="td">
 Away          </td>
         </tr>
       </tbody>
     </table>
-    <!-- @row line 232 -->
-    <div class="bm" data-hl-line="232" data-hl-el="row">
-      <!-- @text line 234 -->
-      <span class="bn" data-hl-line="234" data-hl-el="text">
+    <!-- @row line 230 -->
+    <div class="bn" data-hl-line="230" data-hl-el="row">
+      <!-- @text line 232 -->
+      <span class="bo" data-hl-line="232" data-hl-el="text">
 10      </span>
-      <!-- @text line 234 -->
-      <span class="bn" data-hl-line="234" data-hl-el="text">
+      <!-- @text line 232 -->
+      <span class="bo" data-hl-line="232" data-hl-el="text">
 8      </span>
-      <!-- @text line 234 -->
-      <span class="bn" data-hl-line="234" data-hl-el="text">
+      <!-- @text line 232 -->
+      <span class="bo" data-hl-line="232" data-hl-el="text">
 6      </span>
-      <!-- @text line 234 -->
-      <span class="bn" data-hl-line="234" data-hl-el="text">
+      <!-- @text line 232 -->
+      <span class="bo" data-hl-line="232" data-hl-el="text">
 4      </span>
-      <!-- @text line 234 -->
-      <span class="bn" data-hl-line="234" data-hl-el="text">
+      <!-- @text line 232 -->
+      <span class="bo" data-hl-line="232" data-hl-el="text">
 2      </span>
-      <!-- @text line 234 -->
-      <span class="bn" data-hl-line="234" data-hl-el="text">
+      <!-- @text line 232 -->
+      <span class="bo" data-hl-line="232" data-hl-el="text">
 0      </span>
     </div>
-    <!-- @text line 238 -->
-    <span class="bo" data-hl-line="238" data-hl-el="text">
+    <!-- @text line 236 -->
+    <span class="bp" data-hl-line="236" data-hl-el="text">
 @each … @else shows this for an empty list.    </span>
   </section>
-  <!-- @section line 241 -->
-  <section class="h" data-hl-line="241" data-hl-el="section">
-    <!-- @row line 241 -->
-    <div class="i" data-hl-line="241" data-hl-el="row">
-      <!-- @text line 241 -->
-      <span class="j" data-hl-line="241" data-hl-el="text">
+  <!-- @section line 239 -->
+  <section class="i" data-hl-line="239" data-hl-el="section">
+    <!-- @row line 239 -->
+    <div class="j" data-hl-line="239" data-hl-el="row">
+      <!-- @text line 239 -->
+      <span class="k" data-hl-line="239" data-hl-el="text">
 7.      </span>
-      <!-- @h2 line 241 -->
-      <h2 class="k" data-hl-line="241" data-hl-el="h2">
+      <!-- @h2 line 239 -->
+      <h2 class="l" data-hl-line="239" data-hl-el="h2">
 HTML      </h2>
     </div>
-    <!-- @paragraph line 242 -->
-    <p class="l" data-hl-line="242" data-hl-el="paragraph">
-Every other element has its HTML name, and HTML attributes are written       <!-- @code line 244 -->
-      <code class="g" data-hl-line="244" data-hl-el="code">
-key=value      </code>.    </p>
+    <!-- @paragraph line 240 -->
+    <p class="m" data-hl-line="240" data-hl-el="paragraph">
+Every other element has its HTML name, and HTML attributes are written       <!-- @code line 242 -->
+      <code class="h" data-hl-line="242" data-hl-el="code">
+key=value      </code>.       <!-- @code line 242 -->
+      <code class="h" data-hl-line="242" data-hl-el="code">
+@page      </code> is the root element: its styles go on       <!-- @code line 243 -->
+      <code class="h" data-hl-line="243" data-hl-el="code">
+&lt;body&gt;      </code>, a column that fills the window, and its       <!-- @code line 243 -->
+      <code class="h" data-hl-line="243" data-hl-el="code">
+key=value      </code> attributes on       <!-- @code line 244 -->
+      <code class="h" data-hl-line="244" data-hl-el="code">
+&lt;html&gt;      </code>, like this page's       <!-- @code line 244 -->
+      <code class="h" data-hl-line="244" data-hl-el="code">
+lang=en      </code>.    </p>
     <!-- @row line 245 -->
-    <div class="bp" data-hl-line="245" data-hl-el="row">
+    <div class="bq" data-hl-line="245" data-hl-el="row">
       <!-- @form line 246 -->
-      <form action="/subscribe" class="bq" method="post" data-hl-line="246" data-hl-el="form">
+      <form action="/subscribe" class="br" method="post" data-hl-line="246" data-hl-el="form">
         <!-- @label line 247 -->
-        <label class="br" for="email" data-hl-line="247" data-hl-el="label">
+        <label class="bs" for="email" data-hl-line="247" data-hl-el="label">
 Email        </label>
         <!-- @input line 248 -->
-        <input class="bs" id="email" type="email" name="email" placeholder="you@example.com" required data-hl-line="248" data-hl-el="input">
+        <input class="bt" id="email" type="email" name="email" placeholder="you@example.com" required data-hl-line="248" data-hl-el="input">
         <!-- @label line 260 -->
-        <label class="br" for="topic" data-hl-line="260" data-hl-el="label">
+        <label class="bs" for="topic" data-hl-line="260" data-hl-el="label">
 Topic        </label>
         <!-- @select line 261 -->
-        <select class="bt" id="topic" name="topic" data-hl-line="261" data-hl-el="select">
+        <select class="bu" id="topic" name="topic" data-hl-line="261" data-hl-el="select">
           <!-- @option line 262 -->
           <option value="news" data-hl-line="262" data-hl-el="option">
 News          </option>
@@ -680,31 +691,31 @@ News          </option>
 Releases          </option>
         </select>
         <!-- @button line 264 -->
-        <button class="bu" type="submit" data-hl-line="264" data-hl-el="button">
+        <button class="bv" type="submit" data-hl-line="264" data-hl-el="button">
 Subscribe        </button>
       </form>
       <!-- @el line 265 -->
-      <div class="bv" data-hl-line="265" data-hl-el="el">
+      <div class="bw" data-hl-line="265" data-hl-el="el">
         <!-- @details line 266 -->
-        <details class="bw" data-hl-line="266" data-hl-el="details">
+        <details class="bx" data-hl-line="266" data-hl-el="details">
           <!-- @summary line 267 -->
-          <summary class="bx" data-hl-line="267" data-hl-el="summary">
+          <summary class="by" data-hl-line="267" data-hl-el="summary">
 What does this compile to?          </summary>
           <!-- @paragraph line 268 -->
-          <p class="by" data-hl-line="268" data-hl-el="paragraph">
+          <p class="bz" data-hl-line="268" data-hl-el="paragraph">
 Flexbox and grid CSS in one             <!-- @code line 269 -->
-            <code class="g" data-hl-line="269" data-hl-el="code">
+            <code class="h" data-hl-line="269" data-hl-el="code">
 &lt;style&gt;            </code>, and no JavaScript.          </p>
         </details>
         <!-- @button line 270 -->
-        <button class="bz" type="button" popovertarget="about" data-hl-line="270" data-hl-el="button">
+        <button class="b0" type="button" popovertarget="about" data-hl-line="270" data-hl-el="button">
 Open a popover        </button>
         <!-- @el line 271 -->
-        <div class="b0" id="about" popover data-hl-line="271" data-hl-el="el">
+        <div class="b1" id="about" popover data-hl-line="271" data-hl-el="el">
           <span>Native HTML popovers need no script.</span>
         </div>
         <!-- @row line 273 -->
-        <div class="b1" data-hl-line="273" data-hl-el="row">
+        <div class="b2" data-hl-line="273" data-hl-el="row">
           <!-- @text line 274 -->
           <span data-hl-line="274" data-hl-el="text">
 Progress          </span>
@@ -716,11 +727,11 @@ Progress          </span>
 Sept 26          </time>
         </div>
         <!-- @figure line 277 -->
-        <figure class="b2" data-hl-line="277" data-hl-el="figure">
+        <figure class="b3" data-hl-line="277" data-hl-el="figure">
           <!-- @image line 278 -->
-          <img src="https://picsum.photos/640/240" class="b3" alt="A placeholder landscape" data-hl-line="278" data-hl-el="image">
+          <img src="https://picsum.photos/640/240" class="b4" alt="A placeholder landscape" data-hl-line="278" data-hl-el="image">
           <!-- @figcaption line 279 -->
-          <figcaption class="a6" data-hl-line="279" data-hl-el="figcaption">
+          <figcaption class="a7" data-hl-line="279" data-hl-el="figcaption">
 @figure and @figcaption          </figcaption>
         </figure>
       </div>
@@ -728,15 +739,15 @@ Sept 26          </time>
   </section>
   <hr style="border: none; border-top: 1px dashed #cbd5e1">
   <!-- @footer line 284 -->
-  <footer class="b4" data-hl-line="284" data-hl-el="footer">
+  <footer class="b5" data-hl-line="284" data-hl-el="footer">
     <!-- @text line 285 -->
     <span data-hl-line="285" data-hl-el="text">
 © 2026 htmlang    </span>
     <!-- @el line 286 -->
-    <div class="r" data-hl-line="286" data-hl-el="el">
+    <div class="s" data-hl-line="286" data-hl-el="el">
     </div>
     <!-- @link line 287 -->
-    <a href="https://github.com/iko-soy/htmlang" class="b5" data-hl-line="287" data-hl-el="link">
+    <a href="https://github.com/iko-soy/htmlang" class="b6" data-hl-line="287" data-hl-el="link">
 Source    </a>
   </footer>
 </div>

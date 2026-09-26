@@ -3,7 +3,7 @@
 -- Shows the layout attributes (spacing, center-x, wrap, @spacer), CSS
 -- properties with their own names, design tokens as custom properties, and
 -- functions that take parameters, attributes and children.
-@page [lang en] Launchpad
+@page [lang=en, color var(--ink), dark:background #0b1220, dark:color #e2e8f0] Launchpad
 @meta description Launchpad turns static pages into a product site in minutes.
 @meta og:title Launchpad
 
@@ -48,78 +48,77 @@
   {"name": "Company", "price": "99", "note": "For many teams", "perks": ["Unlimited sites", "SSO", "Priority support"]}
 ]
 
-@el [color var(--ink), dark:background #0b1220, dark:color #e2e8f0]
-  -- Navigation
-  @header [padding 16 24, border-bottom 1 solid var(--line)]
-    @row [width fill, max-width 1100, center-x, spacing 24, align-items center]
-      @text [font-weight 800, font-size 18] Launchpad
-      @spacer
-      @nav [flex-direction row, spacing 20, color var(--muted)]
-        @link [hover:color var(--ink)] #features Features
-        @link [hover:color var(--ink)] #pricing Pricing
-        @link [hover:color var(--ink)] /docs Docs
-      @primary-link [href /signup, padding 8 16] Sign up
+-- Navigation
+@header [padding 16 24, border-bottom 1 solid var(--line)]
+  @row [width fill, max-width 1100, center-x, spacing 24, align-items center]
+    @text [font-weight 800, font-size 18] Launchpad
+    @spacer
+    @nav [flex-direction row, spacing 20, color var(--muted)]
+      @link [hover:color var(--ink)] #features Features
+      @link [hover:color var(--ink)] #pricing Pricing
+      @link [hover:color var(--ink)] /docs Docs
+    @primary-link [href /signup, padding 8 16] Sign up
 
-  -- Hero
-  @section [padding 96 24, background var(--subtle), dark:background #111a2e]
-    @el [max-width 720, center-x, spacing 24, text-align center]
-      @h1 [font-size 52, line-height 1.1, letter-spacing -1, md:font-size 64] Build faster with less CSS.
-      @paragraph [font-size 19, color var(--muted), line-height 1.6]
-        Launchpad turns your static pages into a polished product site in
-        minutes. Write the layout, {@text [font-weight 600, color var(--ink)] ship one file}, and sleep at night.
-      @row [center-x, spacing 12, wrap]
-        @primary-link [href /signup] Start free
-        @secondary-link [href /demo] Watch the demo
+-- Hero
+@section [padding 96 24, background var(--subtle), dark:background #111a2e]
+  @el [max-width 720, center-x, spacing 24, text-align center]
+    @h1 [font-size 52, line-height 1.1, letter-spacing -1, md:font-size 64] Build faster with less CSS.
+    @paragraph [font-size 19, color var(--muted), line-height 1.6]
+      Launchpad turns your static pages into a polished product site in
+      minutes. Write the layout, {@text [font-weight 600, color var(--ink)] ship one file}, and sleep at night.
+    @row [center-x, spacing 12, wrap]
+      @primary-link [href /signup] Start free
+      @secondary-link [href /demo] Watch the demo
 
-  -- Features, from a list of records
-  @section [id=features, padding 80 24, spacing 40]
-    @section-heading [title Everything you need, lede Opinionated where it matters and flexible where it counts.]
-    @row [max-width 1100, center-x, spacing 20, wrap]
-      @each $feature in $features
-        @article [flex 1 1 280px, padding 24, spacing 8, border 1 solid var(--line), border-radius 12]
-          @text [font-size 24, color var(--brand)] $feature.icon
-          @h3 [font-size 18] $feature.title
-          @paragraph [color var(--muted), line-height 1.6] $feature.body
+-- Features, from a list of records
+@section [id=features, padding 80 24, spacing 40]
+  @section-heading [title Everything you need, lede Opinionated where it matters and flexible where it counts.]
+  @row [max-width 1100, center-x, spacing 20, wrap]
+    @each $feature in $features
+      @article [flex 1 1 280px, padding 24, spacing 8, border 1 solid var(--line), border-radius 12]
+        @text [font-size 24, color var(--brand)] $feature.icon
+        @h3 [font-size 18] $feature.title
+        @paragraph [color var(--muted), line-height 1.6] $feature.body
 
-  -- Pricing: one plan is highlighted with if()
-  @section [id=pricing, padding 80 24, spacing 40, background var(--subtle), dark:background #111a2e]
-    @section-heading [title Simple pricing, lede Start free and upgrade when your team grows.]
-    @row [max-width 1000, center-x, spacing 20, wrap, align-items stretch]
-      @each $plan in $plans
-        @article [
-          flex 1 1 260px,
-          padding 28,
-          spacing 16,
-          background white,
-          dark:background #0b1220,
-          border-radius 12,
-          if($plan.featured, [border 2 solid var(--brand), box-shadow 0 12px 32px rgba(37, 99, 235, 0.15)], border 1 solid var(--line))
-        ]
-          @el [spacing 4]
-            @h3 [font-size 18] $plan.name
-            @text [color var(--muted), font-size 14] $plan.note
-          @row [spacing 4, align-items baseline]
-            @text [font-size 40, font-weight 800] \$$plan.price
-            @text [color var(--muted)] / month
-          @ul [spacing 8, flex 1]
-            @each $perk in $plan.perks
-              @li [before:content "✓  ", before:color var(--brand)] $perk
-          @if $plan.featured
-            @primary-link [href /signup?plan=$plan.name, text-align center] Choose $plan.name
-          @else
-            @secondary-link [href /signup?plan=$plan.name, text-align center] Choose $plan.name
+-- Pricing: one plan is highlighted with if()
+@section [id=pricing, padding 80 24, spacing 40, background var(--subtle), dark:background #111a2e]
+  @section-heading [title Simple pricing, lede Start free and upgrade when your team grows.]
+  @row [max-width 1000, center-x, spacing 20, wrap, align-items stretch]
+    @each $plan in $plans
+      @article [
+        flex 1 1 260px,
+        padding 28,
+        spacing 16,
+        background white,
+        dark:background #0b1220,
+        border-radius 12,
+        if($plan.featured, [border 2 solid var(--brand), box-shadow 0 12px 32px rgba(37, 99, 235, 0.15)], border 1 solid var(--line))
+      ]
+        @el [spacing 4]
+          @h3 [font-size 18] $plan.name
+          @text [color var(--muted), font-size 14] $plan.note
+        @row [spacing 4, align-items baseline]
+          @text [font-size 40, font-weight 800] \$$plan.price
+          @text [color var(--muted)] / month
+        @ul [spacing 8, flex 1]
+          @each $perk in $plan.perks
+            @li [before:content "✓  ", before:color var(--brand)] $perk
+        @if $plan.featured
+          @primary-link [href /signup?plan=$plan.name, text-align center] Choose $plan.name
+        @else
+          @secondary-link [href /signup?plan=$plan.name, text-align center] Choose $plan.name
 
-  -- Call to action
-  @section [padding 72 24, spacing 16, background var(--brand), color white, text-align center]
-    @h2 [font-size 30] Ready to launch?
-    @paragraph [max-width 520, center-x, line-height 1.6, opacity 0.9]
-      Join the teams building their marketing sites with htmlang.
-    @link [$button, center-x, background white, color var(--brand), hover:background #eff6ff] /signup
-      Start for free
+-- Call to action
+@section [padding 72 24, spacing 16, background var(--brand), color white, text-align center]
+  @h2 [font-size 30] Ready to launch?
+  @paragraph [max-width 520, center-x, line-height 1.6, opacity 0.9]
+    Join the teams building their marketing sites with htmlang.
+  @link [$button, center-x, background white, color var(--brand), hover:background #eff6ff] /signup
+    Start for free
 
-  @footer [padding 32 24, color var(--muted), font-size 14]
-    @row [width fill, max-width 1100, center-x, wrap, spacing 16]
-      @text © 2026 Launchpad
-      @spacer
-      @link [hover:color var(--ink)] /privacy Privacy
-      @link [hover:color var(--ink)] /terms Terms
+@footer [padding 32 24, color var(--muted), font-size 14]
+  @row [width fill, max-width 1100, center-x, wrap, spacing 16]
+    @text © 2026 Launchpad
+    @spacer
+    @link [hover:color var(--ink)] /privacy Privacy
+    @link [hover:color var(--ink)] /terms Terms

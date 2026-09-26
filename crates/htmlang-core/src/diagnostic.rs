@@ -98,7 +98,8 @@ pub mod code {
     /// A style written without its value (`[padding]`).
     pub const MISSING_VALUE: &str = "missing-value";
     pub const HTML_ATTRIBUTE_FORM: &str = "html-attribute-form";
-    pub const UNKNOWN_PAGE_ATTRIBUTE: &str = "unknown-page-attribute";
+    /// A second `@page`: a page has one root, so one `@page`.
+    pub const DUPLICATE_PAGE: &str = "duplicate-page";
     pub const UNDEFINED_VARIABLE: &str = "undefined-variable";
     /// An attribute, or an attribute's name, made from a variable.
     pub const ATTRIBUTE_FROM_VARIABLE: &str = "attribute-from-variable";
@@ -182,7 +183,7 @@ pub mod code {
         INVALID_PREFIX,
         MISSING_VALUE,
         HTML_ATTRIBUTE_FORM,
-        UNKNOWN_PAGE_ATTRIBUTE,
+        DUPLICATE_PAGE,
         UNDEFINED_VARIABLE,
         ATTRIBUTE_FROM_VARIABLE,
         DUPLICATE_ATTRIBUTE,

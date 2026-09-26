@@ -6,7 +6,6 @@
 
 use std::path::Path;
 
-use htmlang::diagnostic::code;
 use htmlang::parser;
 
 fn code_blocks(markdown: &str) -> Vec<String> {
@@ -42,33 +41,13 @@ fn is_htmlang(block: &str) -> bool {
         || first.starts_with("@element "))
 }
 
-/// Whether a file holds only definitions (a library, such as a layout):
-/// every line that isn't indented is a `@let`, a comment, or the end of a
-/// list that a `@let` opened.
-fn only_definitions(source: &str) -> bool {
-    source
-        .lines()
-        .filter(|l| !l.trim().is_empty() && !l.starts_with([' ', '\t']))
-        .all(|l| l.starts_with("@let ") || l.starts_with("--") || l.starts_with(']'))
-}
-
 /// Every diagnostic makes an example wrong: the docs show pages that
-/// compile cleanly. The one exception is a file of definitions only, whose
-/// definitions are used by the files that include it.
-fn problems(source: &str, result: &parser::ParseResult) -> Vec<String> {
-    let library = only_definitions(source);
+/// compile cleanly. (A file of definitions only, such as a layout, is a
+/// library: the compiler doesn't report its definitions unused.)
+fn problems(result: &parser::ParseResult) -> Vec<String> {
     result
         .diagnostics
         .iter()
-        .filter(|d| {
-            let unused = [
-                code::UNUSED_VARIABLE,
-                code::UNUSED_BUNDLE,
-                code::UNUSED_FUNCTION,
-            ]
-            .contains(&d.code);
-            !(library && unused)
-        })
         .map(|d| format!("line {}: {} [{}]", d.line, d.message, d.code))
         .collect()
 }
@@ -95,7 +74,7 @@ fn check_doc(file: &str) {
 
     let mut failures = Vec::new();
     for block in &blocks {
-        let problems = problems(block, &parser::parse_with_base(block, Some(&dir)));
+        let problems = problems(&parser::parse_with_base(block, Some(&dir)));
         if !problems.is_empty() {
             failures.push(format!("{}\n=> {}", block, problems.join("\n=> ")));
         }
@@ -129,7 +108,7 @@ fn examples_compile() {
             continue;
         }
         let source = std::fs::read_to_string(&path).unwrap();
-        let problems = problems(&source, &parser::parse_with_base(&source, Some(&dir)));
+        let problems = problems(&parser::parse_with_base(&source, Some(&dir)));
         if !problems.is_empty() {
             failures.push(format!("{}\n=> {}", path.display(), problems.join("\n=> ")));
         }

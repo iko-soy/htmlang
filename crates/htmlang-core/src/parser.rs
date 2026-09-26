@@ -163,9 +163,10 @@ struct ParseContext {
     /// Source line currently being parsed, for diagnostics raised deep
     /// inside helpers that don't take a line number.
     current_line: usize,
-    page_title: Option<String>,
-    lang: Option<String>,
-    favicon: Option<String>,
+    /// What the `@page` said, once one has run
+    page: Option<Page>,
+    /// Where that `@page` is, for the error a second one gets
+    page_at: Option<String>,
     meta_tags: Vec<(String, String)>,
     head_blocks: Vec<String>,
     /// What each name means at the line being evaluated.
@@ -232,6 +233,9 @@ struct ParseContext {
     /// parameter of the function the bundle is passed to is checked where
     /// the bundle is used instead.
     in_bundle: bool,
+    /// `@page`'s attributes are being read: a name close to `favicon` is
+    /// a misspelled word of `@page`'s.
+    in_page: bool,
 }
 
 /// How deeply function calls may nest, so that a function that calls
@@ -653,9 +657,8 @@ pub fn parse(input: &str) -> ParseResult {
 pub fn parse_with_base(input: &str, base_path: Option<&Path>) -> ParseResult {
     let mut ctx = ParseContext {
         current_line: 0,
-        page_title: None,
-        lang: None,
-        favicon: None,
+        page: None,
+        page_at: None,
         meta_tags: Vec::new(),
         head_blocks: Vec::new(),
         env: Env::default(),
@@ -686,6 +689,7 @@ pub fn parse_with_base(input: &str, base_path: Option<&Path>) -> ParseResult {
         current_file: None,
         too_deep: false,
         in_bundle: false,
+        in_page: false,
     };
     load_prelude(&mut ctx);
     let tree = ctx.parse_tree(input);
@@ -701,7 +705,19 @@ pub fn parse_with_base(input: &str, base_path: Option<&Path>) -> ParseResult {
     check_unevaluated(&mut ctx);
     check_slot_places(&mut ctx);
     validate_tree(&nodes, None, false, &mut ctx.diagnostics);
-    check_unused(&mut ctx);
+    // A library's definitions are for the files that include it
+    let exported: HashSet<String> = if tree.is_library() {
+        tree.nodes
+            .iter()
+            .filter_map(|node| match node.directive().map(|d| &d.args) {
+                Some(DirectiveArgs::Let(def)) => Some(def.name.clone()),
+                _ => None,
+            })
+            .collect()
+    } else {
+        HashSet::new()
+    };
+    check_unused(&mut ctx, &exported);
     dedupe(&mut ctx.diagnostics);
     // What the file itself defines at its top level
     let file = ctx.env.frames.last().cloned().unwrap_or_default();
@@ -720,9 +736,7 @@ pub fn parse_with_base(input: &str, base_path: Option<&Path>) -> ParseResult {
     }
     ParseResult {
         document: Document {
-            page_title: ctx.page_title,
-            lang: ctx.lang,
-            favicon: ctx.favicon,
+            page: ctx.page,
             meta_tags: ctx.meta_tags,
             head_blocks: ctx.head_blocks,
             variables,
@@ -824,6 +838,23 @@ fn check_unevaluated_node(node: &syntax::Node, ctx: &mut ParseContext) {
                 }
             }
             NodeKind::Text(text) => check_inline_heads(text, line, ctx),
+            // `@page`'s attributes are checked like an element's (a layout's
+            // `@page` is in a function that may not run in this file)
+            NodeKind::Directive(syntax::Directive {
+                args:
+                    DirectiveArgs::Page {
+                        attrs: Some(list), ..
+                    },
+                ..
+            }) => {
+                let words: Vec<String> = crate::vocab::PAGE_WORDS
+                    .iter()
+                    .map(|w| w.to_string())
+                    .collect();
+                ctx.in_page = true;
+                check_attrs(&list.attrs, line, ctx, &words);
+                ctx.in_page = false;
+            }
             _ => {}
         }
         let text = written_line(node);
@@ -1156,40 +1187,38 @@ impl Evaluator {
         let line_num = node.span.line;
         let content = &node.source;
         match (directive.name(), &directive.args) {
-            // @page [lang en, favicon /f.png] Title
+            // @page [lang=en, favicon /f.png, background #f8fafc] Title
             ("page", DirectiveArgs::Page { attrs, title }) => {
-                if let Some(list) = attrs {
-                    for attr in parse_attr_list(&list.attrs, line_num, ctx, false, &[]) {
-                        // A setting, not CSS: quoted text loses its quotes
-                        let value = match attr.quoted {
-                            Some(quoted) => quoted.text,
-                            None => attr.value.unwrap_or_default(),
-                        };
-                        match attr.key.as_str() {
-                            "lang" => ctx.lang = Some(value),
-                            "favicon" => ctx.favicon = Some(value),
-                            other => ctx.diagnostics.push(
-                                Diagnostic::error(
-                                    code::UNKNOWN_PAGE_ATTRIBUTE,
-                                    line_num,
-                                    format!(
-                                        "unknown @page attribute '{}' (expected lang or favicon)",
-                                        other
-                                    ),
-                                )
-                                .source(content.clone())
-                                .subject(other),
-                            ),
-                        }
-                    }
-                }
-                let title = match title {
-                    Some(title) => {
-                        ctx.interpolate_text(&title.raw, title.span.line, Some(title.span.column))
-                    }
-                    None => String::new(),
+                let page = read_page(attrs.as_ref(), title.as_ref(), line_num, ctx);
+                // A page has one root: a second `@page` (a layout called
+                // twice, or one called after the page's own) is an error
+                let here = match &ctx.current_file {
+                    Some(file) => format!("line {} of {}", line_num, file),
+                    None => format!("line {}", line_num),
                 };
-                ctx.page_title = Some(title);
+                if let Some(first) = &ctx.page_at {
+                    let again = if *first == here {
+                        "this @page runs a second time (in a loop, or in a function called \
+                         twice)"
+                            .to_string()
+                    } else {
+                        format!("a second @page (this page already has one, on {})", first)
+                    };
+                    let diagnostic = Diagnostic::error(
+                        code::DUPLICATE_PAGE,
+                        line_num,
+                        format!(
+                            "{}: a page has one @page, the root element that styles its <body>",
+                            again
+                        ),
+                    )
+                    .source(content.clone())
+                    .subject("@page");
+                    ctx.diagnostics.push(diagnostic);
+                } else {
+                    ctx.page_at = Some(here);
+                    ctx.page = Some(page);
+                }
                 Ok(None)
             }
 
@@ -1253,9 +1282,14 @@ impl Evaluator {
                 // An HTML attribute value: quoted text loses its quotes
                 let (value, _, _) =
                     ctx.fill_value(value.trim(), line_num, Some(value_column), Sink::Text);
-                match name.trim().strip_prefix("og:") {
-                    Some(property) => ctx.og_tags.push((property.to_string(), value)),
-                    None => ctx.meta_tags.push((name.trim().to_string(), value)),
+                // The same tag twice says nothing more (a layout called
+                // twice): it is written once
+                let (tags, tag) = match name.trim().strip_prefix("og:") {
+                    Some(property) => (&mut ctx.og_tags, (property.to_string(), value)),
+                    None => (&mut ctx.meta_tags, (name.trim().to_string(), value)),
+                };
+                if !tags.contains(&tag) {
+                    tags.push(tag);
                 }
                 Ok(None)
             }
@@ -2249,6 +2283,93 @@ fn fill_default(
     let (value, _) = ctx.slot_value(default, line, column);
     (ctx.current_source, ctx.current_node) = caller;
     value
+}
+
+/// Read `@page`'s attribute list and title. The page is the root element,
+/// and its attributes are checked like any element's: `key=value` (and a
+/// bare boolean HTML attribute) go on `<html>`, styles on `<body>`, and
+/// `favicon FILE` is its one word of htmlang's own.
+fn read_page(
+    attrs: Option<&syntax::AttrList>,
+    title: Option<&syntax::Arg>,
+    line: usize,
+    ctx: &mut ParseContext,
+) -> Page {
+    let mut page = Page::default();
+    if let Some(list) = attrs {
+        let words: Vec<String> = crate::vocab::PAGE_WORDS
+            .iter()
+            .map(|w| w.to_string())
+            .collect();
+        ctx.in_page = true;
+        let read = parse_attr_list(&list.attrs, line, ctx, true, &words);
+        ctx.in_page = false;
+        for attr in read {
+            let boolean = attr.value.is_none()
+                && crate::vocab::BOOLEAN_HTML_ATTRS.contains(&attr.key.as_str());
+            if words.contains(&attr.key) {
+                if attr.html {
+                    ctx.diagnostics.push(
+                        Diagnostic::error(
+                            code::PARAMETER_FORM,
+                            line,
+                            format!(
+                                "'{0}' is @page's own word, not an HTML attribute: write `{0} {1}`",
+                                attr.key,
+                                attr.value.as_deref().unwrap_or("FILE")
+                            ),
+                        )
+                        .subject(format!("{}=", attr.key))
+                        .suggest(Some(format!("{} ", attr.key))),
+                    );
+                }
+                let value = attr.quoted.map(|q| q.text).or(attr.value);
+                match value.filter(|v| !v.trim().is_empty()) {
+                    Some(file) => {
+                        if page.favicon.is_some() {
+                            ctx.diagnostics.push(
+                                Diagnostic::warning(
+                                    code::DUPLICATE_ATTRIBUTE,
+                                    line,
+                                    "duplicate attribute 'favicon': the later one wins".to_string(),
+                                )
+                                .subject("favicon"),
+                            );
+                        }
+                        page.favicon = Some(file);
+                    }
+                    None => ctx.diagnostics.push(
+                        Diagnostic::error(
+                            code::MISSING_VALUE,
+                            line,
+                            "'favicon' needs its file: `favicon favicon.png`".to_string(),
+                        )
+                        .subject("favicon"),
+                    ),
+                }
+            } else if attr.html || boolean {
+                page.html_attrs.push(attr);
+            } else if crate::vocab::base_attribute(&attr.key) == "inline" {
+                ctx.diagnostics.push(
+                    Diagnostic::error(
+                        code::UNEXPECTED_ARGUMENT,
+                        line,
+                        "`inline` puts an image's file into the page, and @page has none: it \
+                         only goes on @image"
+                            .to_string(),
+                    )
+                    .subject("inline"),
+                );
+            } else {
+                page.styles.push(attr);
+            }
+        }
+    }
+    page.title = match title {
+        Some(title) => ctx.interpolate_text(&title.raw, title.span.line, Some(title.span.column)),
+        None => String::new(),
+    };
+    page
 }
 
 /// A parameter passed `name=value`, the form of an HTML attribute.
@@ -3917,12 +4038,17 @@ fn misspelled_parameter(
     let Some(closest) = suggest_closest(&attr.key, &params) else {
         return false;
     };
+    let what = if ctx.in_page {
+        "@page word"
+    } else {
+        "parameter"
+    };
     let diagnostic = Diagnostic::error(
         code::UNKNOWN_ATTRIBUTE,
         line,
         format!(
-            "unknown parameter '{}', did you mean '{}'?",
-            attr.key, closest
+            "unknown {} '{}', did you mean '{}'?",
+            what, attr.key, closest
         ),
     )
     .subject(attr.key.as_str())
@@ -5074,11 +5200,14 @@ fn track_var_refs(input: &str, used: &mut HashSet<String>) {
 // Unused definition warnings
 // ---------------------------------------------------------------------------
 
-fn check_unused(ctx: &mut ParseContext) {
+/// Warn about definitions nothing uses, except `exported` ones (the
+/// definitions of a library, for the files that include it).
+fn check_unused(ctx: &mut ParseContext, exported: &HashSet<String>) {
     // Check unused @let variables
     for (name, &line) in &ctx.let_lines {
-        if name.starts_with("--") {
-            continue; // CSS vars are always used
+        if name.starts_with("--") || exported.contains(name) {
+            // CSS vars are always used; a library's names are for other files
+            continue;
         }
         if !ctx.used_variables.contains(name) {
             ctx.diagnostics.push(
@@ -5096,7 +5225,10 @@ fn check_unused(ctx: &mut ParseContext) {
     // Check unused attribute bundles (@let name [...]). A `$name` in code
     // that doesn't run (an `if()` branch or `@if` not taken) counts too.
     for (name, &line) in &ctx.define_lines {
-        if !ctx.used_defines.contains(name) && !ctx.used_variables.contains(name) {
+        if !ctx.used_defines.contains(name)
+            && !ctx.used_variables.contains(name)
+            && !exported.contains(name)
+        {
             ctx.diagnostics.push(
                 Diagnostic::new(
                     code::UNUSED_BUNDLE,
@@ -5114,7 +5246,7 @@ fn check_unused(ctx: &mut ParseContext) {
 
     // Check unused functions (@let name ... with body)
     for (name, &line) in &ctx.fn_lines {
-        if !ctx.used_functions.contains(name) {
+        if !ctx.used_functions.contains(name) && !exported.contains(name) {
             ctx.diagnostics.push(
                 Diagnostic::new(
                     code::UNUSED_FUNCTION,
@@ -5763,7 +5895,10 @@ mod tests {
     #[test]
     fn parses_page_directive() {
         let r = parse_ok("@page My Title\n");
-        assert_eq!(r.document.page_title.as_deref(), Some("My Title"));
+        assert_eq!(
+            r.document.page.map(|p| p.title).as_deref(),
+            Some("My Title")
+        );
     }
 
     #[test]

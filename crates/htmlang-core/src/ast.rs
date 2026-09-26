@@ -3,9 +3,8 @@ use std::collections::HashMap;
 #[derive(Debug)]
 #[allow(dead_code)]
 pub struct Document {
-    pub page_title: Option<String>,
-    pub lang: Option<String>,
-    pub favicon: Option<String>,
+    /// The page `@page` makes: without one, the output is a fragment.
+    pub page: Option<Page>,
     pub meta_tags: Vec<(String, String)>,
     pub head_blocks: Vec<String>,
     pub variables: HashMap<String, String>,
@@ -14,6 +13,20 @@ pub struct Document {
     pub custom_css: Vec<String>,
     pub og_tags: Vec<(String, String)>,
     pub nodes: Vec<Node>,
+}
+
+/// What `@page` says: the page is the root element. Its styles style
+/// `<body>`, which lays out the page's top-level elements as a column; its
+/// HTML attributes (`lang=en`, `dir=rtl`, `class=x`) go on `<html>`.
+#[derive(Debug, Clone, Default)]
+pub struct Page {
+    pub title: String,
+    /// `key=value` attributes, and bare boolean HTML attributes, for `<html>`
+    pub html_attrs: Vec<Attribute>,
+    /// Styles, prefixed ones included, for `<body>`
+    pub styles: Vec<Attribute>,
+    /// `favicon FILE`, `@page`'s one word of htmlang's own
+    pub favicon: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -458,7 +471,7 @@ pub enum ArgGrammar {
     /// body (`@raw <hr>`, `@style .a { color: red }`) or, for `@markdown`,
     /// the file.
     Text,
-    /// An optional `[attributes]` list, then text (`@page [lang en] Title`).
+    /// An optional `[attributes]` list, then text (`@page [lang=en] Title`).
     AttrsText,
     /// An expression (`@if $count > 2`).
     Expression,

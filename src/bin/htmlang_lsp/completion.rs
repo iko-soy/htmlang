@@ -551,6 +551,9 @@ fn owning_list(text: &str, position: Position) -> Option<(usize, usize, String)>
 /// they remain available to every element via `attr_completions`.
 fn element_specific_attrs(element: &str) -> &'static [&'static str] {
     match element {
+        // The page is the root element: HTML attributes for `<html>`, and
+        // its own word
+        "page" => &["lang", "dir", "class", "favicon"],
         "input" => &[
             "type",
             "name",
@@ -904,6 +907,12 @@ fn attr_completions(range: Range, element: Option<&str>) -> Vec<CompletionItem> 
         items.push(completion);
     };
     let lays_out_children = lays_out_children(element);
+    if element == Some("page") {
+        for name in vocab::PAGE_WORDS {
+            let detail = "@page: the page's icon, put into the page";
+            push(name.to_string(), format!("{} ", name), detail, "1", name);
+        }
+    }
     for name in vocab::HTMLANG_ATTRIBUTES {
         if !lays_out_children && vocab::CONTAINER_ATTRIBUTES.contains(name) {
             continue;
@@ -1383,6 +1392,35 @@ mod tests {
             };
         assert_eq!(insert("spacing"), "spacing ");
         assert_eq!(insert("wrap"), "wrap");
+    }
+
+    #[test]
+    fn page_offers_its_own_word_and_the_attributes_of_html_first() {
+        let labels = |text: &str, line: u32, character: u32| -> Vec<CompletionItem> {
+            completions(text, Position::new(line, character))
+        };
+        let items = labels("@page [] Home", 0, 7);
+        let rank = |label: &str| {
+            items
+                .iter()
+                .find(|i| i.label == label)
+                .and_then(|i| i.sort_text.clone())
+                .unwrap_or_else(|| panic!("{} not offered", label))
+        };
+        let favicon = items.iter().find(|i| i.label == "favicon").unwrap();
+        match &favicon.text_edit {
+            Some(CompletionTextEdit::Edit(edit)) => assert_eq!(edit.new_text, "favicon "),
+            _ => panic!("no edit for favicon"),
+        }
+        assert!(rank("favicon").starts_with("0_"));
+        assert!(rank("lang=").starts_with("0_"));
+        assert!(rank("dir=").starts_with("0_"));
+        // It styles <body>, a column
+        assert!(items.iter().any(|i| i.label == "spacing"));
+        assert!(items.iter().any(|i| i.label == "background"));
+        // Only @page has the word
+        let items = labels("@el [] x", 0, 5);
+        assert!(!items.iter().any(|i| i.label == "favicon"));
     }
 
     #[test]

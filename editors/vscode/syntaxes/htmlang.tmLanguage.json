@@ -67,15 +67,26 @@
       "match": "^\\s*--.*$"
     },
     "page-directive": {
-      "match": "(@page)\\s+(.*)",
-      "captures": {
+      "comment": "@page [attributes] Title: the page is the root element, so its attributes are an ordinary list",
+      "begin": "(@page)(?![a-zA-Z0-9_-])",
+      "end": "$",
+      "beginCaptures": {
         "1": {
           "name": "keyword.control.directive.htmlang"
-        },
-        "2": {
-          "name": "string.unquoted.page-title.htmlang"
         }
-      }
+      },
+      "contentName": "string.unquoted.page-title.htmlang",
+      "patterns": [
+        {
+          "include": "#attributes"
+        },
+        {
+          "include": "#escape"
+        },
+        {
+          "include": "#variable"
+        }
+      ]
     },
     "let-definition": {
       "match": "(@let)\\s+(?:(@[a-zA-Z][a-zA-Z0-9_-]*)|(--[a-zA-Z][a-zA-Z0-9_-]*|[a-zA-Z_][a-zA-Z0-9_.-]*))",

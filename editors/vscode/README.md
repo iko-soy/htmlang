@@ -6,7 +6,7 @@ Syntax highlighting, snippets, and language server support for
 ## Features
 
 - **Syntax highlighting**: `@` elements and directives, `$variables`,
-  `[attribute]` lists with state and media prefixes, `if(...)` and its
+  `[attribute]` lists (`@page`'s included) with state and media prefixes, `if(...)` and its
   `[groups]`, `key=value` HTML attributes, the leading argument of
   `@link`, `@image`, `@script` and the other elements that take one, quoted text, escapes (`\,`, `\$`, `\]`), `{@inline}` elements
   (shown as text in `@code` and `@textarea`), the one-line body of `@raw`,
@@ -21,7 +21,8 @@ Syntax highlighting, snippets, and language server support for
 - **Completion** of elements, directives, layout attributes (`spacing`,
   `wrap` and `grid-cols` only on a row, column or grid), CSS properties,
   HTML attributes (not the one an element's leading argument already
-  gives, as `href=` in `@link [] /about About`), prefixes, `if()` (and
+  gives, as `href=` in `@link [] /about About`; on `@page`, `lang=`,
+  `dir=`, `class=` and `favicon` first), prefixes, `if()` (and
   attributes inside its branches),
   the variables visible where you type (definitions above in the block and
   the blocks around it, `@each` variables and a function's parameters),

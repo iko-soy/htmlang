@@ -20,6 +20,10 @@ pub const HTMLANG_ATTRIBUTES: &[&str] = &[
 /// they work on a row, column or grid (`ast::Layout::is_container`).
 pub const CONTAINER_ATTRIBUTES: &[&str] = &["spacing", "wrap", "grid-cols", "grid-rows"];
 
+/// The words of htmlang's own that `@page` takes besides its styles and
+/// HTML attributes: `favicon FILE` puts the file into the page as its icon.
+pub const PAGE_WORDS: &[&str] = &["favicon"];
+
 /// htmlang's own attributes that are flags, written without a value
 /// (`center-x`); the others take one (`spacing 8`).
 pub const HTMLANG_FLAGS: &[&str] = &[

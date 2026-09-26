@@ -1,6 +1,6 @@
 -- A documentation page: a sidebar built from data, prose in htmlang and in
 -- Markdown, code samples, a table, and a component with scoped styles.
-@page [lang en] Getting started · htmlang docs
+@page [lang=en, color var(--ink)] Getting started · htmlang docs
 
 @let --ink #0f172a
 @let --muted #64748b
@@ -40,7 +40,7 @@
     @text [class=label] $kind
     @children
 
-@row [min-height 100vh, color var(--ink)]
+@row [height fill]
   -- Sidebar
   @aside [
     width 260,

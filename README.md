@@ -7,7 +7,7 @@ themselves. Styling uses CSS properties under their CSS names, and every other
 element uses its HTML name.
 
 ```
-@page My Site
+@page [lang=en, background #f8fafc] My Site
 @let --brand #3b82f6
 
 @let @card [title]
@@ -15,7 +15,7 @@ element uses its HTML name.
     @h3 $title
     @children
 
-@el [max-width 800, center-x, padding 40, spacing 24]
+@el [width fill, max-width 800, center-x, padding 40, spacing 24]
   @h1 [font-size 32] Hello
   @paragraph
     Built with {@text [font-weight bold, color var(--brand)] htmlang}.
@@ -51,7 +51,10 @@ unless you write some, and nothing is added that you didn't ask for.
   `center-x`, `align-right`, `wrap`) say how an element sits inside its
   parent, and follow the direction the parent's CSS sets: `@nav
   [flex-direction row]` is a row, and `md:flex-direction row` makes a
-  column a row from that width up, children included.
+  column a row from that width up, children included. The page is the root
+  element: `@page`'s styles go on `<body>`, a column that fills the window,
+  and its `key=value` attributes on `<html>` (`@page [lang=en, background
+  #f8fafc] Home`).
 - **Styling is CSS.** Any other attribute is a CSS property with its CSS
   name and value: `padding 20`, `border 1 solid #eee`,
   `grid-template-columns 1fr 2fr`. In lengths, a bare number means pixels.
@@ -103,7 +106,7 @@ htmlang build src -o dist    # compile a whole site
 
 | Command | Purpose |
 |---|---|
-| `build <dir> [-o out] [--minify] [--strict]` | Compile every `.hl` file under a directory (into `out/` by default) |
+| `build <dir> [-o out] [--minify] [--strict]` | Compile every `.hl` file under a directory (into `out/` by default), except libraries: files that hold only `@let`s |
 | `serve [dir\|file] [-p PORT] [--open]` | Dev server with live reload |
 | `watch [dir\|file] [-o out]` | Recompile on change, without a server |
 | `check <file\|dir> [--format json]` | Report diagnostics without writing output |

@@ -1,6 +1,6 @@
 -- A blog index: a layout function with named slots, posts loaded from JSON,
 -- and loops and conditions over records.
-@page [lang en] Notes on the Web
+@page [lang=en] Notes on the Web
 @meta description Short essays on static HTML, layout and tooling.
 
 @let --ink #1f2937
@@ -14,7 +14,7 @@
 -- A layout is an ordinary function. @slot blocks are filled by name; the
 -- rest of the caller's content replaces @children.
 @let @site
-  @el [max-width 720, center-x, padding 48 24, spacing 40, color var(--ink), line-height 1.6]
+  @el [width fill, max-width 720, center-x, padding 48 24, spacing 40, color var(--ink), line-height 1.6]
     @header [spacing 4]
       @link [font-weight 800, font-size 28, letter-spacing -0.5] / Notes on the Web
       @slot tagline

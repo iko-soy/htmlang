@@ -1645,7 +1645,7 @@ fn css_resize() {
 
 #[test]
 fn lang_sets_html_attr() {
-    let output = compile("@page [lang en] T\n@text Hello");
+    let output = compile("@page [lang=en] T\n@text Hello");
     assert!(output.contains("<html lang=\"en\">"));
 }
 
@@ -6104,9 +6104,12 @@ fn fragment_script_and_void_elements_drop_nothing_silently() {
 
 #[test]
 fn page_attributes_and_attributes_with_no_root_are_errors() {
+    // @page's attributes are checked like any element's: `lang en` is an
+    // HTML attribute written as a style, `colour` a misspelled CSS property
     let d = parse_diagnostics("@page [lang en, colour red] T\n");
     assert_eq!(errors(&d).len(), 1, "{:?}", d);
-    assert_eq!(errors(&d)[0].code, "unknown-page-attribute");
+    assert_eq!(errors(&d)[0].code, "html-attribute-form");
+    assert_eq!(coded(&d, "unknown-attribute").len(), 1, "{:?}", d);
 
     let d = parse_diagnostics("@let @two\n  @text a\n  @text b\n@two [padding 4]\n");
     let found = coded(&d, "no-single-root");
@@ -7289,4 +7292,188 @@ fn readable_output_adds_no_whitespace_inside_pre_and_textarea() {
         out
     );
     assert!(out.contains(">c</textarea>\n"), "{}", out);
+}
+
+// --- The page is the root element (@page styles <body>) ---
+
+#[test]
+fn snapshot_page_root() {
+    snapshot_test("page_root");
+}
+
+#[test]
+fn page_styles_go_on_body_and_html_attributes_on_html() {
+    let out = compile("@page [lang=en, dir=rtl, class=x, background #111, padding 8] T\n@text a");
+    assert!(
+        out.contains("<html lang=\"en\" dir=\"rtl\" class=\"x\">"),
+        "{}",
+        out
+    );
+    assert!(out.contains("<body class=\"a\">"), "{}", out);
+    assert!(out.contains(".a{background:#111;padding:8px;}"), "{}", out);
+    // The reset makes <body> the column, so its class doesn't repeat it
+    assert!(
+        out.contains("body{margin:0;font-family:system-ui,-apple-system,sans-serif;display:flex;flex-direction:column;min-height:100dvh}"),
+        "{}",
+        out
+    );
+    assert!(!out.contains(".a{display:flex"), "{}", out);
+}
+
+#[test]
+fn a_page_without_styles_has_a_plain_body() {
+    let out = compile("@page T\n@text a");
+    assert!(out.contains("<html><head>"), "{}", out);
+    assert!(out.contains("<body><span>a</span></body>"), "{}", out);
+}
+
+#[test]
+fn the_top_of_a_page_is_a_column() {
+    // Text lines are children of their own, and fill/center compile
+    // against the column <body> is
+    let out = compile("@page T\nOne\nTwo\n@el [height fill, center-y] x");
+    assert!(
+        out.contains("<body><span>One</span><span>Two</span>"),
+        "{}",
+        out
+    );
+    assert!(out.contains("flex:1;min-height:0;"), "{}", out);
+    // The top of a fragment still has no layout of its own
+    let fragment = compile("One\nTwo\n@el [height fill] x");
+    assert!(fragment.contains("One\nTwo"), "{}", fragment);
+    assert!(fragment.contains("height:100%"), "{}", fragment);
+}
+
+#[test]
+fn a_page_s_direction_moves_its_children_s_fill() {
+    let out = compile("@page [flex-direction row] T\n@el [width fill] a\n@el b");
+    assert!(out.contains("<body class=\"a\">"), "{}", out);
+    assert!(out.contains(".a{flex-direction:row;}"), "{}", out);
+    assert!(out.contains("flex:1;min-width:0;"), "{}", out);
+}
+
+#[test]
+fn page_attributes_are_checked_like_an_element_s() {
+    let d = parse_diagnostics("@page [lang en] T\n");
+    assert_eq!(coded(&d, "html-attribute-form").len(), 1, "{:?}", d);
+
+    let d = parse_diagnostics("@page [colr red] T\n");
+    let found = coded(&d, "unknown-attribute");
+    assert!(
+        found.len() == 1 && found[0].severity == htmlang::parser::Severity::Warning,
+        "{:?}",
+        d
+    );
+
+    let d = parse_diagnostics("@page [padding] T\n");
+    assert_eq!(coded(&d, "missing-value").len(), 1, "{:?}", d);
+
+    let d = parse_diagnostics("@page [hovr:color red] T\n");
+    assert_eq!(coded(&d, "unknown-prefix").len(), 1, "{:?}", d);
+
+    let d = parse_diagnostics("@page [favicn x.png] T\n");
+    let found = coded(&d, "unknown-attribute");
+    assert!(
+        found.len() == 1
+            && found[0]
+                .message
+                .contains("unknown @page word 'favicn', did you mean 'favicon'?"),
+        "{:?}",
+        d
+    );
+
+    let d = parse_diagnostics("@page [favicon=x.png] T\n");
+    let found = coded(&d, "parameter-form");
+    assert!(
+        found.len() == 1 && found[0].suggestion.as_deref() == Some("favicon "),
+        "{:?}",
+        d
+    );
+
+    let d = parse_diagnostics("@page [favicon] T\n");
+    assert_eq!(coded(&d, "missing-value").len(), 1, "{:?}", d);
+
+    let d = parse_diagnostics("@page [inline] T\n");
+    assert_eq!(coded(&d, "unexpected-argument").len(), 1, "{:?}", d);
+
+    // Also where the @page doesn't run: a layout's, in its own file
+    let d = parse_diagnostics("@let @layout\n  @page [lang en] Home\n  @children\n");
+    assert_eq!(coded(&d, "html-attribute-form").len(), 1, "{:?}", d);
+}
+
+#[test]
+fn a_page_s_attributes_can_come_from_a_layout_s_parameters() {
+    let out = compile(
+        "@let @layout [title, bg #fff]\n  @page [lang=en, background $bg] $title\n  @children\n@layout [title Home, bg #fafafa]\n  @text a\n",
+    );
+    assert!(out.contains("<title>Home</title>"), "{}", out);
+    assert!(out.contains("<body class=\"a\">"), "{}", out);
+    assert!(out.contains(".a{background:#fafafa;}"), "{}", out);
+}
+
+#[test]
+fn a_second_page_is_an_error() {
+    let d = parse_diagnostics("@page A\n@page B\n");
+    let found = coded(&d, "duplicate-page");
+    assert!(
+        found.len() == 1
+            && found[0].line == 2
+            && found[0].severity == htmlang::parser::Severity::Error
+            && found[0].message.contains("already has one, on line 1"),
+        "{:?}",
+        d
+    );
+    // A layout called twice, and a layout's after the page's own
+    let layout = "@let @layout [title]\n  @page $title\n  @children\n";
+    let d = parse_diagnostics(&format!(
+        "{}@layout [title A]\n  x\n@layout [title B]\n  y\n",
+        layout
+    ));
+    assert_eq!(coded(&d, "duplicate-page").len(), 1, "{:?}", d);
+    let d = parse_diagnostics(&format!("@page Mine\n{}@layout [title A]\n  x\n", layout));
+    assert_eq!(coded(&d, "duplicate-page").len(), 1, "{:?}", d);
+    // The same @page run twice says so
+    let d = parse_diagnostics("@each $i in 1..2\n  @page T$i\n");
+    let found = coded(&d, "duplicate-page");
+    assert!(
+        found.len() == 1 && found[0].message.contains("runs a second time"),
+        "{:?}",
+        d
+    );
+    // The first one stays
+    let result = htmlang::parser::parse("@page A\n@page B\n");
+    assert_eq!(result.document.page.map(|p| p.title).as_deref(), Some("A"));
+    // One @page in each branch of an @if is one @page
+    let d = parse_diagnostics("@let wide true\n@if $wide\n  @page A\n@else\n  @page B\n");
+    assert!(coded(&d, "duplicate-page").is_empty(), "{:?}", d);
+}
+
+#[test]
+fn the_same_meta_tag_is_written_once() {
+    let out = compile(
+        "@let @head-tags\n  @meta description Same\n  @meta og:title Same\n@page T\n@head-tags\n@head-tags\n",
+    );
+    assert_eq!(out.matches("name=\"description\"").count(), 1, "{}", out);
+    assert_eq!(out.matches("property=\"og:title\"").count(), 1, "{}", out);
+    // Different values are different tags
+    let out = compile("@page T\n@meta keywords a\n@meta keywords b\n");
+    assert_eq!(out.matches("name=\"keywords\"").count(), 2, "{}", out);
+}
+
+#[test]
+fn a_meta_viewport_replaces_the_usual_one() {
+    let out = compile("@page T\n@meta viewport width=1024\n");
+    assert_eq!(out.matches("name=\"viewport\"").count(), 1, "{}", out);
+    assert!(out.contains("content=\"width=1024\""), "{}", out);
+}
+
+#[test]
+fn a_library_s_definitions_are_not_reported_unused() {
+    let lib =
+        "-- A layout\n@let @layout\n  @page Home\n  @children\n@let gap 8\n@let card [padding 8]\n";
+    let d = parse_diagnostics(lib);
+    assert!(d.is_empty(), "{:?}", d);
+    // A page's own definitions still are
+    let d = parse_diagnostics("@page T\n@let gap 8\n");
+    assert_eq!(coded(&d, "unused-variable").len(), 1, "{:?}", d);
 }

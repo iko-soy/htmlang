@@ -1,6 +1,12 @@
 -- A one-page tour of htmlang. Each section shows one part of the language:
 -- layout, text, CSS styles, functions, expressions, control flow and HTML.
-@page [lang en] htmlang tour
+@page [
+  lang=en,
+  color var(--ink),
+  line-height 1.5,
+  dark:background #030712,
+  dark:color #e5e7eb
+] htmlang tour
 @meta description A one-page tour of htmlang.
 @meta og:title htmlang tour
 
@@ -43,15 +49,7 @@
     to { opacity: 1; transform: none; }
   }
 
-@el [
-  max-width 960,
-  center-x,
-  padding $gutter,
-  color var(--ink),
-  line-height 1.5,
-  dark:background #030712,
-  dark:color #e5e7eb
-]
+@el [width fill, max-width 960, center-x, padding $gutter]
   @header [spacing $unit, padding-block $gutter, animation rise 0.4s ease]
     @text [$label] A one-page tour
     @h1 [font-size 44, line-height 1.1, letter-spacing -1] Welcome to htmlang
@@ -241,7 +239,9 @@
   @chapter [title HTML, number 7]
     @paragraph
       Every other element has its HTML name, and HTML attributes are written
-      {@code key=value}.
+      {@code key=value}. {@code @page} is the root element: its styles go on
+      {@code <body>}, a column that fills the window, and its {@code key=value}
+      attributes on {@code <html>}, like this page's {@code lang=en}.
     @row [spacing $gutter, wrap, align-items flex-start]
       @form [$card, spacing $unit, flex 1 1 280px, method=post] /subscribe
         @label [for=email, font-weight 600] Email

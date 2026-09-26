@@ -605,6 +605,8 @@ fn main() {
             eprintln!("no .hl files found in {}", src);
             process::exit(1);
         }
+        // Libraries (files of `@let`s only) are for the pages that include them
+        let hl_files: Vec<PathBuf> = hl_files.into_iter().filter(|f| !is_library(f)).collect();
         // Create output dir if needed
         if let Some(out) = out_dir {
             let _ = fs::create_dir_all(out);
@@ -835,7 +837,7 @@ fn main() {
             let out_dir = config.output.as_deref().unwrap_or("out");
             let _ = fs::create_dir_all(out_dir);
             let mut all_included: Vec<PathBuf> = Vec::new();
-            for file in &hl_files {
+            for file in hl_files.iter().filter(|f| !is_library(f)) {
                 let path_str = file.to_string_lossy().to_string();
                 let rel = file.strip_prefix(target_path).unwrap_or(file);
                 let out_p = Path::new(out_dir).join(rel).with_extension("html");
@@ -882,6 +884,7 @@ fn main() {
                 &WatchBuild {
                     out_dirs: Some((target_path.to_path_buf(), serve_dir)),
                     discover_new_files: true,
+                    skip_libraries: true,
                     ..Default::default()
                 },
             );
@@ -962,7 +965,7 @@ fn main() {
                 let _ = fs::create_dir_all(out);
             }
             let mut all_included = Vec::new();
-            for file in &hl_files {
+            for file in hl_files.iter().filter(|f| !is_library(f)) {
                 let path_str = file.to_string_lossy().to_string();
                 let effective_out = effective_output.as_ref().map(|o| {
                     let rel = file.strip_prefix(target_path).unwrap_or(file);
@@ -995,6 +998,7 @@ fn main() {
                         .as_ref()
                         .map(|o| (target_path.to_path_buf(), PathBuf::from(o))),
                     discover_new_files: true,
+                    skip_libraries: true,
                     ..Default::default()
                 },
             );
@@ -1125,7 +1129,7 @@ fn main() {
         };
         let mut any_errors = false;
         let mut all_included: Vec<PathBuf> = Vec::new();
-        for file in &hl_files {
+        for file in hl_files.iter().filter(|f| check || !is_library(f)) {
             let path_str = file.to_string_lossy().to_string();
             let effective_out = output_path.as_ref().map(|o| {
                 let rel = file.strip_prefix(dir).unwrap_or(file);
@@ -1199,6 +1203,7 @@ fn main() {
                     .as_ref()
                     .map(|o| (dir.to_path_buf(), PathBuf::from(o))),
                 discover_new_files: true,
+                skip_libraries: true,
                 strict,
                 partial,
                 ..Default::default()
@@ -1279,6 +1284,13 @@ fn main() {
 
 // (CLI help, LSP launcher, and shell completions moved to cli.rs)
 
+/// Whether `path` holds only `@let` definitions: a library, such as a
+/// layout, that pages `@include`. Building a directory makes no page of
+/// it (its problems show where a page includes it, or with `check`).
+fn is_library(path: &Path) -> bool {
+    fs::read_to_string(path).is_ok_and(|source| htmlang::syntax::parse(&source).is_library())
+}
+
 fn collect_hl_files(dir: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     if let Ok(entries) = fs::read_dir(dir) {
@@ -1303,6 +1315,9 @@ struct WatchBuild {
     out_file: Option<PathBuf>,
     /// Pick up `.hl` files created in the watch directory (directory mode).
     discover_new_files: bool,
+    /// Write no page for a library (a file of `@let`s only), as building
+    /// a directory doesn't (directory mode).
+    skip_libraries: bool,
     minify: bool,
     strict: bool,
     partial: bool,
@@ -1518,6 +1533,9 @@ fn watch_loop(
 
         let mut recompiled = 0usize;
         for file in &files_to_compile {
+            if build.skip_libraries && is_library(file) {
+                continue;
+            }
             let path_str = file.to_string_lossy().to_string();
             let out_path = build.output_for(file);
             if let Some(parent) = out_path.as_deref().and_then(Path::parent) {
@@ -1578,6 +1596,19 @@ fn watch_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_library_is_not_built_into_a_page() {
+        let dir = env::temp_dir().join(format!("htmlang_library_{}", process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let layout = dir.join("layout.hl");
+        let page = dir.join("index.hl");
+        fs::write(&layout, "@let @layout\n  @page Home\n  @children\n").unwrap();
+        fs::write(&page, "@include layout.hl\n@layout\n  @text hi\n").unwrap();
+        assert!(is_library(&layout));
+        assert!(!is_library(&page));
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn json_escape_handles_control_characters() {
