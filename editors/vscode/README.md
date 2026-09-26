@@ -10,8 +10,9 @@ Syntax highlighting, snippets, and language server support for
   `[groups]`, `key=value` HTML attributes, quoted text, escapes (`\,`, `\$`, `\]`), `{@inline}` elements,
   `@each $item in` headers and ranges (`1..5`), colors, numbers and `-- comments`.
 - **Diagnostics**: the compiler's own, each with its code: parse errors,
-  unknown elements and attributes with "did you mean" suggestions, undefined
-  and unused definitions, and accessibility warnings. The whole file is
+  unknown elements, prefixes and CSS properties with "did you mean"
+  suggestions, anything that would be left out of the page, undefined and
+  unused definitions, and accessibility warnings. The whole file is
   checked, including branches and functions that don't run, and relative
   `@include` and `@data` paths resolve from the file's folder.
 - **Completion** of elements, directives, layout attributes, CSS properties,
@@ -28,7 +29,7 @@ Syntax highlighting, snippets, and language server support for
   `$variables`, bundles and `@let @name` functions. `@include`, `@markdown` and
   `@data` file paths are links.
 - **Code actions**: fixes keyed on diagnostic codes (replace a misspelled
-  name or slot name, write a slot name as one word, add a missing `alt` or `type`, include the file that defines an
+  name, prefix or slot name, write a slot name as one word, add a missing `alt` or `type`, include the file that defines an
   unknown function, write a quoted font stack as `A\, B`, drop the `$` from
   `@let $x` and add it to `@each x`, pass a parameter as `name value`
   instead of `name=value`), removing unused

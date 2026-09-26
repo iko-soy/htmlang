@@ -1269,10 +1269,25 @@ impl Reader<'_> {
             (NodeKind::Text(text), open)
         };
         if open {
-            problems.push(self.error(
-                code::UNCLOSED_BRACKET,
-                "unclosed '[' in attribute list".to_string(),
-            ));
+            // An unclosed quote keeps the list open to the end of the file
+            let mut quotes = 0;
+            let mut chars = self.text.chars();
+            while let Some(c) = chars.next() {
+                match c {
+                    '\\' => {
+                        chars.next();
+                    }
+                    '"' => quotes += 1,
+                    _ => {}
+                }
+            }
+            let message = if quotes % 2 == 1 {
+                "unclosed '[' in attribute list: a `\"` in it isn't closed (write `\\\"` for a \
+                 quote character)"
+            } else {
+                "unclosed '[' in attribute list"
+            };
+            problems.push(self.error(code::UNCLOSED_BRACKET, message.to_string()));
         }
         (kind, open, problems)
     }

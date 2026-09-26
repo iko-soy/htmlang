@@ -45,6 +45,10 @@ unless you write some, and nothing is added that you didn't ask for.
   A comma separates attributes, so a comma inside a value is written `\,`
   (`transition opacity 0.3s\, transform 0.3s`), and quoted text keeps its
   quotes only in CSS (`before:content "→ "`).
+- **Names are checked, values are CSS's.** A misspelled element, prefix,
+  parameter or slot is an error. A CSS property htmlang doesn't know is
+  passed through with a "did you mean" warning, and values go to the CSS as
+  written. Nothing you write is left out of the page without an error.
 - **HTML stays HTML.** Elements have their HTML names (`@nav`, `@ul`, `@form`,
   `@details`), and HTML attributes are written `key=value` (`id=main`,
   `type=email`) or bare (`required`).

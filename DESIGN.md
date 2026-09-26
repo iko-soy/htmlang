@@ -33,7 +33,8 @@ Every example block in this file is compiled by the test suite
 - **The output is what you wrote.** Each page compiles to one self-contained
   HTML file. Its CSS is inside, and it has no JavaScript unless you write
   some. The compiler doesn't add attributes, tags or rewritten values that
-  the source doesn't ask for.
+  the source doesn't ask for, and it doesn't leave out anything you wrote:
+  what can't go into the page is an error.
 - **Everything runs at compile time.** Variables, expressions, loops and
   conditions are resolved when the page is built.
 
@@ -66,7 +67,7 @@ An attribute can take one of three forms:
 - `key=value` is an **HTML attribute** (`id=main`, `type=email`,
   `aria-label=Close`).
 - A bare word is a **flag**: a layout attribute such as `center-x`, or a
-  boolean HTML attribute such as `required`, `disabled` or `open`.
+  boolean HTML attribute such as `required`, `disabled`, `hidden` or `open`.
 
 A comma inside `(...)`, `[...]` or `"..."` doesn't split attributes. Anywhere else,
 `\,` keeps a comma in the value:
@@ -199,6 +200,22 @@ needs the function's `@let` to have run first. Only a name that depends on
 data, such as a variable a loop fills in, is checked just where the code
 runs.
 
+**Names are checked, and values are CSS's.** A misspelled element, prefix,
+parameter or slot is an error, and so is an undefined variable. A CSS
+property htmlang doesn't know, but whose name CSS could have, is written to
+the CSS as it is, with a warning that suggests the closest known name
+(`corner-shape`, or `colr`, which asks "did you mean `color`?"). Values go to
+the CSS as written, so the browser decides what `z-index auto` or `color
+rebeccapurple` means; only what is wrong in any CSS is reported (see
+[CSS properties](#css-properties)).
+
+**Nothing you write is left out silently.** An error means something
+couldn't go into the page: a flag htmlang doesn't know, an attribute
+`@fragment` has no element for, content for a function without
+`@children`. A warning means it went into the page as written, but may not
+be what you meant. A warning is reported once, even from a line that runs
+many times in a loop or a function.
+
 Every diagnostic has a stable code, such as `unknown-element` or
 `unused-variable`. The command line prints it as `error[unknown-element]`,
 `--format json` has it in a `code` field, and the editor's quick fixes are
@@ -220,7 +237,7 @@ its children, and how it sits in its parent:
 |---|---|
 | `spacing N` | Gap between children |
 | `width fill` / `width shrink` / `width N` | Take the remaining space in a row (the full width in a column), fit the content, or an exact size |
-| `height fill` / `height shrink` / `height N` | Take the remaining space in a column, fit the content, or an exact size |
+| `height fill` / `height shrink` / `height N` | Take the remaining space in a column (the full height in a row), fit the content, or an exact size |
 | `center-x`, `center-y` | Center the element in its parent |
 | `align-left`, `align-right`, `align-top`, `align-bottom` | Align the element in its parent |
 | `wrap` | Let a row wrap onto more lines |
@@ -300,6 +317,27 @@ keywords and CSS functions pass through as written (`width 50%`,
 `line-clamp N` also adds the `-webkit-box` declarations that browsers still
 need to cut text off after N lines.
 
+A property htmlang doesn't know is written to the CSS as it is, so new CSS
+(`corner-shape squircle`) works before htmlang lists it; the compiler warns
+and suggests the closest known name, in case it is a typo. Custom
+properties (`--gap`) and vendor-prefixed ones (`-webkit-tap-highlight-color`)
+pass without a warning. The value of a property htmlang doesn't know is
+written exactly as it is, without pixels added. A style needs a value:
+`[padding]` is an error.
+
+```
+@el [--gap 12px, gap var(--gap), -webkit-tap-highlight-color transparent]
+  Passed through as written
+```
+
+A value is checked only for what is wrong in any CSS. A `;`, `{` or `}`
+(outside a quoted string, and for `;` outside parentheses, as in CSS's own
+`if()`) or an unclosed quote or parenthesis would break out of the rule, so
+it is an error, including in a value that comes from a variable or from
+`@data`. A hex color that doesn't have 3, 4, 6 or 8 digits is a warning. A
+style whose value comes out empty, such as a field that a record doesn't
+have, is left out.
+
 ### Prefixes
 
 A prefix applies a style only in some condition:
@@ -314,6 +352,10 @@ A prefix applies a style only in some condition:
 | `sm:`, `md:`, `lg:`, `xl:`, `2xl:` | From that viewport width up (640, 768, 1024, 1280, 1536px) |
 | `cq-sm:` … `cq-2xl:` | From that container width up (the same widths, for an ancestor with `container-type inline-size`) |
 | `dark:`, `print:`, `motion-safe:`, `motion-reduce:`, `landscape:`, `portrait:` | Under that media condition |
+
+A prefix goes on a style or a layout flag, and an attribute takes one
+prefix: a misspelled prefix (`hovr:`) and a second one (`md:hover:`) are
+errors, not styles that silently never apply.
 
 ```
 @el [padding 16, background #3b82f6, hover:background #2563eb, md:padding 32, dark:background #1e3a8a]
@@ -366,7 +408,7 @@ its HTML name.
 | `@paragraph` | p | Flowing text with inline elements |
 | `@link URL` | a | Link, whose content is the text after the URL |
 | `@image SRC` | img | Image |
-| `@fragment` | (none) | Its children, without a wrapper element |
+| `@fragment` | (none) | Its children, without a wrapper element (so it takes no attributes) |
 
 The HTML elements, by kind:
 
@@ -384,6 +426,11 @@ The HTML elements, by kind:
   the URL is the form's `action`.
 - **Media and embeds**: `@picture` / `@source`, `@video SRC`, `@audio SRC`,
   `@iframe SRC`, `@canvas`, `@script`, `@hr`.
+
+`@script` takes HTML attributes (`@script [src=app.js, defer]`) and its code
+as a verbatim body; it isn't shown, so a style on it is an error. An element
+without a closing tag (`@input`, `@hr`, `@image`, `@source`) takes no
+content.
 
 Browser default margins on headings, paragraphs, lists and figures are reset
 to 0, so `spacing` controls the gaps. List items are columns like other
@@ -409,7 +456,9 @@ the list.
 HTML attributes are written `key=value`: `id=main`, `class=note`,
 `href=/about`, `type=email`, `alt=Logo`, `target=_blank`,
 `aria-label=Close menu`, `data-id=42`. Any name works. Boolean attributes are
-written bare: `required`, `disabled`, `checked`, `open`, `popover`. A style
+written bare: `required`, `disabled`, `checked`, `hidden`, `open`, `popover`.
+An HTML attribute written like a style (`type email`) is an error that
+shows the `key=value` form. A style
 and an HTML attribute can share a name, because the `=` tells them apart:
 
 ```
@@ -509,8 +558,9 @@ is text.
 ```
 
 A name that isn't defined is an error. A field that a record doesn't have
-is empty, so optional fields of `@data` records work: `@if $post.draft` is
-false, and `${default($post.tag, none)}` gives `none`.
+is empty, and so is any field of it, so optional fields of `@data` records
+work: `@if $post.draft` is false, `$post.author.name` is empty when there is
+no `author`, and `${default($post.tag, none)}` gives `none`.
 
 ### Values
 
@@ -557,7 +607,8 @@ list.
 - A computed number prints without float noise: whole numbers without
   decimals, others with at most four (`${100 / 3}` is `33.3333`).
 - A list prints as written when the source wrote it, and otherwise as its
-  items joined with `, `. A record has no text of its own.
+  items joined with `, `. A record has no text of its own, so writing one
+  where text goes is an error: write one of its fields.
 
 **Quoted text remembers that it was quoted.** A value written `"..."` (in a
 `@let`, an attribute or a function's argument) keeps its quotes in a CSS
@@ -603,7 +654,8 @@ inline in text (`{@key Ctrl+K}`):
   flag, or a `key=value` HTML attribute such as `id=intro`. It is checked
   like an attribute written on that element, so `@panel [title Hi,
   padding 40]` works the same as styling a built-in element, and
-  `[paddin 40]` gets the same warning.
+  `[paddin 40]` gets the same warning. A name close to one of the
+  parameters (`titel Hi`) is a misspelled parameter, which is an error.
 - Text after the attributes and the indented lines are the call's
   content, and replace `@children` in the body. A `@slot NAME` block
   directly under the call (or under an `@if`, `@else` or `@each` there)
@@ -885,7 +937,7 @@ it.
 
 `@page TITLE` makes the output a full HTML document. Without it, the output
 is a fragment. The attributes of `@page` set `lang`, and `favicon` (the file
-is embedded in the page). `@meta NAME VALUE` adds a meta tag, and names that
+is embedded in the page); any other is an error. `@meta NAME VALUE` adds a meta tag, and names that
 start with `og:` become Open Graph `property` tags. `@head` holds any other
 raw HTML for the `<head>`, such as a font link, a canonical URL or JSON-LD.
 

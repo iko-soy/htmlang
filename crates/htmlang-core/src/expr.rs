@@ -412,7 +412,9 @@ impl Parser<'_> {
                         name,
                         offset: at + 1 + offset,
                     }),
-                    Some(Problem::Invalid { message, .. }) => Err(Error::Invalid(message)),
+                    Some(Problem::Invalid { message, .. } | Problem::Record { message, .. }) => {
+                        Err(Error::Invalid(message))
+                    }
                 }
             }
             Token::Var(name) => {

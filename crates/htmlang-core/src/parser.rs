@@ -228,6 +228,10 @@ struct ParseContext {
     /// A call went deeper than [`MAX_CALL_DEPTH`]: the calls it is nested
     /// in expand to nothing, until the outermost one returns.
     too_deep: bool,
+    /// A bundle's attributes are being read: a name that could be a
+    /// parameter of the function the bundle is passed to is checked where
+    /// the bundle is used instead.
+    in_bundle: bool,
 }
 
 /// How deeply function calls may nest, so that a function that calls
@@ -316,7 +320,8 @@ impl ParseContext {
         for mut problem in problems {
             match &mut problem {
                 interp::Problem::Undefined { offset, .. }
-                | interp::Problem::Invalid { offset, .. } => {
+                | interp::Problem::Invalid { offset, .. }
+                | interp::Problem::Record { offset, .. } => {
                     // An offset into the protected text, as one into `raw`
                     *offset = protected[..*offset]
                         .chars()
@@ -519,6 +524,13 @@ impl ParseContext {
                     None => diagnostic,
                 }
             }
+            interp::Problem::Record { message, offset } => {
+                let diagnostic = Diagnostic::error(code::INVALID_VALUE, line, message);
+                match column {
+                    Some(column) => diagnostic.column(column + offset),
+                    None => diagnostic,
+                }
+            }
         };
         let diagnostic = match line_text {
             Some(text) => diagnostic.source(text),
@@ -673,6 +685,7 @@ pub fn parse_with_base(input: &str, base_path: Option<&Path>) -> ParseResult {
         current_node: 0,
         current_file: None,
         too_deep: false,
+        in_bundle: false,
     };
     load_prelude(&mut ctx);
     let tree = ctx.parse_tree(input);
@@ -803,7 +816,7 @@ fn check_unevaluated_node(node: &syntax::Node, ctx: &mut ParseContext) {
         match &node.kind {
             NodeKind::Element(element) => {
                 for head in &element.chain {
-                    check_head(head, line, false, ctx);
+                    check_head(head, line, ctx);
                 }
                 check_unevaluated_content(node, element, ctx);
                 if let Some(text) = &element.text {
@@ -866,7 +879,7 @@ fn check_unevaluated_content(
 
 /// Check a head that was never evaluated: its name, and its attributes
 /// (for a call, see [`check_call`]).
-fn check_head(head: &syntax::Head, line: usize, inline: bool, ctx: &mut ParseContext) {
+fn check_head(head: &syntax::Head, line: usize, ctx: &mut ParseContext) {
     let is_function =
         ctx.namespace.contains(&head.name) || ctx.defined_functions.contains_key(&head.name);
     if is_function {
@@ -876,10 +889,7 @@ fn check_head(head: &syntax::Head, line: usize, inline: bool, ctx: &mut ParseCon
         }
         return;
     }
-    if let Err(mut e) = parse_element_kind(&head.name, line, ctx) {
-        if inline {
-            e.severity = Severity::Warning;
-        }
+    if let Err(e) = parse_element_kind(&head.name, line, ctx) {
         ctx.diagnostics.push(e);
         return;
     }
@@ -891,7 +901,7 @@ fn check_head(head: &syntax::Head, line: usize, inline: bool, ctx: &mut ParseCon
 /// The attributes of a list that is never evaluated that can be checked
 /// together: not bundles or `if()`s. Names are checked; a value with a
 /// variable in it depends on what the variable holds, so only a literal
-/// value is.
+/// value is (the other is checked as an empty value).
 fn literal_attrs(tokens: &[syntax::Attr]) -> Vec<syntax::Attr> {
     tokens
         .iter()
@@ -903,8 +913,8 @@ fn literal_attrs(tokens: &[syntax::Attr]) -> Vec<syntax::Attr> {
             let mut a = a.clone();
             let variable = |v: &String| v.contains('$');
             if !a.key.contains('$') && a.value.as_ref().is_some_and(variable) {
-                a.value = None;
-                a.raw = a.key.clone();
+                a.value = Some(String::new());
+                a.raw = format!("{} ", a.key);
             }
             a
         })
@@ -971,7 +981,7 @@ fn written_parameter_forms(
 fn check_inline_heads(text: &syntax::Text, line: usize, ctx: &mut ParseContext) {
     for segment in &text.segments {
         if let Segment::Inline(inline) = segment {
-            check_head(&inline.head, line, true, ctx);
+            check_head(&inline.head, line, ctx);
             if let Some(text) = &inline.text {
                 check_inline_heads(text, line, ctx);
             }
@@ -1153,7 +1163,7 @@ impl Evaluator {
                             "lang" => ctx.lang = Some(value),
                             "favicon" => ctx.favicon = Some(value),
                             other => ctx.diagnostics.push(
-                                Diagnostic::warning(
+                                Diagnostic::error(
                                     code::UNKNOWN_PAGE_ATTRIBUTE,
                                     line_num,
                                     format!(
@@ -1194,7 +1204,9 @@ impl Evaluator {
                     }
                     // Attribute bundle: @let name [attr1, attr2, ...]
                     LetForm::Bundle(list) => {
+                        ctx.in_bundle = true;
                         let attrs = parse_attr_list(&list.attrs, line_num, ctx, true, &[]);
+                        ctx.in_bundle = false;
                         ctx.env.define(name, Binding::Bundle(Rc::new(attrs)));
                         ctx.define_lines.entry(name.to_string()).or_insert(line_num);
                     }
@@ -2010,7 +2022,7 @@ impl Evaluator {
             }
             for message in problems {
                 ctx.diagnostics.push(
-                    Diagnostic::warning(code::NO_SINGLE_ROOT, line_num, message)
+                    Diagnostic::error(code::NO_SINGLE_ROOT, line_num, message)
                         .source(content)
                         .subject(name),
                 );
@@ -2284,7 +2296,26 @@ fn set_variable(name: &str, value: Value, line_num: usize, ctx: &mut ParseContex
         let css = value
             .quoted_css()
             .map_or_else(|| value.to_string(), str::to_string);
-        ctx.css_vars.push((name.to_string(), css));
+        match css_breakout(&css) {
+            Some(reason) => {
+                let diagnostic = Diagnostic::error(
+                    code::INVALID_VALUE,
+                    line_num,
+                    format!(
+                        "the value of '{}' has {}: `{}` can't be written into the page's CSS",
+                        name, reason, css
+                    ),
+                )
+                .subject(css.as_str());
+                ctx.push_once(match &ctx.current_source {
+                    (current, Some(text)) if *current == line_num => {
+                        diagnostic.source(text.clone())
+                    }
+                    _ => diagnostic,
+                });
+            }
+            None => ctx.css_vars.push((name.to_string(), css)),
+        }
     }
     let mut path = name.split('.');
     let root = path.next().unwrap_or(name);
@@ -3290,35 +3321,6 @@ fn suggest_var_name(input: &str, vars: &[&str]) -> Option<String> {
 // Attribute parsing
 // ---------------------------------------------------------------------------
 
-/// Attributes that expect purely numeric values (px-based) or values with CSS units.
-const NUMERIC_ATTRS: &[&str] = &[
-    "spacing",
-    "gap",
-    "padding",
-    "padding-top",
-    "padding-bottom",
-    "padding-left",
-    "padding-right",
-    "min-width",
-    "max-width",
-    "min-height",
-    "max-height",
-    "border-radius",
-    "font-size",
-    "column-gap",
-    "row-gap",
-    "top",
-    "right",
-    "bottom",
-    "left",
-    "letter-spacing",
-];
-
-const CSS_UNIT_SUFFIXES: &[&str] = &[
-    "px", "%", "rem", "em", "vh", "vw", "vmin", "vmax", "dvh", "svh", "lvh", "ch", "ex", "cm",
-    "mm", "in", "pt", "pc", "fr",
-];
-
 /// The quoted strings of a CSS value, without their quotes.
 fn css_strings(value: &str) -> Vec<&str> {
     let mut strings = Vec::new();
@@ -3379,36 +3381,147 @@ fn not_css_if(value: &str) -> Option<&str> {
     None
 }
 
-fn has_css_unit(value: &str) -> bool {
-    CSS_UNIT_SUFFIXES.iter().any(|u| value.ends_with(u))
-        || value.starts_with("var(")
-        || value.starts_with("calc(")
-        || value.starts_with("clamp(")
-        || value.starts_with("min(")
-        || value.starts_with("max(")
+/// Why a CSS value can't be written into a rule as it is, whatever it
+/// means: a `;` (outside parentheses, where CSS's own `if()` uses it), a
+/// `{` or a `}` would end the declaration or the rule, and an unclosed
+/// quote or parenthesis would run on into the rules after it. Quoted
+/// strings are text, and a backslash escapes the character after it, as
+/// in CSS.
+fn css_breakout(value: &str) -> Option<&'static str> {
+    let mut quote = None;
+    let mut depth = 0usize;
+    let mut chars = value.chars();
+    while let Some(c) = chars.next() {
+        match (quote, c) {
+            (_, '\\') => {
+                chars.next();
+            }
+            (Some(q), c) if c == q => quote = None,
+            (Some(_), _) => {}
+            (None, '"' | '\'') => quote = Some(c),
+            (None, '(') => depth += 1,
+            (None, ')') if depth == 0 => return Some("a `)` that closes nothing"),
+            (None, ')') => depth -= 1,
+            (None, ';') if depth == 0 => return Some("a `;`, which would end the declaration"),
+            (None, '{' | '}') => return Some("a `{` or `}`, which would end the CSS rule"),
+            _ => {}
+        }
+    }
+    match (quote, depth) {
+        (Some('"'), _) => Some("a `\"` that isn't closed"),
+        (Some(_), _) => Some("a `'` that isn't closed"),
+        (None, 0) => None,
+        (None, _) => Some("a `(` that isn't closed"),
+    }
 }
 
-/// Attributes that accept numeric OR keyword values.
-const NUMERIC_OR_KEYWORD_ATTRS: &[&str] = &["width", "height"];
-const SIZE_KEYWORDS: &[&str] = &["fill", "shrink"];
+/// The hex colors of a CSS value that don't have 3, 4, 6 or 8 hex
+/// digits. A `#` word in a CSS value is a color, except inside `url(...)`
+/// and quoted strings.
+fn bad_hex_colors(value: &str) -> Vec<&str> {
+    let mut bad = Vec::new();
+    let mut quote = None;
+    let mut in_url = 0usize;
+    let mut depth = 0usize;
+    let mut chars = value.char_indices().peekable();
+    while let Some((at, c)) = chars.next() {
+        match (quote, c) {
+            (_, '\\') => {
+                chars.next();
+            }
+            (Some(q), c) if c == q => quote = None,
+            (Some(_), _) => {}
+            (None, '"' | '\'') => quote = Some(c),
+            (None, '(') => {
+                depth += 1;
+                if value[..at].ends_with("url") && in_url == 0 {
+                    in_url = depth;
+                }
+            }
+            (None, ')') => {
+                if in_url == depth {
+                    in_url = 0;
+                }
+                depth = depth.saturating_sub(1);
+            }
+            (None, '#') if in_url == 0 => {
+                let end = value[at + 1..]
+                    .find(|c: char| !(c.is_alphanumeric() || c == '-' || c == '_'))
+                    .map_or(value.len(), |n| at + 1 + n);
+                let hex = &value[at + 1..end];
+                if !(matches!(hex.len(), 3 | 4 | 6 | 8)
+                    && hex.chars().all(|c| c.is_ascii_hexdigit()))
+                {
+                    bad.push(&value[at..end]);
+                }
+            }
+            _ => {}
+        }
+    }
+    bad
+}
 
-fn validate_attr_value(attr: &Attribute, line_num: usize, ctx: &mut ParseContext) {
-    let base_key = crate::vocab::base_attribute(attr.key.as_str());
+/// A diagnostic about an attribute, with its column and source line when
+/// it is on the line being evaluated.
+fn at_attribute(diagnostic: Diagnostic, column: Option<usize>, ctx: &ParseContext) -> Diagnostic {
+    match (&ctx.current_source, column) {
+        ((current, Some(text)), Some(column)) if *current == diagnostic.line => {
+            diagnostic.column(column).source(text.clone())
+        }
+        _ => diagnostic,
+    }
+}
 
+/// Check a style's value. Values go to the CSS as written, so only what
+/// can't be wrong in any CSS is checked: a value that would break out of
+/// its rule is an error (and it is left out); a hex color without 3, 4, 6
+/// or 8 digits, an `if()` that isn't CSS's and a quoted font stack are
+/// warnings. Returns whether the value can be written.
+fn check_css_value(
+    attr: &Attribute,
+    base: &str,
+    line: usize,
+    column: Option<usize>,
+    ctx: &mut ParseContext,
+) -> bool {
+    let Some(value) = &attr.value else {
+        return true;
+    };
+    if let Some(reason) = css_breakout(value) {
+        let diagnostic = Diagnostic::error(
+            code::INVALID_VALUE,
+            line,
+            format!(
+                "the value of '{}' has {}: `{}` can't be written into the page's CSS",
+                attr.key, reason, value
+            ),
+        )
+        .subject(value.as_str());
+        ctx.diagnostics.push(at_attribute(diagnostic, column, ctx));
+        return false;
+    }
+    if crate::vocab::is_custom_property(base) {
+        return true;
+    }
+
+    let warn = |ctx: &mut ParseContext, diagnostic: Diagnostic| {
+        let diagnostic = at_attribute(diagnostic, column, ctx);
+        ctx.diagnostics.push(diagnostic);
+    };
     // In CSS, a quoted font-family is one family, commas and all
-    if base_key == "font-family"
-        && let Some(val) = &attr.value
-        && let Some(family) = css_strings(val).into_iter().find(|s| s.contains(','))
+    if base == "font-family"
+        && let Some(family) = css_strings(value).into_iter().find(|s| s.contains(','))
     {
         let stack = family
             .split(',')
             .map(str::trim)
             .collect::<Vec<_>>()
             .join("\\, ");
-        ctx.diagnostics.push(
+        warn(
+            ctx,
             Diagnostic::warning(
                 code::INVALID_VALUE,
-                line_num,
+                line,
                 format!(
                     "font-family \"{}\" is one family, whose name has a comma in it: \
                      for a font stack, write `font-family {}`",
@@ -3419,334 +3532,276 @@ fn validate_attr_value(attr: &Attribute, line_num: usize, ctx: &mut ParseContext
             .suggest(Some(stack)),
         );
     }
-
-    if let Some(val) = &attr.value {
-        if let Some(call) = not_css_if(val) {
-            ctx.diagnostics.push(
-                Diagnostic::warning(
-                    code::INVALID_VALUE,
-                    line_num,
-                    format!(
-                        "'{}' is not CSS's if(), whose branches are written \
-                         `if(CONDITION: VALUE; else: VALUE)`",
-                        call
-                    ),
-                )
-                .subject(call),
-            );
-            return;
-        }
-        // CSS's if() is decided by the browser, like var()
-        if val.starts_with("if(") {
-            return;
-        }
-        if NUMERIC_ATTRS.contains(&base_key) {
-            // All space-separated parts must be numeric or have a CSS unit
-            for part in val.split_whitespace() {
-                if part.parse::<f64>().is_err() && !has_css_unit(part) {
-                    ctx.diagnostics.push(Diagnostic::new(
-                        code::INVALID_VALUE,
-                        Severity::Warning,
-                        line_num,
-                        format!(
-                            "'{}' expects a numeric value (with optional unit), got '{}'",
-                            attr.key, val
-                        ),
-                    ));
-                    return;
-                }
-            }
-        } else if NUMERIC_OR_KEYWORD_ATTRS.contains(&base_key) {
-            let is_keyword = SIZE_KEYWORDS.contains(&val.as_str());
-            let is_numeric = val.parse::<f64>().is_ok();
-            let has_unit = has_css_unit(val);
-            if !is_keyword && !is_numeric && !has_unit {
-                ctx.diagnostics.push(Diagnostic::new(
-                    code::INVALID_VALUE,
-                    Severity::Warning,
-                    line_num,
-                    format!(
-                        "'{}' expects a number or one of [{}], got '{}'",
-                        attr.key,
-                        SIZE_KEYWORDS.join(", "),
-                        val
-                    ),
-                ));
-            }
-        } else if base_key == "opacity" {
-            if let Ok(v) = val.parse::<f64>() {
-                if !(0.0..=1.0).contains(&v) {
-                    ctx.diagnostics.push(Diagnostic::new(
-                        code::INVALID_VALUE,
-                        Severity::Warning,
-                        line_num,
-                        format!("'opacity' should be between 0 and 1, got '{}'", val),
-                    ));
-                }
-            } else {
-                ctx.diagnostics.push(Diagnostic::new(
-                    code::INVALID_VALUE,
-                    Severity::Warning,
-                    line_num,
-                    format!("'opacity' expects a numeric value, got '{}'", val),
-                ));
-            }
-        } else if base_key == "z-index" {
-            if val.parse::<i32>().is_err() {
-                ctx.diagnostics.push(Diagnostic::new(
-                    code::INVALID_VALUE,
-                    Severity::Warning,
-                    line_num,
-                    format!("'z-index' expects an integer, got '{}'", val),
-                ));
-            }
-        } else if base_key == "display" {
-            const DISPLAY_VALUES: &[&str] = &[
-                "none",
-                "block",
-                "inline",
-                "inline-block",
-                "flex",
-                "inline-flex",
-                "grid",
-                "inline-grid",
-                "table",
-                "table-row",
-                "table-cell",
-                "contents",
-                "flow-root",
-                "list-item",
-            ];
-            if !DISPLAY_VALUES.contains(&val.as_str()) && !val.starts_with("var(") {
-                let suggestion = suggest_closest(val, DISPLAY_VALUES);
-                let msg = match suggestion {
-                    Some(s) => format!("unknown display value '{}', did you mean '{}'?", val, s),
-                    None => format!("unknown display value '{}'", val),
-                };
-                ctx.diagnostics.push(Diagnostic::new(
-                    code::INVALID_VALUE,
-                    Severity::Warning,
-                    line_num,
-                    msg,
-                ));
-            }
-        } else if base_key == "position" {
-            const POSITION_VALUES: &[&str] = &["static", "relative", "absolute", "fixed", "sticky"];
-            if !POSITION_VALUES.contains(&val.as_str()) && !val.starts_with("var(") {
-                let suggestion = suggest_closest(val, POSITION_VALUES);
-                let msg = match suggestion {
-                    Some(s) => format!("unknown position value '{}', did you mean '{}'?", val, s),
-                    None => format!("unknown position value '{}'", val),
-                };
-                ctx.diagnostics.push(Diagnostic::new(
-                    code::INVALID_VALUE,
-                    Severity::Warning,
-                    line_num,
-                    msg,
-                ));
-            }
-        } else if base_key == "overflow" || base_key == "overflow-x" || base_key == "overflow-y" {
-            const OVERFLOW_VALUES: &[&str] = &["visible", "hidden", "scroll", "auto", "clip"];
-            if !OVERFLOW_VALUES.contains(&val.as_str()) && !val.starts_with("var(") {
-                let suggestion = suggest_closest(val, OVERFLOW_VALUES);
-                let msg = match suggestion {
-                    Some(s) => format!("unknown overflow value '{}', did you mean '{}'?", val, s),
-                    None => format!("unknown overflow value '{}'", val),
-                };
-                ctx.diagnostics.push(Diagnostic::new(
-                    code::INVALID_VALUE,
-                    Severity::Warning,
-                    line_num,
-                    msg,
-                ));
-            }
-        } else if base_key == "text-align" {
-            const TEXT_ALIGN_VALUES: &[&str] =
-                &["left", "right", "center", "justify", "start", "end"];
-            if !TEXT_ALIGN_VALUES.contains(&val.as_str()) && !val.starts_with("var(") {
-                let suggestion = suggest_closest(val, TEXT_ALIGN_VALUES);
-                let msg = match suggestion {
-                    Some(s) => format!("unknown text-align value '{}', did you mean '{}'?", val, s),
-                    None => format!("unknown text-align value '{}'", val),
-                };
-                ctx.diagnostics.push(Diagnostic::new(
-                    code::INVALID_VALUE,
-                    Severity::Warning,
-                    line_num,
-                    msg,
-                ));
-            }
-        } else if base_key == "cursor" {
-            const CURSOR_VALUES: &[&str] = &[
-                "auto",
-                "default",
-                "none",
-                "pointer",
-                "wait",
-                "text",
-                "move",
-                "not-allowed",
-                "crosshair",
-                "grab",
-                "grabbing",
-                "help",
-                "progress",
-                "col-resize",
-                "row-resize",
-                "n-resize",
-                "s-resize",
-                "e-resize",
-                "w-resize",
-                "zoom-in",
-                "zoom-out",
-                "context-menu",
-                "cell",
-                "copy",
-                "alias",
-                "no-drop",
-            ];
-            if !CURSOR_VALUES.contains(&val.as_str())
-                && !val.starts_with("url(")
-                && !val.starts_with("var(")
-            {
-                let suggestion = suggest_closest(val, CURSOR_VALUES);
-                let msg = match suggestion {
-                    Some(s) => format!("unknown cursor value '{}', did you mean '{}'?", val, s),
-                    None => format!("unknown cursor value '{}'", val),
-                };
-                ctx.diagnostics.push(Diagnostic::new(
-                    code::INVALID_VALUE,
-                    Severity::Warning,
-                    line_num,
-                    msg,
-                ));
-            }
-        } else if base_key == "font-weight" {
-            const WEIGHT_VALUES: &[&str] = &[
-                "normal", "bold", "bolder", "lighter", "100", "200", "300", "400", "500", "600",
-                "700", "800", "900",
-            ];
-            if !WEIGHT_VALUES.contains(&val.as_str()) && !val.starts_with("var(") {
-                ctx.diagnostics.push(Diagnostic::new(
-                    code::INVALID_VALUE,
-                    Severity::Warning,
-                    line_num,
-                    format!(
-                        "'font-weight' expects a weight keyword or number 100-900, got '{}'",
-                        val
-                    ),
-                ));
-            }
-        } else if base_key == "color" || base_key == "background" {
-            // Validate named CSS colors (only if not hex, rgb, hsl, var, etc.)
-            if !val.starts_with('#')
-                && !val.starts_with("rgb")
-                && !val.starts_with("hsl")
-                && !val.starts_with("var(")
-                && !val.starts_with("linear-gradient")
-                && !val.starts_with("radial-gradient")
-                && !val.starts_with("conic-gradient")
-                && !val.starts_with("oklch")
-                && !val.starts_with("oklab")
-                && !val.starts_with("color(")
-                && !val.starts_with("light-dark(")
-                && !val.contains("url(")
-                && !val.contains(' ')
-            // skip shorthand multi-value
-            {
-                const NAMED_COLORS: &[&str] = &[
-                    "transparent",
-                    "currentcolor",
-                    "inherit",
-                    "initial",
-                    "unset",
-                    "black",
-                    "white",
-                    "red",
-                    "green",
-                    "blue",
-                    "yellow",
-                    "orange",
-                    "purple",
-                    "pink",
-                    "brown",
-                    "gray",
-                    "grey",
-                    "cyan",
-                    "magenta",
-                    "lime",
-                    "olive",
-                    "navy",
-                    "teal",
-                    "aqua",
-                    "fuchsia",
-                    "maroon",
-                    "silver",
-                    "coral",
-                    "salmon",
-                    "tomato",
-                    "crimson",
-                    "firebrick",
-                    "darkred",
-                    "indigo",
-                    "violet",
-                    "plum",
-                    "orchid",
-                    "thistle",
-                    "lavender",
-                    "gold",
-                    "khaki",
-                    "wheat",
-                    "tan",
-                    "sienna",
-                    "chocolate",
-                    "peru",
-                    "beige",
-                    "ivory",
-                    "linen",
-                    "snow",
-                    "seashell",
-                    "mintcream",
-                    "skyblue",
-                    "steelblue",
-                    "royalblue",
-                    "dodgerblue",
-                    "cornflowerblue",
-                    "slategray",
-                    "slategrey",
-                    "dimgray",
-                    "dimgrey",
-                    "lightgray",
-                    "lightgrey",
-                    "darkgray",
-                    "darkgrey",
-                    "gainsboro",
-                    "whitesmoke",
-                ];
-                if !NAMED_COLORS.contains(&val.to_lowercase().as_str()) {
-                    let lower = val.to_lowercase();
-                    let suggestion = suggest_closest(&lower, NAMED_COLORS);
-                    let msg = match suggestion {
-                        Some(s) => format!("unknown color '{}', did you mean '{}'?", val, s),
-                        None => format!("unknown color '{}'", val),
-                    };
-                    ctx.diagnostics.push(
-                        Diagnostic::warning(code::UNKNOWN_COLOR, line_num, msg)
-                            .subject(val.as_str())
-                            .suggest(suggestion),
-                    );
-                }
-            }
-        }
+    if let Some(call) = not_css_if(value) {
+        warn(
+            ctx,
+            Diagnostic::warning(
+                code::INVALID_VALUE,
+                line,
+                format!(
+                    "'{}' is not CSS's if(), whose branches are written \
+                     `if(CONDITION: VALUE; else: VALUE)`",
+                    call
+                ),
+            )
+            .subject(call),
+        );
     }
+    for color in bad_hex_colors(value) {
+        warn(
+            ctx,
+            Diagnostic::warning(
+                code::INVALID_COLOR,
+                line,
+                format!(
+                    "invalid hex color '{}': a hex color has 3, 4, 6 or 8 hex digits",
+                    color
+                ),
+            )
+            .subject(color),
+        );
+    }
+    true
 }
 
-fn is_valid_hex_color(s: &str) -> bool {
-    if !s.starts_with('#') {
-        return true; // Not a hex color, skip
+/// Check an attribute written as a style or a flag (not `key=value`): its
+/// prefix, its name, and, for a style, its value. A name htmlang doesn't
+/// know but CSS could have (`corner-shape`) is passed to the CSS as written,
+/// with a warning; custom properties (`--brand`) and vendor-prefixed ones
+/// (`-webkit-...`) without one. Anything that can't be written into the
+/// page is an error; returns false then, and the attribute is left out.
+fn check_attribute(
+    attr: &Attribute,
+    line: usize,
+    column: Option<usize>,
+    after_another: bool,
+    ctx: &mut ParseContext,
+) -> bool {
+    use crate::vocab;
+    let (prefixes, base) = vocab::split_prefixes(&attr.key);
+    let fail = |ctx: &mut ParseContext, code: &'static str, message: String, subject: &str| {
+        let diagnostic = Diagnostic::error(code, line, message).subject(subject);
+        let diagnostic = at_attribute(diagnostic, column, ctx);
+        ctx.diagnostics.push(diagnostic);
+        false
+    };
+
+    // `hovr:color red`: a word and a `:` before the name is a prefix
+    if let Some(colon) = base.find(':')
+        && !base[..colon].is_empty()
+        && !base[..colon].contains(['=', ' ', '('])
+    {
+        let written = &base[..colon + 1];
+        let suggestion =
+            suggest_closest(written, &vocab::all_prefixes()).filter(|&closest| closest != written);
+        let message = match suggestion {
+            Some(closest) => format!("unknown prefix '{}', did you mean '{}'?", written, closest),
+            // `nth:2n` without the attribute after its expression
+            None if written == "nth:" => format!(
+                "'{}': the prefix is `nth:EXPR:`, followed by the attribute \
+                 (`nth:2n+1:color red`)",
+                attr.key
+            ),
+            None => format!("unknown prefix '{}'", written),
+        };
+        let diagnostic = Diagnostic::error(code::UNKNOWN_PREFIX, line, message)
+            .subject(written)
+            .suggest(suggestion);
+        let diagnostic = at_attribute(diagnostic, column, ctx);
+        ctx.diagnostics.push(diagnostic);
+        return false;
     }
-    let hex = &s[1..];
-    matches!(hex.len(), 3 | 4 | 6 | 8) && hex.chars().all(|c| c.is_ascii_hexdigit())
+    if prefixes.len() > 1 {
+        return fail(
+            ctx,
+            code::INVALID_PREFIX,
+            format!(
+                "'{}' has more than one prefix: an attribute takes one prefix, so `{}` and `{}` \
+                 can't both apply",
+                attr.key, prefixes[0], prefixes[1]
+            ),
+            &attr.key,
+        );
+    }
+    // The selector of `has(...)` or `nth:...:` goes into the CSS as written
+    if let Some(prefix) = prefixes.first()
+        && let Some(reason) = css_breakout(prefix.trim_end_matches(':'))
+    {
+        return fail(
+            ctx,
+            code::INVALID_PREFIX,
+            format!(
+                "the prefix '{}' has {}: it can't be written into the page's CSS",
+                prefix, reason
+            ),
+            prefix,
+        );
+    }
+    let prefixed = !prefixes.is_empty();
+    // `md:id=x`: `=` makes an HTML attribute, which has no states
+    if prefixed && let Some((name, _)) = base.split_once('=') {
+        return fail(
+            ctx,
+            code::INVALID_PREFIX,
+            format!(
+                "'{}': a prefix applies to a style, and `{}=` is an HTML attribute",
+                attr.key, name
+            ),
+            &attr.key,
+        );
+    }
+    let is_html_name = |name: &str| {
+        vocab::HTML_ATTRIBUTES.contains(&name)
+            || name.starts_with("aria-")
+            || name.starts_with("data-")
+    };
+
+    let Some(value) = &attr.value else {
+        if vocab::HTMLANG_FLAGS.contains(&base) {
+            return true;
+        }
+        if vocab::BOOLEAN_HTML_ATTRS.contains(&base) {
+            if !prefixed {
+                return true;
+            }
+            return fail(
+                ctx,
+                code::INVALID_PREFIX,
+                format!(
+                    "'{}': a prefix applies to a style, and '{}' is an HTML attribute",
+                    attr.key, base
+                ),
+                &attr.key,
+            );
+        }
+        if vocab::is_style_attribute(base)
+            || vocab::is_custom_property(base)
+            || vocab::is_vendor_property(base)
+        {
+            return fail(
+                ctx,
+                code::MISSING_VALUE,
+                format!("'{}' needs a value: `{} VALUE`", attr.key, attr.key),
+                &attr.key,
+            );
+        }
+        if is_html_name(base) && !prefixed {
+            return fail(
+                ctx,
+                code::HTML_ATTRIBUTE_FORM,
+                format!(
+                    "'{}' is an HTML attribute that isn't a flag: write `{}=VALUE`",
+                    base, base
+                ),
+                base,
+            );
+        }
+        return unknown_attribute(attr, base, line, column, after_another, true, ctx);
+    };
+
+    if vocab::HTMLANG_FLAGS.contains(&base) {
+        return fail(
+            ctx,
+            code::INVALID_VALUE,
+            format!(
+                "'{}' is a flag and takes no value: write `{}` alone",
+                base, attr.key
+            ),
+            &attr.key,
+        );
+    }
+    if vocab::is_style_attribute(base)
+        || vocab::is_custom_property(base)
+        || vocab::is_vendor_property(base)
+    {
+        return check_css_value(attr, base, line, column, ctx);
+    }
+    if is_html_name(base) && !prefixed {
+        let diagnostic = Diagnostic::error(
+            code::HTML_ATTRIBUTE_FORM,
+            line,
+            format!(
+                "'{}' is an HTML attribute: write `{}={}`",
+                attr.key, attr.key, value
+            ),
+        )
+        .subject(attr.key.as_str());
+        let diagnostic = at_attribute(diagnostic, column, ctx);
+        ctx.diagnostics.push(diagnostic);
+        return false;
+    }
+    let passes = vocab::is_property_name(base);
+    unknown_attribute(attr, base, line, column, after_another, !passes, ctx)
+        && check_css_value(attr, base, line, column, ctx)
+}
+
+/// Whether an attribute of a bundle could pass a parameter to a function
+/// it is spliced into (`@let t [title Hello]`): a name without a prefix
+/// that isn't a style or a flag. Such a name is checked where the bundle is
+/// used.
+fn could_be_parameter(attr: &Attribute) -> bool {
+    use crate::vocab;
+    let key = attr.key.as_str();
+    let flag = attr.value.is_none()
+        && (vocab::HTMLANG_FLAGS.contains(&key) || vocab::BOOLEAN_HTML_ATTRS.contains(&key));
+    !attr.html
+        && !flag
+        && !vocab::is_style_attribute(key)
+        && key.starts_with(|c: char| c.is_alphabetic())
+        && key
+            .chars()
+            .all(|c| c.is_alphanumeric() || matches!(c, '-' | '_'))
+}
+
+/// An attribute name htmlang doesn't know. A style whose name CSS could
+/// have goes to the CSS as written, with a warning; anything else (a flag,
+/// a name that isn't a word) is an error. Returns whether it is kept.
+fn unknown_attribute(
+    attr: &Attribute,
+    base: &str,
+    line: usize,
+    column: Option<usize>,
+    after_another: bool,
+    error: bool,
+    ctx: &mut ParseContext,
+) -> bool {
+    let suggestion = suggest_closest(base, &crate::vocab::all_attributes());
+    let mut message = match (&suggestion, error) {
+        (Some(closest), true) => {
+            format!(
+                "unknown attribute '{}', did you mean '{}'?",
+                attr.key, closest
+            )
+        }
+        (None, true) => format!("unknown attribute '{}'", attr.key),
+        (Some(closest), false) => format!(
+            "unknown CSS property '{}', did you mean '{}'? It is written to the CSS as it is",
+            base, closest
+        ),
+        (None, false) => format!(
+            "unknown CSS property '{}': it is written to the CSS as it is",
+            base
+        ),
+    };
+    // `box-shadow 0 1px red, 0 2px blue` or `font-family Inter,
+    // sans-serif`: the comma ended the attribute, and the rest of the
+    // value became one
+    let rest_of_a_value = !base.starts_with(|c: char| c.is_ascii_alphabetic() || c == '-')
+        || (suggestion.is_none() && attr.value.is_none() && after_another);
+    if rest_of_a_value && error {
+        message.push_str(". A comma separates attributes: to keep one in a value, write `\\,`");
+    }
+    let severity = if error {
+        Severity::Error
+    } else {
+        Severity::Warning
+    };
+    let diagnostic = Diagnostic::new(code::UNKNOWN_ATTRIBUTE, severity, line, message)
+        .subject(base)
+        .suggest(suggestion);
+    let diagnostic = at_attribute(diagnostic, column, ctx);
+    ctx.diagnostics.push(diagnostic);
+    !error
 }
 
 /// Evaluate the attributes of a list: bundles are spliced in, `if()`
@@ -3780,7 +3835,7 @@ fn parse_attrs(
     text_keys: &[String],
 ) -> Vec<(Attribute, Option<Value>)> {
     let mut attrs: Vec<(Attribute, Option<Value>)> = Vec::new();
-    let mut seen_keys: Vec<String> = Vec::new();
+    let mut seen_keys: Vec<(String, bool)> = Vec::new();
     let mut chosen = Vec::new();
     choose_attrs(tokens, line_num, ctx, validate, text_keys, &mut chosen);
 
@@ -3802,7 +3857,19 @@ fn parse_attrs(
         if let Some(name) = bundle {
             if let Some(define_attrs) = ctx.env.bundle(&name).cloned() {
                 ctx.used_defines.insert(name);
-                attrs.extend(define_attrs.iter().map(|attr| (attr.clone(), None)));
+                for attr in define_attrs.iter() {
+                    // Checked here, where it is either a parameter or not
+                    let checked_here = validate
+                        && !ctx.in_bundle
+                        && could_be_parameter(attr)
+                        && !text_keys.contains(&attr.key);
+                    if checked_here
+                        && !check_attribute(attr, line, column(0), !attrs.is_empty(), ctx)
+                    {
+                        continue;
+                    }
+                    attrs.push((attr.clone(), None));
+                }
             } else {
                 not_a_bundle(&name, line, column(0), ctx);
             }
@@ -3870,93 +3937,52 @@ fn parse_attrs(
         // parameter's value is text for the function
         let validate = validate && filled && !text_keys.contains(&attr.key);
 
-        // Warn on duplicate attributes (compare full key so pseudo-class
-        // variants like `border` and `hover:border` are not conflated)
+        // A duplicate is reported (compare the full key, so `border` and
+        // `hover:border` differ, and the form, so `width=800` and
+        // `width 200` do too), and the later one wins
         if validate {
-            if seen_keys.contains(&attr.key) {
-                ctx.diagnostics.push(Diagnostic::new(
-                    code::DUPLICATE_ATTRIBUTE,
-                    Severity::Warning,
-                    line_num,
-                    format!("duplicate attribute '{}'", attr.key),
-                ));
+            let seen = (attr.key.clone(), attr.html);
+            if seen_keys.contains(&seen) {
+                let message = if attr.html {
+                    format!("duplicate attribute '{}='", attr.key)
+                } else {
+                    format!("duplicate attribute '{}': the later one wins", attr.key)
+                };
+                let diagnostic = Diagnostic::warning(code::DUPLICATE_ATTRIBUTE, line, message)
+                    .subject(attr.key.as_str());
+                let diagnostic = at_attribute(diagnostic, column(0), ctx);
+                ctx.diagnostics.push(diagnostic);
             } else {
-                seen_keys.push(attr.key.clone());
-            }
-
-            // Color validation for hex colors
-            if !attr.html
-                && matches!(
-                    crate::vocab::base_attribute(&attr.key),
-                    "background" | "color"
-                )
-                && let Some(ref val) = attr.value
-                && val.starts_with('#')
-                && !is_valid_hex_color(val)
-            {
-                ctx.diagnostics.push(Diagnostic::new(
-                    code::INVALID_COLOR,
-                    Severity::Warning,
-                    line_num,
-                    format!("invalid hex color '{}'", val),
-                ));
+                seen_keys.push(seen);
             }
         }
 
-        // Warn on unknown attributes. `key=value` HTML attributes may use any
-        // name; everything else must be a known style.
-        if validate && !attr.html {
-            let base_key = crate::vocab::base_attribute(attr.key.as_str());
-            let is_boolean_html =
-                attr.value.is_none() && crate::vocab::BOOLEAN_HTML_ATTRS.contains(&base_key);
-            if is_boolean_html || crate::vocab::is_style_attribute(base_key) {
-                validate_attr_value(&attr, line_num, ctx);
-            } else if crate::vocab::HTML_ATTRIBUTES.contains(&base_key)
-                || base_key.starts_with("aria-")
-                || base_key.starts_with("data-")
-            {
-                ctx.diagnostics.push(
-                    Diagnostic::new(
-                        code::HTML_ATTRIBUTE_FORM,
-                        Severity::Warning,
-                        line_num,
-                        format!(
-                            "'{}' is an HTML attribute: write `{}={}`",
-                            attr.key,
-                            attr.key,
-                            attr.value.as_deref().unwrap_or("")
-                        ),
-                    )
-                    .subject(attr.key.as_str()),
-                );
-            } else {
-                let suggestion = suggest_closest(base_key, &crate::vocab::all_attributes());
-                let mut msg = match &suggestion {
-                    Some(closest) => {
-                        format!(
-                            "unknown attribute '{}', did you mean '{}'?",
-                            attr.key, closest
-                        )
-                    }
-                    None => format!("unknown attribute '{}'", attr.key),
-                };
-                // `box-shadow 0 1px red, 0 2px blue` or `font-family Inter,
-                // sans-serif`: the comma ended the attribute, and the rest
-                // of the value became one
-                let rest_of_a_value = !base_key
-                    .starts_with(|c: char| c.is_ascii_alphabetic() || c == '-')
-                    || (suggestion.is_none() && attr.value.is_none() && !attrs.is_empty());
-                if rest_of_a_value {
-                    msg.push_str(
-                        ". A comma separates attributes: to keep one in a value, write `\\,`",
-                    );
-                }
-                ctx.diagnostics.push(
-                    Diagnostic::warning(code::UNKNOWN_ATTRIBUTE, line_num, msg)
-                        .subject(base_key)
-                        .suggest(suggestion),
-                );
+        // At a call, a name close to one of the function's parameters is
+        // a misspelled parameter, not an attribute for its root
+        if validate && !text_keys.is_empty() && could_be_parameter(&attr) {
+            let params: Vec<&str> = text_keys.iter().map(String::as_str).collect();
+            if let Some(closest) = suggest_closest(&attr.key, &params) {
+                let diagnostic = Diagnostic::error(
+                    code::UNKNOWN_ATTRIBUTE,
+                    line,
+                    format!(
+                        "unknown parameter '{}', did you mean '{}'?",
+                        attr.key, closest
+                    ),
+                )
+                .subject(attr.key.as_str())
+                .suggest(Some(closest));
+                let diagnostic = at_attribute(diagnostic, column(0), ctx);
+                ctx.diagnostics.push(diagnostic);
+                continue;
             }
+        }
+
+        // A style or a flag: its name is checked, and what can't be
+        // written into the page is an error and left out
+        let checked = validate && !attr.html && !(ctx.in_bundle && could_be_parameter(&attr));
+        if checked && !check_attribute(&attr, line, column(0), !attrs.is_empty(), ctx) {
+            continue;
         }
 
         attrs.push((attr, typed));
@@ -4113,9 +4139,9 @@ fn text_segments(text: &syntax::Text, ctx: &mut ParseContext) -> Vec<TextSegment
                         }
                     }
                     Err(mut e) => {
-                        // Keep the braces as literal text, but flag what
-                        // looks like a mistyped inline element.
-                        e.severity = Severity::Warning;
+                        // A misspelled element is an error inline too (a
+                        // brace that is text is written `\{`); the braces
+                        // stay as written
                         e.source_line = Some(text.raw.as_str().into());
                         ctx.diagnostics.push(e);
                         start.get_or_insert(inline.span);
@@ -4363,30 +4389,9 @@ fn validate_tree(
         }
         if let Node::Element(elem) = node {
             let start = diagnostics.len();
+            dropped_by_the_element(elem, diagnostics);
             for attr in &elem.attrs {
                 let base = crate::vocab::base_attribute(&attr.key);
-                if base == "width"
-                    && attr.value.as_deref() == Some("fill")
-                    && !matches!(parent_kind, Some(ElementKind::Row))
-                {
-                    diagnostics.push(Diagnostic::new(
-                        code::FILL_FALLBACK,
-                        Severity::Warning,
-                        elem.line_num,
-                        "'width fill' works best inside @row; using 100% as fallback".to_string(),
-                    ));
-                }
-                if base == "height"
-                    && attr.value.as_deref() == Some("fill")
-                    && !parent_kind.is_some_and(ElementKind::is_column)
-                {
-                    diagnostics.push(Diagnostic::new(
-                        code::FILL_FALLBACK,
-                        Severity::Warning,
-                        elem.line_num,
-                        "'height fill' works best inside @el; using 100% as fallback".to_string(),
-                    ));
-                }
 
                 // Container-only attributes on non-container elements
                 if CONTAINER_ONLY_ATTRS.contains(&base) && !is_container(&elem.kind) {
@@ -4605,6 +4610,71 @@ fn validate_tree(
 
             validate_tree(&elem.children, Some(&elem.kind), diagnostics);
         }
+    }
+}
+
+/// What an element has no place for in HTML, which would otherwise be
+/// left out of the page: attributes on `@fragment` (which has no element
+/// of its own), styles and text on `@script` (whose code is its body), and
+/// content in a void element such as `@input`.
+fn dropped_by_the_element(elem: &Element, diagnostics: &mut Vec<Diagnostic>) {
+    let name = elem.kind.name();
+    let keys = |attrs: Vec<&Attribute>| {
+        attrs
+            .iter()
+            .map(|a| format!("'{}'", a.key))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let mut error = |code: &'static str, message: String| {
+        diagnostics.push(Diagnostic::error(code, elem.line_num, message).subject(name))
+    };
+    if elem.kind == ElementKind::Fragment && !elem.attrs.is_empty() {
+        error(
+            code::UNEXPECTED_ARGUMENT,
+            format!(
+                "@fragment has no element of its own to put attributes on, so {} would go \
+                 nowhere: put them on its children, or use @el",
+                keys(elem.attrs.iter().collect())
+            ),
+        );
+    }
+    if elem.kind == ElementKind::Script {
+        let styles: Vec<&Attribute> = elem
+            .attrs
+            .iter()
+            .filter(|a| !a.html && !crate::vocab::BOOLEAN_HTML_ATTRS.contains(&a.key.as_str()))
+            .collect();
+        if !styles.is_empty() {
+            error(
+                code::UNEXPECTED_ARGUMENT,
+                format!(
+                    "@script isn't shown on the page, so its styles {} would go nowhere",
+                    keys(styles)
+                ),
+            );
+        }
+        if let Some(argument) = &elem.argument {
+            error(
+                code::UNEXPECTED_ARGUMENT,
+                format!(
+                    "@script takes its code as an indented block, so '{}' would go nowhere: \
+                     for a file, write `@script [src={}]`",
+                    argument, argument
+                ),
+            );
+        }
+    }
+    let void = elem.kind == ElementKind::Image || elem.kind.spec().is_some_and(|spec| spec.void);
+    if void && !elem.children.is_empty() {
+        error(
+            code::UNEXPECTED_CONTENT,
+            format!(
+                "@{} takes no content: it is an element without a closing tag, so its text \
+                 and indented lines would go nowhere",
+                name
+            ),
+        );
     }
 }
 

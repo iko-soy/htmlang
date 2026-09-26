@@ -16,6 +16,19 @@ pub const HTMLANG_ATTRIBUTES: &[&str] = &[
     "spacing", "wrap",
 ];
 
+/// htmlang's own attributes that are flags, written without a value
+/// (`center-x`); the others take one (`spacing 8`).
+pub const HTMLANG_FLAGS: &[&str] = &[
+    "align-bottom",
+    "align-left",
+    "align-right",
+    "align-top",
+    "center-x",
+    "center-y",
+    "inline",
+    "wrap",
+];
+
 /// Standard CSS properties, sorted. Any of these can be written as an
 /// attribute and is copied into the generated CSS as-is.
 #[rustfmt::skip]
@@ -120,10 +133,10 @@ pub const CSS_PROPERTIES: &[&str] = &[
 /// written `key=value`.
 #[rustfmt::skip]
 pub const BOOLEAN_HTML_ATTRS: &[&str] = &[
-    "allowfullscreen", "async", "autofocus", "autoplay", "checked", "controls", "defer",
-    "disabled", "download", "formnovalidate", "inert", "loop", "multiple", "muted", "nomodule",
-    "novalidate", "open", "playsinline", "popover", "readonly", "required", "reversed",
-    "sandbox", "selected",
+    "allowfullscreen", "async", "autofocus", "autoplay", "checked", "controls", "default",
+    "defer", "disabled", "download", "formnovalidate", "hidden", "inert", "ismap", "itemscope",
+    "loop", "multiple", "muted", "nomodule", "novalidate", "open", "playsinline", "popover",
+    "readonly", "required", "reversed", "sandbox", "selected",
 ];
 
 /// Common HTML attribute names, used to suggest `key=value` when one is
@@ -233,39 +246,108 @@ pub const CONTAINER_QUERY_PREFIXES: &[&str] = &["cq-sm:", "cq-md:", "cq-lg:", "c
 
 /// Does `key` carry any state, media, responsive or container prefix?
 pub fn is_prefixed(key: &str) -> bool {
-    PSEUDO_PREFIXES.iter().any(|&(p, _)| key.starts_with(p))
-        || RESPONSIVE_PREFIXES.iter().any(|p| key.starts_with(p))
-        || MEDIA_PREFIXES.iter().any(|p| key.starts_with(p))
-        || CONTAINER_QUERY_PREFIXES.iter().any(|p| key.starts_with(p))
-        || key.starts_with("nth:")
-        || key.starts_with("has(")
+    prefix_len(key).is_some()
+}
+
+/// The length of the prefix `key` starts with (its `:` included), when it
+/// starts with one: `hover:`, `md:`, `nth:2n+1:`, `has(> img):`.
+pub fn prefix_len(key: &str) -> Option<usize> {
+    let known = PSEUDO_PREFIXES
+        .iter()
+        .map(|&(p, _)| p)
+        .chain(RESPONSIVE_PREFIXES.iter().copied())
+        .chain(MEDIA_PREFIXES.iter().copied())
+        .chain(CONTAINER_QUERY_PREFIXES.iter().copied())
+        .find(|p| key.starts_with(p));
+    if let Some(prefix) = known {
+        return Some(prefix.len());
+    }
+    if let Some(rest) = key.strip_prefix("nth:") {
+        return rest.find(':').map(|colon| 4 + colon + 1);
+    }
+    if key.starts_with("has(") {
+        // The selector may hold parentheses and colons of its own
+        let mut depth = 0;
+        for (i, c) in key.char_indices().skip(3) {
+            match c {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return key[i + 1..].starts_with(':').then_some(i + 2);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    None
+}
+
+/// The prefixes `key` starts with, and the rest: `md:hover:color` →
+/// `(["md:", "hover:"], "color")`.
+pub fn split_prefixes(key: &str) -> (Vec<&str>, &str) {
+    let mut prefixes = Vec::new();
+    let mut rest = key;
+    while let Some(len) = prefix_len(rest) {
+        prefixes.push(&rest[..len]);
+        rest = &rest[len..];
+    }
+    (prefixes, rest)
+}
+
+/// Every prefix's name, for "did you mean" suggestions.
+pub fn all_prefixes() -> Vec<&'static str> {
+    PSEUDO_PREFIXES
+        .iter()
+        .map(|&(p, _)| p)
+        .chain(RESPONSIVE_PREFIXES.iter().copied())
+        .chain(MEDIA_PREFIXES.iter().copied())
+        .chain(CONTAINER_QUERY_PREFIXES.iter().copied())
+        .chain(["nth:", "has("])
+        .collect()
 }
 
 /// The attribute name without its prefixes: `hover:md:background` →
 /// `background`, `nth:2n:color` → `color`, `has(.x):padding` → `padding`.
 pub fn base_attribute(key: &str) -> &str {
-    let mut key = key;
-    loop {
-        let stripped = PSEUDO_PREFIXES
-            .iter()
-            .map(|&(p, _)| p)
-            .chain(RESPONSIVE_PREFIXES.iter().copied())
-            .chain(MEDIA_PREFIXES.iter().copied())
-            .chain(CONTAINER_QUERY_PREFIXES.iter().copied())
-            .find_map(|p| key.strip_prefix(p))
-            .or_else(|| {
-                let rest = key.strip_prefix("nth:")?;
-                rest.find(':').map(|pos| &rest[pos + 1..])
-            })
-            .or_else(|| {
-                let rest = key.strip_prefix("has(")?;
-                rest.find("):").map(|pos| &rest[pos + 2..])
-            });
-        match stripped {
-            Some(rest) => key = rest,
-            None => return key,
-        }
-    }
+    split_prefixes(key).1
+}
+
+/// A CSS custom property's name: `--brand`.
+pub fn is_custom_property(name: &str) -> bool {
+    name.strip_prefix("--").is_some_and(|rest| {
+        !rest.is_empty()
+            && rest
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+    })
+}
+
+/// A vendor-prefixed property's name: `-webkit-tap-highlight-color`.
+pub fn is_vendor_property(name: &str) -> bool {
+    name.strip_prefix('-').is_some_and(|rest| {
+        rest.split_once('-').is_some_and(|(vendor, property)| {
+            !vendor.is_empty()
+                && vendor.chars().all(|c| c.is_ascii_lowercase())
+                && is_ident(property)
+        })
+    })
+}
+
+/// A word CSS could have as a property's name: letters, digits and `-`,
+/// starting with a letter, or a custom or vendor-prefixed name. Such a name
+/// is passed to the CSS as written, even when htmlang doesn't know it.
+pub fn is_property_name(name: &str) -> bool {
+    is_ident(name) || is_custom_property(name) || is_vendor_property(name)
+}
+
+fn is_ident(name: &str) -> bool {
+    name.starts_with(|c: char| c.is_ascii_alphabetic())
+        && !name.ends_with('-')
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
 }
 
 pub fn is_css_property(name: &str) -> bool {
@@ -296,6 +378,51 @@ mod tests {
         assert_eq!(super::base_attribute("has(.a):dark:padding"), "padding");
         assert_eq!(super::base_attribute("children:flex-shrink"), "flex-shrink");
         assert_eq!(super::base_attribute("width"), "width");
+        assert_eq!(super::base_attribute("has(:not(.a)):color"), "color");
+        assert_eq!(super::base_attribute("hovr:color"), "hovr:color");
+    }
+
+    #[test]
+    fn prefixes_split_one_by_one() {
+        assert_eq!(
+            super::split_prefixes("md:hover:color"),
+            (vec!["md:", "hover:"], "color")
+        );
+        assert_eq!(
+            super::split_prefixes("nth:2n+1:padding"),
+            (vec!["nth:2n+1:"], "padding")
+        );
+        assert_eq!(
+            super::split_prefixes("has(a:hover)"),
+            (vec![], "has(a:hover)")
+        );
+    }
+
+    #[test]
+    fn property_names_are_checked_by_form() {
+        for name in [
+            "corner-shape",
+            "--brand",
+            "--x_1",
+            "-webkit-tap-highlight-color",
+            "-moz-x",
+        ] {
+            assert!(super::is_property_name(name), "{}", name);
+        }
+        for name in [
+            "20",
+            "a!b",
+            "-x",
+            "--",
+            "colr-",
+            "hovr:color",
+            "-Webkit-x",
+            "",
+        ] {
+            assert!(!super::is_property_name(name), "{}", name);
+        }
+        assert!(super::is_custom_property("--brand"));
+        assert!(!super::is_vendor_property("--brand"));
     }
 
     #[test]

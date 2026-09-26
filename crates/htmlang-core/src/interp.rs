@@ -17,7 +17,8 @@
 //!   inserts the value of an expression (see `expr.rs`).
 //! - A `$` before anything else is text: `$5`, `$$`, a `$` at the end.
 //! - An undefined name is an error. A field that a record doesn't have is
-//!   empty, so optional fields of `@data` records work.
+//!   empty, and so are its fields (`$post.author.name` when `$post` has no
+//!   `author`), so optional fields of `@data` records work.
 //! - Quoted text (`@let arrow "→ "`, `@card [quote "→ "]`) remembers its
 //!   quotes: a CSS value gets them (`content $arrow` is `content:"→ "`),
 //!   text and HTML attribute values don't. See [`Sink`].
@@ -86,6 +87,35 @@ pub enum Problem {
     Undefined { name: String, offset: usize },
     /// A `${...}` whose expression doesn't evaluate.
     Invalid { message: String, offset: usize },
+    /// A record put where text goes, which it has none of: it would print
+    /// nothing.
+    Record { message: String, offset: usize },
+}
+
+/// The problem with putting `value`, written `written`, where text goes:
+/// a record has no text.
+fn no_text(written: &str, value: &Value, offset: usize) -> Option<Problem> {
+    let Value::Record(fields) = value else {
+        return None;
+    };
+    let name = written.strip_prefix('$').map(|name| {
+        name.strip_prefix('{')
+            .and_then(|n| n.strip_suffix('}'))
+            .map_or(name, str::trim)
+    });
+    let example = match (name, fields.first()) {
+        (Some(name), Some((field, _))) if is_path(name) => {
+            format!(", such as `${}.{}`", name, field)
+        }
+        _ => String::new(),
+    };
+    Some(Problem::Record {
+        message: format!(
+            "'{}' is a record, which has no text of its own: write one of its fields{}",
+            written, example
+        ),
+        offset,
+    })
 }
 
 fn is_name_char(c: char) -> bool {
@@ -147,8 +177,50 @@ fn is_path(s: &str) -> bool {
     rest.is_empty()
 }
 
+/// What a name path leads to so far: a value, or a field that a record
+/// (or an item that a list) doesn't have, which is empty, and so is every
+/// field of it.
+#[derive(Clone)]
+enum Step {
+    Value(Value),
+    Missing,
+}
+
+impl Step {
+    /// The field `name` of this step, or `None` when it has no fields
+    /// (text, a number, true or false).
+    fn field(&self, name: &str) -> Option<Step> {
+        let Step::Value(value) = self else {
+            return Some(Step::Missing);
+        };
+        match value {
+            Value::Record(fields) => Some(
+                fields
+                    .iter()
+                    .find(|(key, _)| key == name)
+                    .map_or(Step::Missing, |(_, value)| Step::Value(value.clone())),
+            ),
+            Value::List(list) => Some(
+                name.parse::<usize>()
+                    .ok()
+                    .and_then(|i| list.items.get(i).cloned())
+                    .map_or(Step::Missing, Step::Value),
+            ),
+            _ => None,
+        }
+    }
+
+    fn value(self) -> Value {
+        match self {
+            Step::Value(value) => value,
+            Step::Missing => Value::empty(),
+        }
+    }
+}
+
 /// The name path at the start of `s` (after a `$`) and its length: the
-/// name, and each `.field` while the value so far is a record or a list.
+/// name, and each `.field` while the value so far is a record or a list,
+/// or a field one of them doesn't have.
 fn path_at(s: &str, scope: &dyn Scope) -> Option<(String, usize)> {
     let n = name_len(s);
     if n == 0 {
@@ -156,10 +228,10 @@ fn path_at(s: &str, scope: &dyn Scope) -> Option<(String, usize)> {
     }
     let mut path = s[..n].to_string();
     let mut len = n;
-    let mut value = scope.get(&path);
+    let mut step = scope.get(&path).map(Step::Value);
     while let Some(rest) = s[len..].strip_prefix('.') {
         let f = word_len(rest, is_name_char);
-        let Some(field) = value
+        let Some(field) = step
             .as_ref()
             .filter(|_| f > 0)
             .and_then(|v| v.field(&rest[..f]))
@@ -168,7 +240,7 @@ fn path_at(s: &str, scope: &dyn Scope) -> Option<(String, usize)> {
         };
         path = format!("{}.{}", path, &rest[..f]);
         len += 1 + f;
-        value = Some(field);
+        step = Some(field);
     }
     Some((path, len))
 }
@@ -200,14 +272,14 @@ pub fn reference<'a>(s: &'a str, scope: &dyn Scope) -> Option<(Reference<'a>, us
 }
 
 /// The value of a name path, or `None` when it is undefined. A field that
-/// a record doesn't have is empty.
+/// a record doesn't have is empty, and so is any field of it.
 pub fn resolve(path: &str, scope: &dyn Scope) -> Option<Value> {
     let mut parts = path.split('.');
-    let mut value = scope.get(parts.next()?)?;
+    let mut step = Step::Value(scope.get(parts.next()?)?);
     for field in parts {
-        value = value.field(field)?;
+        step = step.field(field)?;
     }
-    Some(value)
+    Some(step.value())
 }
 
 /// Fill in the `$name`s and `${...}`s of one slot's text, for text (see
@@ -252,10 +324,13 @@ pub fn interpolate_for(text: &str, scope: &dyn Scope, sink: Sink) -> (String, Ve
         };
         match reference {
             Reference::Var(path) => match resolve(&path, scope) {
-                Some(value) => out.push_str(&insert(
-                    value.to_string(),
-                    value.quoted_css().map(str::to_string),
-                )),
+                Some(value) => match no_text(written, &value, dollar) {
+                    Some(problem) => problems.push(problem),
+                    None => out.push_str(&insert(
+                        value.to_string(),
+                        value.quoted_css().map(str::to_string),
+                    )),
+                },
                 None => {
                     problems.push(Problem::Undefined {
                         name: path,
@@ -265,7 +340,10 @@ pub fn interpolate_for(text: &str, scope: &dyn Scope, sink: Sink) -> (String, Ve
                 }
             },
             Reference::Expr(source) => match expr::eval(source, scope) {
-                Ok(value) => out.push_str(&insert(value.to_string(), None)),
+                Ok(value) => match no_text(written, &value, dollar) {
+                    Some(problem) => problems.push(problem),
+                    None => out.push_str(&insert(value.to_string(), None)),
+                },
                 Err(error) => {
                     problems.push(match error {
                         // At the `${`

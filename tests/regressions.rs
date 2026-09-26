@@ -593,10 +593,17 @@ fn uncalled_functions_and_empty_loops_are_checked() {
     let src = "@data $e []\n@each $x in $e\n  @bogus\n@each $y in 1..2\n  $y\n@else\n  @nope\n";
     assert!(has_code(src, 3, "unknown-element"), "{:?}", codes(src));
     assert!(has_code(src, 7, "unknown-element"), "{:?}", codes(src));
-    // Inline elements in code that doesn't run warn, as they do when it runs
+    // An inline element in code that doesn't run is an error, as it is
+    // when it runs (a misspelled element is never a warning)
     let src = "@if false\n  Text with {@nosuch x}\n";
     assert!(
-        codes(src).contains(&(2, "unknown-element", Severity::Warning)),
+        codes(src).contains(&(2, "unknown-element", Severity::Error)),
+        "{:?}",
+        codes(src)
+    );
+    let src = "@paragraph\n  Text with {@nosuch x}\n";
+    assert!(
+        codes(src).contains(&(2, "unknown-element", Severity::Error)),
         "{:?}",
         codes(src)
     );
@@ -1381,4 +1388,64 @@ fn a_name_defined_out_of_sight_says_where_names_are_visible() {
         .find(|d| d.code == "undefined-variable")
         .expect("an error");
     assert!(!d.message.contains("block"), "{}", d.message);
+}
+
+// --- Input that was dropped without a word ---
+
+#[test]
+fn a_semicolon_from_data_no_longer_escapes_the_css_rule() {
+    let result =
+        parser::parse("@data $d {\"c\": \"red;} body{display:none\"}\n@el [color $d.c] x\n");
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "invalid-value" && d.severity == Severity::Error),
+        "{:?}",
+        result.diagnostics
+    );
+    let html = codegen::generate(&result.document);
+    assert!(!html.contains("body{display:none"), "{}", html);
+}
+
+#[test]
+fn stacked_prefixes_are_no_longer_dropped_silently() {
+    let result = parser::parse("@el [md:hover:color red, hover:md:color blue] x\n");
+    let errors: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == "invalid-prefix")
+        .collect();
+    assert_eq!(errors.len(), 2, "{:?}", result.diagnostics);
+}
+
+#[test]
+fn script_keeps_every_html_attribute() {
+    // It used to keep only src, type, defer, async, crossorigin, integrity,
+    // nomodule and id
+    let html = compile("@script [src=a.js, referrerpolicy=no-referrer, data-x=1, nonce=abc]\n");
+    assert!(
+        html.contains(r#"<script src="a.js" referrerpolicy="no-referrer" data-x="1" nonce="abc">"#),
+        "{}",
+        html
+    );
+}
+
+#[test]
+fn text_on_an_element_without_a_closing_tag_is_reported() {
+    // `@input hello` dropped the text
+    let d = parser::parse("@input [type=text, aria-label=x] hello\n").diagnostics;
+    assert!(
+        d.iter()
+            .any(|d| d.code == "unexpected-content" && d.severity == Severity::Error),
+        "{:?}",
+        d
+    );
+}
+
+#[test]
+fn a_duplicate_width_across_forms_is_not_reported() {
+    // DESIGN's own `@image [width=800, width 200]` warned "duplicate"
+    let d = parser::parse("@image [width=800, width 200, alt=A] a.png\n").diagnostics;
+    assert!(d.is_empty(), "{:?}", d);
 }

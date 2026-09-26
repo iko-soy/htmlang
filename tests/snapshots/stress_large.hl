@@ -47,7 +47,7 @@
   @if $active == true
     @link [color $--primary, font-weight bold, padding 8 12, background #eff6ff, dark:background #1e3a5f, border-radius 6] $url $label
   @else
-    @link [color $--gray, hover:color $--primary, padding 8 12, hover:background #f1f5f9, dark:hover:background #334155, border-radius 6, transition all 0.15s] $url $label
+    @link [color $--gray, hover:color $--primary, padding 8 12, hover:background #f1f5f9, border-radius 6, transition all 0.15s] $url $label
 
 @let @sidebar-section [title]
   @el [margin-bottom $--gap-lg]
@@ -59,7 +59,7 @@
     @text $initials
 
 @let @table-row [col1, col2, col3, col4]
-  @row [spacing 0, padding 12 16, border-bottom 1 solid $--border, dark:border-bottom 1 solid #334155, hover:background #f8fafc, dark:hover:background #1e293b]
+  @row [spacing 0, padding 12 16, border-bottom 1 solid $--border, dark:border-bottom 1 solid #334155, hover:background #f8fafc]
     @el [width 200]
       @text [font-size 14] $col1
     @el [width 150]
@@ -192,8 +192,8 @@
       @alert [message Welcome back! You have 3 new notifications and 2 pending tasks., type info]
 
       @row [spacing $--gap, margin-top $--gap-lg, sm:flex-direction column, lg:flex-direction row]
-        @stat-card [label Total Revenue, value $48,295, change +12.5% from last month]
-        @stat-card [label Active Users, value 2,847, change +8.2% from last week]
+        @stat-card [label Total Revenue, value $48\,295, change +12.5% from last month]
+        @stat-card [label Active Users, value 2\,847, change +8.2% from last week]
         @stat-card [label Conversion Rate, value 3.24%, change +0.4% from yesterday]
         @stat-card [label Open Tickets, value 142, change -5.1% from last month]
 
@@ -207,7 +207,7 @@
         @card [title Activity Feed]
           @el [spacing 12, margin-top 12]
             @each $member in $team-members
-              @row [spacing 12, align-items center, padding 8, hover:background #f8fafc, dark:hover:background #1e293b, border-radius 6]
+              @row [spacing 12, align-items center, padding 8, hover:background #f8fafc, border-radius 6]
                 @avatar [initials $member, size 32]
                 @el [spacing 2, width fill]
                   @text [font-size 14, font-weight bold, color $--dark, dark:color white] $member
@@ -267,7 +267,7 @@
           @card [title Team Members]
             @el [spacing 8, margin-top 12]
               @each $member in $team-members
-                @row [spacing 10, align-items center, padding 6 8, hover:background #f1f5f9, dark:hover:background #1e293b, border-radius 6, transition all 0.15s]
+                @row [spacing 10, align-items center, padding 6 8, hover:background #f1f5f9, border-radius 6, transition all 0.15s]
                   @avatar [initials $member, size 28]
                   @el [spacing 0, width fill]
                     @text [font-size 13, font-weight bold, color $--dark, dark:color white] $member
@@ -337,7 +337,7 @@
 
             @each $status in $statuses
               @each $project in $projects
-                @row [spacing 0, padding 10 16, border-bottom 1 solid $--border, dark:border-bottom 1 solid #334155, hover:background #f8fafc, dark:hover:background #1e293b, cursor pointer, transition all 0.1s]
+                @row [spacing 0, padding 10 16, border-bottom 1 solid $--border, dark:border-bottom 1 solid #334155, hover:background #f8fafc, cursor pointer, transition all 0.1s]
                   @el [width 60]
                     @text [font-size 13, color $--gray] #42
                   @el [width 200]

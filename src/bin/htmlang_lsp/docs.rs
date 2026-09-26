@@ -15,13 +15,6 @@ pub(crate) struct Doc {
     pub usage: &'static str,
 }
 
-impl Doc {
-    /// Does this attribute take a value (`spacing 20` vs `bold`)?
-    pub fn takes_value(&self) -> bool {
-        self.usage.trim() != self.name
-    }
-}
-
 const fn doc(name: &'static str, summary: &'static str, usage: &'static str) -> Doc {
     Doc {
         name,
@@ -44,10 +37,15 @@ pub(crate) const ELEMENTS: &[Doc] = &[
     ),
     doc("link", "Link (`<a>`); text after the URL is its content.", "@link /about About us"),
     doc("image", "Image (`<img>`); the argument is the source.", "@image [alt=Logo, width 120] logo.png"),
-    doc("script", "Script; its indented body is JavaScript, kept verbatim.", "@script\n  console.log(1)"),
+    doc(
+        "script",
+        "Script (`<script>`): HTML attributes such as `src=` and `defer`, and JavaScript as its \
+         indented body, kept verbatim. It isn't shown, so it takes no styles.",
+        "@script [src=app.js, defer]",
+    ),
     doc(
         "fragment",
-        "Groups children without a wrapper element.",
+        "Groups children without a wrapper element, so it takes no attributes.",
         "@fragment\n  @text A\n  @text B",
     ),
     doc(
@@ -278,6 +276,11 @@ fn attribute_hover(name: &str) -> Option<String> {
             "**{name}** \u{2014} CSS property `{name}`, passed through unchanged.\n\n[MDN](https://developer.mozilla.org/docs/Web/CSS/{name})"
         ));
     }
+    if vocab::is_custom_property(name) || vocab::is_vendor_property(name) {
+        return Some(format!(
+            "**{name}** \u{2014} CSS property `{name}`, written to the CSS as it is."
+        ));
+    }
     if vocab::BOOLEAN_HTML_ATTRS.contains(&name) {
         return Some(format!(
             "**{name}** \u{2014} Boolean HTML attribute, written bare: `[{name}]`."
@@ -405,5 +408,12 @@ mod tests {
         assert!(hover("@spacer").unwrap().contains("standard library"));
         assert!(hover("$truncate").unwrap().contains("bundle"));
         assert!(hover("@nav").unwrap().contains("<nav>"));
+        assert!(hover("hidden").unwrap().contains("Boolean"));
+        assert!(hover("--gap").unwrap().contains("as it is"));
+        assert!(
+            hover("-webkit-tap-highlight-color")
+                .unwrap()
+                .contains("as it is")
+        );
     }
 }

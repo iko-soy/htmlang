@@ -87,7 +87,16 @@ pub mod code {
 
     // Names
     pub const UNKNOWN_ELEMENT: &str = "unknown-element";
+    /// An attribute name htmlang doesn't know: a warning when CSS could
+    /// have the name (it is written to the CSS as it is), an error otherwise.
     pub const UNKNOWN_ATTRIBUTE: &str = "unknown-attribute";
+    /// A misspelled prefix (`hovr:color red`).
+    pub const UNKNOWN_PREFIX: &str = "unknown-prefix";
+    /// A prefix the attribute can't take: a second one (`md:hover:`), or
+    /// one on an HTML attribute (`hover:required`).
+    pub const INVALID_PREFIX: &str = "invalid-prefix";
+    /// A style written without its value (`[padding]`).
+    pub const MISSING_VALUE: &str = "missing-value";
     pub const HTML_ATTRIBUTE_FORM: &str = "html-attribute-form";
     pub const UNKNOWN_PAGE_ATTRIBUTE: &str = "unknown-page-attribute";
     pub const UNDEFINED_VARIABLE: &str = "undefined-variable";
@@ -96,8 +105,9 @@ pub mod code {
     pub const DUPLICATE_ATTRIBUTE: &str = "duplicate-attribute";
 
     // Values
+    /// A value that can't be written into the page's CSS (an error), or
+    /// one that can't mean what it says (a warning).
     pub const INVALID_VALUE: &str = "invalid-value";
-    pub const UNKNOWN_COLOR: &str = "unknown-color";
     pub const INVALID_COLOR: &str = "invalid-color";
     pub const INVALID_EXPRESSION: &str = "invalid-expression";
     pub const INVALID_JSON: &str = "invalid-json";
@@ -132,7 +142,6 @@ pub mod code {
 
     // Context: an attribute or element where it has no effect
     pub const NO_EFFECT: &str = "no-effect";
-    pub const FILL_FALLBACK: &str = "fill-fallback";
 
     // Accessibility
     pub const MISSING_ALT: &str = "missing-alt";
@@ -164,13 +173,15 @@ pub mod code {
         STRAY_ELSE,
         UNKNOWN_ELEMENT,
         UNKNOWN_ATTRIBUTE,
+        UNKNOWN_PREFIX,
+        INVALID_PREFIX,
+        MISSING_VALUE,
         HTML_ATTRIBUTE_FORM,
         UNKNOWN_PAGE_ATTRIBUTE,
         UNDEFINED_VARIABLE,
         ATTRIBUTE_FROM_VARIABLE,
         DUPLICATE_ATTRIBUTE,
         INVALID_VALUE,
-        UNKNOWN_COLOR,
         INVALID_COLOR,
         INVALID_EXPRESSION,
         INVALID_JSON,
@@ -190,7 +201,6 @@ pub mod code {
         CIRCULAR_INCLUDE,
         UNSET_ENVIRONMENT,
         NO_EFFECT,
-        FILL_FALLBACK,
         MISSING_ALT,
         MISSING_INPUT_TYPE,
         MISSING_LINK_TEXT,

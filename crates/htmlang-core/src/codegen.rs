@@ -973,32 +973,15 @@ fn generate_element(
     if elem.kind == ElementKind::Script {
         out.push_str(&ctx.indent());
         out.push_str("<script");
-        // Pass through src, type, defer, async, etc.
-        for attr in &elem.attrs {
-            let key = attr.key.as_str();
-            if matches!(
-                key,
-                "src"
-                    | "type"
-                    | "defer"
-                    | "async"
-                    | "crossorigin"
-                    | "integrity"
-                    | "nomodule"
-                    | "id"
-            ) {
-                if let Some(val) = &attr.value {
-                    out.push(' ');
-                    out.push_str(key);
-                    out.push_str("=\"");
-                    out.push_str(&html_escape(val));
-                    out.push('"');
-                } else {
-                    out.push(' ');
-                    out.push_str(key);
-                }
+        // Its HTML attributes (`src=`, `type=module`, `defer`, ...); it has
+        // no styles, which the parser reports
+        let (id, class) = extract_id_class(&elem.attrs);
+        for (key, value) in [("id", id), ("class", class)] {
+            if let Some(value) = value {
+                out.push_str(&format!(" {}=\"{}\"", key, html_escape(&value)));
             }
         }
+        emit_html_attrs(out, &elem.attrs);
         out.push('>');
         // Children are raw JS code, not HTML
         for child in &elem.children {
@@ -1525,6 +1508,11 @@ fn attrs_to_css(
         };
 
         let val = attr.value.as_deref();
+        // A style whose value came out empty (a field a record doesn't
+        // have, `${if()}` without its other branch) is left out
+        if val.is_some_and(|v| v.trim().is_empty()) {
+            continue;
+        }
 
         match effective_key {
             // Layout
@@ -1721,22 +1709,6 @@ fn attrs_to_css(
                 }
             }
 
-            // CSS containment for rendering performance
-            "contain" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "contain", v);
-                } else {
-                    push_css(&mut css, "contain", "layout style paint");
-                }
-            }
-            "content-visibility" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "content-visibility", v);
-                } else {
-                    push_css(&mut css, "content-visibility", "auto");
-                }
-            }
-
             // Outline (like border but doesn't affect layout)
             "outline" => {
                 if let Some(v) = val {
@@ -1851,11 +1823,6 @@ fn attrs_to_css(
                     push_css(&mut css, "margin", &css_px_multi(v));
                 }
             }
-            // Container queries
-            "container" => {
-                push_css(&mut css, "container-type", "inline-size");
-            }
-
             // Inset (shorthand for top/right/bottom/left)
             "inset" => {
                 if let Some(v) = val {
@@ -1951,6 +1918,15 @@ fn attrs_to_css(
                     } else {
                         push_css(&mut css, key, v);
                     }
+                }
+            }
+
+            // A name htmlang doesn't know but CSS could have (a custom
+            // property, a vendor-prefixed or a new property) is written as
+            // it is; the parser warned about an unknown one
+            key if crate::vocab::is_property_name(key) => {
+                if let Some(v) = val {
+                    push_css(&mut css, key, v);
                 }
             }
 

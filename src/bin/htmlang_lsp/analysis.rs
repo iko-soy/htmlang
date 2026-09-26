@@ -182,7 +182,6 @@ pub(crate) fn code_actions(
             // Replace a misspelled name with the closest known one.
             code::UNKNOWN_ELEMENT
             | code::UNKNOWN_ATTRIBUTE
-            | code::UNKNOWN_COLOR
             | code::UNKNOWN_SLOT
             | code::UNDEFINED_VARIABLE => {
                 let (Some(subject), Some(suggestion)) = (subject, suggestion) else {
@@ -213,8 +212,9 @@ pub(crate) fn code_actions(
             }
 
             // Rewrite a value as the compiler suggests (a quoted font
-            // stack as `A\, B`, a slot name `my footer` as `my-footer`).
-            code::INVALID_VALUE | code::INVALID_SLOT_NAME => {
+            // stack as `A\, B`, a slot name `my footer` as `my-footer`, a
+            // prefix `hovr:` as `hover:`).
+            code::INVALID_VALUE | code::INVALID_SLOT_NAME | code::UNKNOWN_PREFIX => {
                 let (Some(subject), Some(suggestion)) = (subject, suggestion) else {
                     continue;
                 };
@@ -1169,6 +1169,26 @@ mod tests {
         assert_eq!(edits[0].new_text, r"Inter\, sans-serif");
         assert_eq!(edits[0].range.start, Position::new(0, 17));
         assert_eq!(edits[0].range.end, Position::new(0, 36));
+    }
+
+    #[test]
+    fn a_misspelled_prefix_or_property_is_replaced() {
+        let found = fixes("@el [padding 4, hovr:color red] x\n");
+        let (_, edits) = found
+            .iter()
+            .find(|(t, _)| t == "Replace with 'hover:'")
+            .unwrap_or_else(|| panic!("{:?}", found));
+        assert_eq!(edits[0].new_text, "hover:");
+        assert_eq!(edits[0].range.start, Position::new(0, 16));
+        assert_eq!(edits[0].range.end, Position::new(0, 21));
+
+        // An unknown property is written as it is, with a warning and a fix
+        let found = fixes("@el [colr red] x\n");
+        assert!(
+            found.iter().any(|(t, _)| t == "Replace with 'color'"),
+            "{:?}",
+            found
+        );
     }
 
     #[test]

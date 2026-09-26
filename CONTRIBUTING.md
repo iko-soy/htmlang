@@ -89,6 +89,11 @@ Linux, macOS, and Windows. Your change should pass all three.
   `subject` and a replacement in `suggestion`.
 - Diagnostics should include `line` and, when practical, `column` and a
   `source_line` excerpt. Use `Severity::Help` for suggestions, not `Warning`.
+- Check names, not values, and never drop input silently. When something
+  the author wrote can't go into the page, report an error; a warning means
+  it went into the page as written. Check a CSS value only for what is
+  wrong in any CSS (see `css_breakout` in `parser.rs`), not against a list
+  of values the browser may know better.
 - No unwrap() on parsed user input. Use `Result<_, ParseError>` and record a
   diagnostic so the compiler keeps going.
 

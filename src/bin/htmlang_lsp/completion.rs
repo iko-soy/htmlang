@@ -811,7 +811,7 @@ fn attr_completions(range: Range, element: Option<&str>) -> Vec<CompletionItem> 
     };
     for name in vocab::HTMLANG_ATTRIBUTES {
         let doc = docs::attribute(name);
-        let insert = if doc.is_none_or(|d| d.takes_value()) {
+        let insert = if !vocab::HTMLANG_FLAGS.contains(name) {
             format!("{} ", name)
         } else {
             name.to_string()
@@ -872,7 +872,7 @@ fn attr_completions(range: Range, element: Option<&str>) -> Vec<CompletionItem> 
 fn state_attr_completions(prefix: &str, range: Range) -> Vec<CompletionItem> {
     let htmlang = vocab::HTMLANG_ATTRIBUTES
         .iter()
-        .map(|name| (*name, docs::attribute(name).is_none_or(|d| d.takes_value())));
+        .map(|name| (*name, !vocab::HTMLANG_FLAGS.contains(name)));
     let css = vocab::CSS_PROPERTIES.iter().map(|name| (*name, true));
     htmlang
         .chain(css)

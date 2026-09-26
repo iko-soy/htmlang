@@ -240,13 +240,19 @@ fn error_unknown_element_suggestion() {
 
 #[test]
 fn error_unknown_attribute() {
-    let diags = parse_diagnostics("@el [bakground red]");
+    // A name CSS could have is written as it is, with a warning
+    let result = htmlang::parser::parse("@el [bakground red]");
+    let diags = &result.diagnostics;
     assert!(
-        diags
-            .iter()
-            .any(|d| d.message.contains("unknown attribute") && d.message.contains("background")),
+        diags.iter().any(|d| d.code == "unknown-attribute"
+            && d.severity == htmlang::parser::Severity::Warning
+            && d.message.contains("did you mean 'background'")),
         "expected unknown attribute with suggestion, got: {:?}",
         diags
+    );
+    assert!(
+        htmlang::codegen::generate(&result.document).contains("bakground:red"),
+        "an unknown property is passed through"
     );
 }
 
@@ -296,37 +302,33 @@ fn error_each_bad_syntax() {
 }
 
 #[test]
-fn error_numeric_validation() {
-    let diags = parse_diagnostics("@el [padding abc]");
-    assert!(
-        diags
-            .iter()
-            .any(|d| d.message.contains("expects a numeric value")),
-        "expected numeric validation warning, got: {:?}",
-        diags
-    );
+fn values_pass_through_unchecked() {
+    // Values are CSS's to judge: none of these is a guess htmlang makes
+    let src = "@el [padding abc, opacity 50%, z-index auto, max-width none, \
+               color rebeccapurple, width fit-content, font-weight 450, display blok]\n  x";
+    let result = htmlang::parser::parse(src);
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    let html = htmlang::codegen::generate(&result.document);
+    for css in [
+        "padding:abc",
+        "opacity:50%",
+        "z-index:auto",
+        "max-width:none",
+        "color:rebeccapurple",
+        "width:fit-content",
+        "font-weight:450",
+        "display:blok",
+    ] {
+        assert!(html.contains(css), "{} in {}", css, html);
+    }
 }
 
 #[test]
-fn error_opacity_range() {
-    let diags = parse_diagnostics("@el [opacity 2.0]");
-    assert!(
-        diags.iter().any(|d| d.message.contains("between 0 and 1")),
-        "expected opacity range warning, got: {:?}",
-        diags
-    );
-}
-
-#[test]
-fn warning_fill_outside_row() {
-    let diags = parse_diagnostics("@el\n  @el [width fill]");
-    assert!(
-        diags
-            .iter()
-            .any(|d| d.message.contains("width fill") && d.message.contains("@row")),
-        "expected fill context warning, got: {:?}",
-        diags
-    );
+fn fill_in_a_column_is_its_full_width() {
+    // DESIGN: `width fill` takes the full width in a column, so no warning
+    let diags = parse_diagnostics("@el\n  @el [width fill]\n@row\n  @el [height fill]");
+    assert!(diags.is_empty(), "{:?}", diags);
+    assert!(compile("@el\n  @el [width fill]").contains("width:100%"));
 }
 
 #[test]
@@ -598,8 +600,20 @@ fn style_block_output() {
 
 #[test]
 fn container_attr() {
-    let output = compile("@page T\n@el [container]");
-    assert!(output.contains("container-type:inline-size"));
+    // `container` is CSS's shorthand, written as it is
+    let output = compile("@page T\n@el [container sidebar / inline-size]");
+    assert!(
+        output.contains("container:sidebar / inline-size"),
+        "{}",
+        output
+    );
+    // A property without a value is an error, not a default htmlang picks
+    let diags = parse_diagnostics("@el [container]");
+    assert!(
+        diags.iter().any(|d| d.code == "missing-value"),
+        "{:?}",
+        diags
+    );
 }
 
 #[test]
@@ -941,9 +955,15 @@ fn css_contain_attribute() {
 }
 
 #[test]
-fn css_contain_default() {
-    let output = compile("@page T\n@el [contain, width 200]\n  test");
-    assert!(output.contains("contain:layout style paint"));
+fn css_contain_needs_a_value() {
+    let diags = parse_diagnostics("@el [contain, width 200]\n  test");
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.code == "missing-value" && d.message.contains("'contain' needs a value")),
+        "{:?}",
+        diags
+    );
 }
 
 #[test]
@@ -2525,7 +2545,9 @@ fn nth_pseudo_formula() {
 
 #[test]
 fn container_query_generates_css() {
-    let output = compile("@page T\n@el [container]\n  @el [cq-sm:padding 20]\n    @text test");
+    let output = compile(
+        "@page T\n@el [container-type inline-size]\n  @el [cq-sm:padding 20]\n    @text test",
+    );
     assert!(
         output.contains("@container(min-width:640px)"),
         "should generate container query: {}",
@@ -3456,7 +3478,7 @@ fn conditional_attribute_without_else_is_left_out() {
 
 #[test]
 fn conditional_attribute_can_pick_a_bundle() {
-    let html = compile("@let on false\n@el [if($on, bold, $truncate)]\n  test\n");
+    let html = compile("@let on false\n@el [if($on, font-weight bold, $truncate)]\n  test\n");
     assert!(html.contains("text-overflow:ellipsis"), "{}", html);
     assert!(!html.contains("bold"), "{}", html);
 }
@@ -4517,8 +4539,9 @@ fn markdown_file_missing_reports_error() {
 
 #[test]
 fn function_call_text_becomes_children() {
-    let output =
-        compile("@let @box\n  @el [padding 4]\n    @children\n@box Hello {@text [bold] world}");
+    let output = compile(
+        "@let @box\n  @el [padding 4]\n    @children\n@box Hello {@text [font-weight bold] world}",
+    );
     assert!(output.contains("Hello"), "{}", output);
     assert!(output.contains(">world</span>"), "{}", output);
 }
@@ -5798,4 +5821,360 @@ fn the_document_holds_the_file_s_own_top_level_names() {
     );
     assert!(!result.document.variables.contains_key("c"));
     assert!(result.document.defines.contains_key("b"));
+}
+
+// ---------------------------------------------------------------------------
+// Names are checked, values are CSS's, and nothing is dropped silently
+// ---------------------------------------------------------------------------
+
+#[test]
+fn snapshot_names_and_values() {
+    snapshot_test("names_and_values");
+}
+
+fn errors(diagnostics: &[htmlang::parser::Diagnostic]) -> Vec<&htmlang::parser::Diagnostic> {
+    diagnostics
+        .iter()
+        .filter(|d| d.severity == htmlang::parser::Severity::Error)
+        .collect()
+}
+
+#[test]
+fn the_after_snippet_of_names_not_values() {
+    let d = parse_diagnostics("@el [max-width none, z-index auto]\n  x\n");
+    assert!(d.is_empty(), "{:?}", d);
+
+    let result = htmlang::parser::parse("@el [corner-shape squircle]\n  x\n");
+    let unknown = coded(&result.diagnostics, "unknown-attribute");
+    assert_eq!(unknown.len(), 1, "{:?}", result.diagnostics);
+    assert_eq!(unknown[0].severity, htmlang::parser::Severity::Warning);
+    assert!(htmlang::codegen::generate(&result.document).contains("corner-shape:squircle"));
+
+    let d = parse_diagnostics("@let name Ada\n@text Hello $nmae\n");
+    let undefined = coded(&d, "undefined-variable");
+    assert_eq!(undefined.len(), 1, "{:?}", d);
+    assert!(undefined[0].message.contains("did you mean '$name'"));
+
+    assert!(compile("@text costs $5\n").contains("costs $5"));
+
+    let html = compile(
+        "@data $plan {\"name\": \"Pro\"}\n@if $plan.featured\n  @text Featured\n@text $plan.name\n",
+    );
+    assert!(
+        !html.contains("Featured") && html.contains("Pro"),
+        "{}",
+        html
+    );
+
+    let d = parse_diagnostics("@el [hover:focus:color red]\n  x\n");
+    assert_eq!(coded(&d, "invalid-prefix").len(), 1, "{:?}", d);
+}
+
+#[test]
+fn unknown_css_properties_pass_through_with_a_warning() {
+    let result = htmlang::parser::parse(
+        "@el [colr red, --gap 12px, hover:--gap 4px, -webkit-tap-highlight-color transparent, -moz-osx-font-smoothing grayscale]\n  x\n",
+    );
+    let unknown = coded(&result.diagnostics, "unknown-attribute");
+    assert_eq!(unknown.len(), 1, "{:?}", result.diagnostics);
+    assert_eq!(unknown[0].subject.as_deref(), Some("colr"));
+    assert_eq!(unknown[0].suggestion.as_deref(), Some("color"));
+    assert_eq!(unknown[0].column, Some(5));
+    let html = htmlang::codegen::generate(&result.document);
+    for css in [
+        "colr:red",
+        "--gap:12px",
+        ":hover{--gap:4px;}",
+        "-webkit-tap-highlight-color:transparent",
+        "-moz-osx-font-smoothing:grayscale",
+    ] {
+        assert!(html.contains(css), "{} in {}", css, html);
+    }
+}
+
+#[test]
+fn what_cannot_be_css_is_an_error_and_left_out() {
+    let cases = [
+        ("[center-z]", "unknown-attribute"),
+        ("[20]", "unknown-attribute"),
+        ("[type email]", "html-attribute-form"),
+        ("[title]", "html-attribute-form"),
+        ("[padding]", "missing-value"),
+        ("[--gap]", "missing-value"),
+        ("[spacing]", "missing-value"),
+        ("[center-x 4]", "invalid-value"),
+    ];
+    for (attrs, code) in cases {
+        let src = format!("@el {} x\n", attrs);
+        let result = htmlang::parser::parse(&src);
+        let found = errors(&result.diagnostics);
+        assert!(
+            found.len() == 1 && found[0].code == code,
+            "{}: {:?}",
+            src,
+            result.diagnostics
+        );
+        let html = htmlang::codegen::generate(&result.document);
+        assert!(
+            !html.contains("center-z") && !html.contains("email"),
+            "{}",
+            html
+        );
+    }
+    // A comma cut a value in two: the rest can't be an attribute
+    let d = parse_diagnostics("@el [font-family Inter, sans-serif]\n  x\n");
+    let unknown = coded(&d, "unknown-attribute");
+    assert!(unknown[0].message.contains(r"write `\,`"), "{:?}", d);
+}
+
+#[test]
+fn prefixes_are_checked_by_name_and_number() {
+    let d = parse_diagnostics("@el [hovr:color red]\n  x\n");
+    let unknown = coded(&d, "unknown-prefix");
+    assert_eq!(unknown.len(), 1, "{:?}", d);
+    assert_eq!(unknown[0].subject.as_deref(), Some("hovr:"));
+    assert_eq!(unknown[0].suggestion.as_deref(), Some("hover:"));
+    assert_eq!(unknown[0].severity, htmlang::parser::Severity::Error);
+
+    for attr in [
+        "md:hover:color red",
+        "dark:hover:color red",
+        "children:odd:color red",
+        "hover:required",
+        "md:id=x",
+        "has(.a{):color red",
+    ] {
+        let src = format!("@el [{}]\n  x\n", attr);
+        let d = parse_diagnostics(&src);
+        assert_eq!(coded(&d, "invalid-prefix").len(), 1, "{}: {:?}", src, d);
+    }
+    // One prefix of any kind works, and so does a prefixed flag
+    let d = parse_diagnostics(
+        "@el [nth:2n+1:color red, has(img:hover):padding 4, cq-md:padding 8, md:center-x, print:display none]\n  x\n",
+    );
+    assert!(d.is_empty(), "{:?}", d);
+}
+
+#[test]
+fn values_that_would_break_out_of_the_css_rule_are_errors() {
+    let bad = [
+        "color red; background blue",
+        "padding {3}",
+        "padding 4}",
+        "content it's",
+        "width calc(100% - 4px",
+        "width 4px)",
+    ];
+    for attr in bad {
+        let src = format!("@el [{}]\n  x\n", attr);
+        let result = htmlang::parser::parse(&src);
+        let invalid = coded(&result.diagnostics, "invalid-value");
+        assert!(
+            invalid.len() == 1 && invalid[0].severity == htmlang::parser::Severity::Error,
+            "{}: {:?}",
+            src,
+            result.diagnostics
+        );
+        // The value is left out of the page
+        let html = htmlang::codegen::generate(&result.document);
+        assert!(
+            !html.contains("background blue") && !html.contains("{3}"),
+            "{}",
+            html
+        );
+    }
+    let fine = "@el [content \"a;b{}\", after:content \"it's\", before:content \"a\\\"b\", \
+                width if(media(width > 40em): 50%; else: 100%), \
+                background url(data:image/png;base64,AAA=)]\n  x\n";
+    let d = parse_diagnostics(fine);
+    assert!(d.is_empty(), "{:?}", d);
+
+    // Also from data, and in a custom property
+    let d = parse_diagnostics(
+        "@data $d {\"c\": \"red;} body{color:red\", \"q\": \"a\\\"b\"}\n@el [color $d.c, content $d.q]\n  x\n@let --x a;b\n",
+    );
+    assert_eq!(coded(&d, "invalid-value").len(), 3, "{:?}", d);
+    assert_eq!(errors(&d).len(), 3, "{:?}", d);
+    // A quote that isn't closed in a list keeps the list open: says so
+    let d = parse_diagnostics("@el [content \"open]\n  x\n");
+    assert!(
+        coded(&d, "unclosed-bracket")[0]
+            .message
+            .contains("isn't closed"),
+        "{:?}",
+        d
+    );
+}
+
+#[test]
+fn hex_colors_are_checked_by_their_digits() {
+    let d = parse_diagnostics(
+        "@el [color #12345, border 1 solid #12, background linear-gradient(#fff, #00000g)]\n  x\n",
+    );
+    let bad = coded(&d, "invalid-color");
+    let subjects: Vec<_> = bad.iter().filter_map(|d| d.subject.as_deref()).collect();
+    assert_eq!(subjects, ["#12345", "#12", "#00000g"], "{:?}", d);
+    let d = parse_diagnostics(
+        "@el [color #abc, background #aabbccdd, mask url(#m), content \"#1\", --id #x]\n  x\n",
+    );
+    assert!(d.is_empty(), "{:?}", d);
+}
+
+#[test]
+fn a_style_whose_value_comes_out_empty_is_left_out() {
+    let result = htmlang::parser::parse(
+        "@data $p {\"title\": \"Hi\"}\n@let on false\n@el [padding $p.gap, margin ${if($on, 4)}, color red]\n  $p.title\n",
+    );
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    let html = htmlang::codegen::generate(&result.document);
+    assert!(
+        !html.contains("padding:") && !html.contains("margin:"),
+        "{}",
+        html
+    );
+    assert!(html.contains("color:red"), "{}", html);
+}
+
+#[test]
+fn a_field_of_a_missing_field_is_empty() {
+    let html = compile(
+        "@data $r {\"a\": {\"b\": 1}}\n@text [$truncate] [$r.a.c.d] [${r.a.c.d}] [${default($r.x.y, none)}] [$r.a.b.c]\n@if $r.x.y\n  @text shown\n",
+    );
+    assert!(html.contains("[] [] [none] [1.c]"), "{}", html);
+    assert!(!html.contains("shown"), "{}", html);
+}
+
+#[test]
+fn fragment_script_and_void_elements_drop_nothing_silently() {
+    let d = parse_diagnostics("@fragment [padding 4, id=x]\n  @text a\n");
+    assert_eq!(coded(&d, "unexpected-argument").len(), 1, "{:?}", d);
+
+    let d = parse_diagnostics("@script [padding 4, src=a.js] b.js\n");
+    let found = coded(&d, "unexpected-argument");
+    assert_eq!(found.len(), 2, "{:?}", d);
+    assert!(
+        found.iter().any(|d| d.message.contains("[src=b.js]")),
+        "{:?}",
+        d
+    );
+
+    for src in [
+        "@hr\n  child\n",
+        "@input [type=text, aria-label=x] hello\n",
+        "@image [alt=x] a.png\n  kid\n",
+    ] {
+        let d = parse_diagnostics(src);
+        assert_eq!(coded(&d, "unexpected-content").len(), 1, "{}: {:?}", src, d);
+    }
+
+    // Every HTML attribute of @script is kept
+    let html = compile("@script [src=app.js, type=module, data-x=1, id=s, class=c, defer]\n");
+    assert!(
+        html.contains(
+            r#"<script id="s" class="c" src="app.js" type="module" data-x="1" defer></script>"#
+        ),
+        "{}",
+        html
+    );
+}
+
+#[test]
+fn page_attributes_and_attributes_with_no_root_are_errors() {
+    let d = parse_diagnostics("@page [lang en, colour red] T\n");
+    assert_eq!(errors(&d).len(), 1, "{:?}", d);
+    assert_eq!(errors(&d)[0].code, "unknown-page-attribute");
+
+    let d = parse_diagnostics("@let @two\n  @text a\n  @text b\n@two [padding 4]\n");
+    let found = coded(&d, "no-single-root");
+    assert!(
+        found.len() == 1 && found[0].severity == htmlang::parser::Severity::Error,
+        "{:?}",
+        d
+    );
+}
+
+#[test]
+fn a_bundle_is_checked_where_it_is_used() {
+    // Its `title` passes a parameter to a call...
+    let d = parse_diagnostics(
+        "@let t [title Hi, padding 4]\n@let @card [title]\n  @el $title\n@card [$t]\n",
+    );
+    assert!(d.is_empty(), "{:?}", d);
+    // ...and on an element it is an HTML attribute written like a style
+    let d = parse_diagnostics("@let t [title Hi, padding 4]\n@el [$t] x\n");
+    let found = coded(&d, "html-attribute-form");
+    assert_eq!(found.len(), 1, "{:?}", d);
+    assert_eq!(found[0].line, 2);
+    // A known style is checked where the bundle is defined
+    let d = parse_diagnostics("@let t [padding 4;]\n@el [$t] x\n");
+    assert_eq!(coded(&d, "invalid-value").len(), 1, "{:?}", d);
+    assert_eq!(coded(&d, "invalid-value")[0].line, 1);
+}
+
+#[test]
+fn a_style_and_an_html_attribute_of_one_name_are_not_duplicates() {
+    let d = parse_diagnostics("@image [width=800, width 200, alt=A] a.png\n");
+    assert!(d.is_empty(), "{:?}", d);
+    let d = parse_diagnostics("@el [padding 4, padding 8]\n  x\n");
+    let found = coded(&d, "duplicate-attribute");
+    assert!(
+        found.len() == 1 && found[0].message.contains("the later one wins"),
+        "{:?}",
+        d
+    );
+}
+
+#[test]
+fn a_warning_in_a_loop_or_a_function_is_reported_once() {
+    let d = parse_diagnostics(
+        "@let @box\n  @el [colr red, color #12]\n    @children\n@each $i in 1..5\n  @box $i\n  @el [bakground red] $i\n",
+    );
+    assert_eq!(coded(&d, "unknown-attribute").len(), 2, "{:?}", d);
+    assert_eq!(coded(&d, "invalid-color").len(), 1, "{:?}", d);
+}
+
+#[test]
+fn hidden_is_a_boolean_attribute() {
+    let result = htmlang::parser::parse("@el [hidden] x\n");
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    assert!(htmlang::codegen::generate(&result.document).contains("<div class=\"a\" hidden>"));
+}
+
+#[test]
+fn a_misspelled_parameter_is_an_error() {
+    let d = parse_diagnostics(
+        "@let @card [title, tone red, featured false]\n  @el [background $tone] $title\n@card [title A, tnoe blue, featred, corner-shape x]\n",
+    );
+    let unknown = coded(&d, "unknown-attribute");
+    let errors: Vec<_> = unknown
+        .iter()
+        .filter(|d| d.severity == htmlang::parser::Severity::Error)
+        .map(|d| (d.subject.as_deref(), d.suggestion.as_deref()))
+        .collect();
+    assert_eq!(
+        errors,
+        [
+            (Some("tnoe"), Some("tone")),
+            (Some("featred"), Some("featured"))
+        ],
+        "{:?}",
+        d
+    );
+    // Anything else goes to the root, checked like any attribute there
+    assert_eq!(unknown.len(), 3, "{:?}", d);
+}
+
+#[test]
+fn a_record_written_where_text_goes_is_an_error() {
+    let d = parse_diagnostics(
+        "@data $p {\"title\": \"Hi\"}\n@text $p and ${p}\n@el [aria-label=$p] x\n",
+    );
+    let found = coded(&d, "invalid-value");
+    assert_eq!(found.len(), 3, "{:?}", d);
+    assert!(found[0].message.contains("such as `$p.title`"), "{:?}", d);
+    // Passed whole, it is a value like any other
+    let html = compile(
+        "@data $p {\"title\": \"Hi\"}\n@let @card [post]\n  @text $post.title\n@card [post $p]\n@let q $p\n@text $q.title\n",
+    );
+    assert!(html.contains(">Hi<"), "{}", html);
 }

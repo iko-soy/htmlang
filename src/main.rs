@@ -386,8 +386,6 @@ fn open_in_browser(port: u16) {
 struct ProjectConfig {
     output: Option<String>,
     port: u16,
-    variables: Vec<(String, String)>,
-    breakpoints: Vec<(String, String)>,
     // Build options (can be overridden by CLI flags)
     dev: Option<bool>,
     minify: Option<bool>,
@@ -400,8 +398,6 @@ fn load_config(target: &Path) -> ProjectConfig {
     let mut config = ProjectConfig {
         output: None,
         port: 3000,
-        variables: Vec::new(),
-        breakpoints: Vec::new(),
         dev: None,
         minify: None,
         strict: None,
@@ -430,9 +426,9 @@ fn load_config(target: &Path) -> ProjectConfig {
         }
         if trimmed.starts_with('[') && trimmed.ends_with(']') {
             section = &trimmed[1..trimmed.len() - 1];
-            if !matches!(section, "variables" | "breakpoints" | "build" | "watch") {
+            if !matches!(section, "build" | "watch") {
                 eprintln!(
-                    "warning: {}:{}: unknown section '[{}]' (expected: variables, breakpoints, build, watch)",
+                    "warning: {}:{}: unknown section '[{}]', whose lines are ignored (expected: build, watch)",
                     config_path.display(),
                     line_num + 1,
                     section
@@ -443,13 +439,35 @@ fn load_config(target: &Path) -> ProjectConfig {
         if let Some((key, value)) = trimmed.split_once('=') {
             let key = key.trim();
             let value = value.trim().trim_matches('"');
+            // A value that doesn't read is reported, and the default kept
+            let invalid = |expected: &str| {
+                eprintln!(
+                    "warning: {}:{}: '{}' for '{}' is ignored (expected {})",
+                    config_path.display(),
+                    line_num + 1,
+                    value,
+                    key,
+                    expected
+                );
+            };
+            let flag = |current: Option<bool>| match value {
+                "true" => Some(true),
+                "false" => Some(false),
+                _ => {
+                    invalid("true or false");
+                    current
+                }
+            };
             match section {
                 "" => match key {
                     "output" => config.output = Some(value.to_string()),
-                    "port" => config.port = value.parse().unwrap_or(3000),
+                    "port" => match value.parse() {
+                        Ok(port) => config.port = port,
+                        Err(_) => invalid("a port number"),
+                    },
                     _ => {
                         eprintln!(
-                            "warning: {}:{}: unknown key '{}' (expected: output, port)",
+                            "warning: {}:{}: unknown key '{}' is ignored (expected: output, port)",
                             config_path.display(),
                             line_num + 1,
                             key
@@ -457,12 +475,12 @@ fn load_config(target: &Path) -> ProjectConfig {
                     }
                 },
                 "build" => match key {
-                    "dev" => config.dev = Some(value == "true"),
-                    "minify" => config.minify = Some(value == "true"),
-                    "strict" => config.strict = Some(value == "true"),
+                    "dev" => config.dev = flag(config.dev),
+                    "minify" => config.minify = flag(config.minify),
+                    "strict" => config.strict = flag(config.strict),
                     _ => {
                         eprintln!(
-                            "warning: {}:{}: unknown build key '{}' (expected: dev, minify, strict)",
+                            "warning: {}:{}: unknown build key '{}' is ignored (expected: dev, minify, strict)",
                             config_path.display(),
                             line_num + 1,
                             key
@@ -470,24 +488,19 @@ fn load_config(target: &Path) -> ProjectConfig {
                     }
                 },
                 "watch" => match key {
-                    "debounce_ms" => config.debounce_ms = value.parse().unwrap_or(50),
+                    "debounce_ms" => match value.parse() {
+                        Ok(ms) => config.debounce_ms = ms,
+                        Err(_) => invalid("a number of milliseconds"),
+                    },
                     _ => {
                         eprintln!(
-                            "warning: {}:{}: unknown watch key '{}' (expected: debounce_ms)",
+                            "warning: {}:{}: unknown watch key '{}' is ignored (expected: debounce_ms)",
                             config_path.display(),
                             line_num + 1,
                             key
                         );
                     }
                 },
-                "variables" => {
-                    config.variables.push((key.to_string(), value.to_string()));
-                }
-                "breakpoints" => {
-                    config
-                        .breakpoints
-                        .push((key.to_string(), value.to_string()));
-                }
                 _ => {} // already warned about unknown section
             }
         }
