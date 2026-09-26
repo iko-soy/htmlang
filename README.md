@@ -35,7 +35,9 @@ unless you write some, and nothing is added that you didn't ask for.
   elements. Text after an element's attributes is its content, read like
   any line of text, and `{...}` puts an element inside a line of text
   (`@h1 Hello {@text [color red] world}`). The text of `@code` and
-  `@textarea` is shown as written.
+  `@textarea` is shown as written. An element that points at a URL or a
+  file takes it as its first word, and the rest is its content: `@link
+  /about About us`, `@image logo.png`, `@form /subscribe`, `@script app.js`.
 - **Layout comes from elm-ui.** Every element has one layout. `@el` and the
   containers (`@section`, `@nav`, `@ul`, `@li`, ...) are columns, `@row` is a
   row and `@grid` a grid: in them each line of text is a child, and

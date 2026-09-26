@@ -25,6 +25,9 @@
       "include": "#literal-line"
     },
     {
+      "include": "#leading-argument"
+    },
+    {
       "include": "#element"
     },
     {
@@ -138,6 +141,33 @@
           "include": "#variable"
         }
       ]
+    },
+    "leading-argument": {
+      "comment": "The first word after the attributes of an element with a leading argument (@link's href, @image's src, ...): one token, which \"...\" and ${...} keep whole",
+      "match": "(?:^\\s*|\\s>\\s*)(@(?:link|image|script|form|video|audio|iframe|source|track|embed|object|area|optgroup))(?![a-zA-Z0-9_-])(\\s*\\[[^\\[\\]]*\\])?\\s+(?![\\[>])((?:\"(?:[^\"\\\\]|\\\\.)*\"|\\$\\{[^}]*\\}|\\\\.|[^\\s\"$\\\\]|\\$(?!\\{))+)",
+      "captures": {
+        "1": {
+          "name": "entity.name.tag.htmlang"
+        },
+        "2": {
+          "patterns": [
+            {
+              "include": "#attributes"
+            }
+          ]
+        },
+        "3": {
+          "name": "markup.underline.link.htmlang",
+          "patterns": [
+            {
+              "include": "#escape"
+            },
+            {
+              "include": "#variable"
+            }
+          ]
+        }
+      }
     },
     "element": {
       "name": "entity.name.tag.htmlang",

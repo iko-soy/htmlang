@@ -3088,32 +3088,66 @@ fn parse_single_element(
     ctx: &mut ParseContext,
 ) -> Result<Element, ParseError> {
     let kind = parse_element_kind(&head.name, line_num, ctx)?;
-    let attrs = head.attrs.as_ref().map_or_else(Vec::new, |list| {
+    let mut attrs = head.attrs.as_ref().map_or_else(Vec::new, |list| {
         parse_attr_list(&list.attrs, line_num, ctx, true, &[])
     });
 
-    // The argument is one slot: a URL, a source, an action or a slot name.
-    // For @link, the first word is the URL and the rest is its text. Any
-    // other element's argument is text content, parsed like any line of
-    // text, as in `@el [padding 8] Hello` or `@h2 Meet {@text htmlang}`;
-    // its layout decides how it combines with the lines under it.
+    // The leading argument: for an element whose row names a leading
+    // attribute (`@link`'s href, `@image`'s src, `@form`'s action, ...),
+    // the first token of the text fills it, split before anything is
+    // filled in, and the rest is content (an error on an element without
+    // content). `@slot`'s whole text is its name. Any other element's text
+    // is content, parsed like any line of text, as in `@el [padding 8]
+    // Hello` or `@h2 Meet {@text htmlang}`; its layout decides how it
+    // combines with the lines under it.
     let mut children = Vec::new();
     let mut argument = None;
-    if let Some(text) = text {
-        if argument_is_special(&kind) {
-            let raw = if kind == ElementKind::Link {
-                let (url, rest) = text.split_first_word();
-                if let Some(rest) = rest {
-                    children.push(Node::Text(text_segments(&rest, ctx)));
+    let leading = kind.arg().attributes();
+    match text {
+        Some(text) if !leading.is_empty() => {
+            let (token, rest) = text.split_leading();
+            let given = attrs
+                .iter()
+                .find(|a| a.html && leading.contains(&a.key.as_str()))
+                .map(|a| (a.key.clone(), a.value.clone().unwrap_or_default()));
+            if let Some((key, value)) = given {
+                // The attribute wins; the text is content, as if the
+                // element had no leading argument
+                ctx.push_once(leading_twice(&kind, &token, &key, &value, text, ctx));
+                if kind.layout() != Layout::Void {
+                    children.push(Node::Text(text_segments(text, ctx)));
                 }
-                url
             } else {
-                text.raw.clone()
-            };
-            argument = Some(ctx.interpolate_text(&raw, text.span.line, Some(text.span.column)));
-        } else {
-            children.push(Node::Text(text_segments(text, ctx)));
+                let column = Some(token.span.column);
+                argument = Some(
+                    ctx.fill_value(&token.raw, text.span.line, column, Sink::Text)
+                        .0,
+                );
+                if let Some(rest) = rest {
+                    if kind.layout() == Layout::Void {
+                        let d = after_the_leading_argument(&kind, &token.raw, &rest);
+                        let d = at_attribute(d, Some(rest.span.column), ctx);
+                        ctx.push_once(d);
+                    } else {
+                        children.push(Node::Text(text_segments(&rest, ctx)));
+                    }
+                }
+            }
         }
+        Some(text) if matches!(kind, ElementKind::Slot(_)) => {
+            argument =
+                Some(ctx.interpolate_text(&text.raw, text.span.line, Some(text.span.column)));
+        }
+        Some(text) => children.push(Node::Text(text_segments(text, ctx))),
+        // `@link [href=/about]`: the attribute is the leading argument, so
+        // both forms compile the same (`@image [src=a.svg, inline]`). Not
+        // for `@source`, whose attribute depends on where it is.
+        None if leading.len() == 1 => {
+            if let Some(i) = attrs.iter().position(|a| a.html && a.key == leading[0]) {
+                argument = Some(attrs.remove(i).value.unwrap_or_default());
+            }
+        }
+        None => {}
     }
 
     // For @slot, the argument is the slot name
@@ -3133,15 +3167,65 @@ fn parse_single_element(
     })
 }
 
-/// Elements whose argument is not text content: a URL, a source, an action,
-/// or a slot name.
-fn argument_is_special(kind: &ElementKind) -> bool {
-    matches!(
-        kind,
-        ElementKind::Link | ElementKind::Image | ElementKind::Script | ElementKind::Slot(_)
-    ) || kind
-        .spec()
-        .is_some_and(|spec| matches!(spec.arg, TagArg::Attr(_)))
+/// A leading argument given twice, as the first token and as its
+/// attribute: `@link [href=/a] About`.
+fn leading_twice(
+    kind: &ElementKind,
+    token: &syntax::Arg,
+    key: &str,
+    value: &str,
+    text: &syntax::Text,
+    ctx: &ParseContext,
+) -> Diagnostic {
+    let name = kind.name();
+    let what = leading_name(kind);
+    let written = if kind.layout() == Layout::Void {
+        format!("@{} {}", name, value)
+    } else {
+        format!("@{} {} {}", name, value, text.raw)
+    };
+    let d = Diagnostic::error(
+        code::DUPLICATE_ATTRIBUTE,
+        text.span.line,
+        format!(
+            "@{} takes its first word '{}' as its {}, and it also has {}=: give it once, \
+             as `{}`",
+            name, token.raw, what, key, written
+        ),
+    )
+    .subject(token.raw.clone());
+    at_attribute(d, Some(token.span.column), ctx)
+}
+
+/// The attribute an element's leading argument fills, for messages.
+fn leading_name(kind: &ElementKind) -> &'static str {
+    match kind.arg() {
+        TagArg::Source => "srcset in @picture or src elsewhere",
+        arg => arg.attribute(false).unwrap_or("argument"),
+    }
+}
+
+/// Text after the leading argument of an element without content:
+/// `@image logo.png Our logo`.
+fn after_the_leading_argument(kind: &ElementKind, token: &str, rest: &syntax::Text) -> Diagnostic {
+    let name = kind.name();
+    let attr = leading_name(kind);
+    let alt = if matches!(kind, ElementKind::Image) || kind.is_tag("area") {
+        " For a text alternative, write `alt=...`."
+    } else {
+        ""
+    };
+    Diagnostic::error(
+        code::UNEXPECTED_ARGUMENT,
+        rest.span.line,
+        format!(
+            "@{0} takes one word after its attributes, its {1} ('{2}'), and it has no \
+             content, so '{3}' would go nowhere. A value with a space in it is quoted: \
+             `\"{2} {3}\"`.{4}",
+            name, attr, token, rest.raw, alt
+        ),
+    )
+    .subject(rest.raw.clone())
 }
 
 /// The element named `name`, or an "unknown element" error that suggests
@@ -4693,8 +4777,9 @@ fn validate_tree(
 
 /// What an element has no place for in HTML, which would otherwise be
 /// left out of the page: attributes on `@fragment` (which has no element
-/// of its own), styles and text on `@script` (whose code is its body), and
-/// content in a void element such as `@input`.
+/// of its own), styles on `@script` (which isn't shown), a body under a
+/// `@script` that has a src (which the browser doesn't run), and content in
+/// a void element such as `@input`.
 fn dropped_by_the_element(elem: &Element, diagnostics: &mut Vec<Diagnostic>) {
     let name = elem.kind.name();
     let keys = |attrs: Vec<&Attribute>| {
@@ -4717,7 +4802,28 @@ fn dropped_by_the_element(elem: &Element, diagnostics: &mut Vec<Diagnostic>) {
             ),
         );
     }
-    if elem.kind == ElementKind::Script {
+    // The leading argument given twice: an attribute passed to the root
+    // of a function whose body gives the argument (written on one line,
+    // it is reported where it is read, and the attribute wins there)
+    if let Some(argument) = &elem.argument
+        && let Some(attr) = elem
+            .attrs
+            .iter()
+            .find(|a| a.html && elem.kind.arg().attributes().contains(&a.key.as_str()))
+    {
+        error(
+            code::DUPLICATE_ATTRIBUTE,
+            format!(
+                "@{} takes '{}' as its {}, and it also has {}={}: give it once",
+                name,
+                argument,
+                leading_name(&elem.kind),
+                attr.key,
+                attr.value.as_deref().unwrap_or("")
+            ),
+        );
+    }
+    if elem.kind.is_verbatim() {
         let styles: Vec<&Attribute> = elem
             .attrs
             .iter()
@@ -4727,18 +4833,27 @@ fn dropped_by_the_element(elem: &Element, diagnostics: &mut Vec<Diagnostic>) {
             error(
                 code::UNEXPECTED_ARGUMENT,
                 format!(
-                    "@script isn't shown on the page, so its styles {} would go nowhere",
+                    "@{} isn't shown on the page, so its styles {} would go nowhere",
+                    name,
                     keys(styles)
                 ),
             );
         }
-        if let Some(argument) = &elem.argument {
+        let src = elem.argument.clone().or_else(|| {
+            elem.attrs
+                .iter()
+                .find(|a| a.html && a.key == "src")
+                .map(|a| a.value.clone().unwrap_or_default())
+        });
+        if let Some(src) = src
+            && !elem.children.is_empty()
+        {
             error(
-                code::UNEXPECTED_ARGUMENT,
+                code::UNEXPECTED_CONTENT,
                 format!(
-                    "@script takes its code as an indented block, so '{}' would go nowhere: \
-                     for a file, write `@script [src={}]`",
-                    argument, argument
+                    "@{0} has both a src ('{1}') and a body: the browser runs only the file, \
+                     so the body would go nowhere. Put the code in {1}, or leave out the src",
+                    name, src
                 ),
             );
         }
@@ -4770,8 +4885,8 @@ fn dropped_by_the_element(elem: &Element, diagnostics: &mut Vec<Diagnostic>) {
 fn has_no_element(kind: &ElementKind) -> bool {
     matches!(
         kind,
-        ElementKind::Fragment | ElementKind::Script | ElementKind::Children | ElementKind::Slot(_)
-    )
+        ElementKind::Fragment | ElementKind::Children | ElementKind::Slot(_)
+    ) || kind.is_verbatim()
 }
 
 /// htmlang's word `word` for laying out children (`spacing`, `wrap`,

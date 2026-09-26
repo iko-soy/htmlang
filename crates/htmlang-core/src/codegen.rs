@@ -489,6 +489,9 @@ struct GenContext {
     in_text: bool,
     /// How the element whose children are being written lays them out
     flow: Flow,
+    /// Writing the children of a `@picture`, where `@source`'s leading
+    /// argument is its `srcset`
+    in_picture: bool,
 }
 
 impl GenContext {
@@ -660,6 +663,7 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
         has_interactive: false,
         in_text: false,
         flow: Flow::default(),
+        in_picture: false,
     };
 
     let mut body = String::new();
@@ -921,6 +925,7 @@ fn generate_partial_inner(doc: &Document, dev: bool) -> String {
         has_interactive: false,
         in_text: false,
         flow: Flow::default(),
+        in_picture: false,
     };
     let mut body = String::new();
 
@@ -1038,21 +1043,49 @@ fn generate_run(
     }
 }
 
-/// Emit the argument of an element whose argument is an HTML attribute
-/// (`@iframe URL` → `src="URL"`, `@form /submit` → `action="/submit"`).
-fn emit_argument_attr(out: &mut String, elem: &Element) {
-    if let Some(TagSpec {
-        arg: TagArg::Attr(attr),
-        ..
-    }) = elem.kind.spec()
-        && let Some(value) = &elem.argument
-    {
-        out.push(' ');
-        out.push_str(attr);
-        out.push_str("=\"");
-        out.push_str(&html_escape(value));
-        out.push('"');
+/// Emit the element's leading argument as its attribute (`@iframe URL` →
+/// `src="URL"`, `@form /submit` → `action="/submit"`, `@link /a` →
+/// `href="/a"`), first, before the class. `@image [inline] photo.png` puts
+/// the file itself into the page.
+fn emit_argument_attr(out: &mut String, elem: &Element, in_picture: bool) {
+    let (Some(attr), Some(value)) = (elem.kind.leading_attribute(in_picture), &elem.argument)
+    else {
+        return;
+    };
+    let inline =
+        elem.kind == ElementKind::Image && elem.attrs.iter().any(|a| !a.html && a.key == "inline");
+    let value = match inline.then(|| image_data_uri(value)).flatten() {
+        Some(data) => data,
+        None => html_escape(value),
+    };
+    out.push(' ');
+    out.push_str(attr);
+    out.push_str("=\"");
+    out.push_str(&value);
+    out.push('"');
+}
+
+/// A raster image's file as a `data:` URI (an SVG is put into the page
+/// as markup by the parser instead); `None` when it can't be read.
+fn image_data_uri(src: &str) -> Option<String> {
+    if src.is_empty() || src.ends_with(".svg") {
+        return None;
     }
+    let mime = if src.ends_with(".png") {
+        "image/png"
+    } else if src.ends_with(".jpg") || src.ends_with(".jpeg") {
+        "image/jpeg"
+    } else if src.ends_with(".gif") {
+        "image/gif"
+    } else if src.ends_with(".webp") {
+        "image/webp"
+    } else if src.ends_with(".avif") {
+        "image/avif"
+    } else {
+        "application/octet-stream"
+    };
+    let data = std::fs::read(src).ok()?;
+    Some(format!("data:{};base64,{}", mime, base64_encode(&data)))
 }
 
 /// Emit HTML attributes: `key=value` ones (except `id` / `class`, which
@@ -1101,12 +1134,14 @@ fn generate_element(
         generate_self_closing(elem, parent, out, styles, ctx);
         return;
     }
-    // @script renders as <script> with raw body content (no HTML escaping)
-    if elem.kind == ElementKind::Script {
+    // A verbatim element (@script) writes its body as it is, with no HTML
+    // escaping; it isn't shown, so it has no class (its styles are an error)
+    if elem.kind.is_verbatim() {
+        let tag = elem.kind.spec().map_or("script", |spec| spec.html);
         out.push_str(&ctx.indent());
-        out.push_str("<script");
-        // Its HTML attributes (`src=`, `type=module`, `defer`, ...); it has
-        // no styles, which the parser reports
+        out.push('<');
+        out.push_str(tag);
+        emit_argument_attr(out, elem, false);
         let (id, class) = extract_id_class(&elem.attrs);
         for (key, value) in [("id", id), ("class", class)] {
             if let Some(value) = value {
@@ -1115,7 +1150,6 @@ fn generate_element(
         }
         emit_html_attrs(out, &elem.attrs);
         out.push('>');
-        // Children are raw JS code, not HTML
         for child in &elem.children {
             match child {
                 Node::Text(segments) => {
@@ -1129,7 +1163,9 @@ fn generate_element(
                 _ => {}
             }
         }
-        out.push_str("</script>");
+        out.push_str("</");
+        out.push_str(tag);
+        out.push('>');
         out.push_str(ctx.nl());
         return;
     }
@@ -1185,15 +1221,7 @@ fn generate_element(
     out.push('<');
     out.push_str(tag);
 
-    if elem.kind == ElementKind::Link
-        && let Some(url) = &elem.argument
-    {
-        out.push_str(" href=\"");
-        out.push_str(&html_escape(url));
-        out.push('"');
-    }
-
-    emit_argument_attr(out, elem);
+    emit_argument_attr(out, elem, ctx.in_picture);
 
     emit_class_attr(out, gen_class.as_deref(), user_class.as_deref());
 
@@ -1221,7 +1249,9 @@ fn generate_element(
     let outer_in_text = ctx.in_text;
     ctx.in_text = in_text || layout == Layout::Text;
     let outer_flow = std::mem::replace(&mut ctx.flow, own);
+    let outer_picture = std::mem::replace(&mut ctx.in_picture, elem.kind.is_tag("picture"));
     generate_children(&elem.children, Some(layout), out, styles, ctx);
+    ctx.in_picture = outer_picture;
     ctx.flow = outer_flow;
     ctx.in_text = outer_in_text;
     ctx.depth -= 1;
@@ -1260,44 +1290,7 @@ fn generate_self_closing(
     out.push_str(&ctx.indent());
     out.push('<');
     out.push_str(tag);
-    emit_argument_attr(out, elem);
-
-    // Image src (with optional non-SVG base64 inlining)
-    if elem.kind == ElementKind::Image {
-        let src = elem.argument.as_deref().unwrap_or("");
-        let is_inline = elem.attrs.iter().any(|a| a.key == "inline");
-        if is_inline && !src.is_empty() && !src.ends_with(".svg") {
-            let mime = if src.ends_with(".png") {
-                "image/png"
-            } else if src.ends_with(".jpg") || src.ends_with(".jpeg") {
-                "image/jpeg"
-            } else if src.ends_with(".gif") {
-                "image/gif"
-            } else if src.ends_with(".webp") {
-                "image/webp"
-            } else if src.ends_with(".avif") {
-                "image/avif"
-            } else {
-                "application/octet-stream"
-            };
-            if let Ok(data) = std::fs::read(src) {
-                let b64 = base64_encode(&data);
-                out.push_str(" src=\"data:");
-                out.push_str(mime);
-                out.push_str(";base64,");
-                out.push_str(&b64);
-                out.push('"');
-            } else {
-                out.push_str(" src=\"");
-                out.push_str(&html_escape(src));
-                out.push('"');
-            }
-        } else {
-            out.push_str(" src=\"");
-            out.push_str(&html_escape(src));
-            out.push('"');
-        }
-    }
+    emit_argument_attr(out, elem, ctx.in_picture);
 
     emit_class_attr(out, gen_class.as_deref(), user_class.as_deref());
 

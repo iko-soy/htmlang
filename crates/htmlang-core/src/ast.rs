@@ -33,9 +33,10 @@ pub enum TextSegment {
 pub struct Element {
     pub kind: ElementKind,
     pub attrs: Vec<Attribute>,
-    /// The argument when it is one slot: `@link`'s URL, `@image`'s source,
-    /// the attribute of a [`TagArg::Attr`] row, `@slot`'s name. Any other
-    /// element's argument is text, its first child.
+    /// The value of the element's leading attribute (see
+    /// [`ElementKind::arg`]): the first token of `@link /about About`, or
+    /// its `href=` when it has no argument. For `@slot`, the slot's name.
+    /// Any other text after the attributes is content, a first child.
     pub argument: Option<String>,
     pub children: Vec<Node>,
     /// The line it is written on; for an element a function's body wrote,
@@ -78,7 +79,6 @@ pub enum ElementKind {
     Link,
     Image,
     // Elements generated in a special way
-    Script,
     Fragment,
     // Function bodies: placeholders for the caller's content
     Children,
@@ -97,7 +97,6 @@ impl ElementKind {
             ElementKind::Paragraph => "paragraph",
             ElementKind::Link => "link",
             ElementKind::Image => "image",
-            ElementKind::Script => "script",
             ElementKind::Fragment => "fragment",
             ElementKind::Children => "children",
             ElementKind::Slot(_) => "slot",
@@ -121,10 +120,7 @@ impl ElementKind {
             ElementKind::El => Layout::Column,
             ElementKind::Text | ElementKind::Paragraph | ElementKind::Link => Layout::Text,
             ElementKind::Image => Layout::Void,
-            ElementKind::Script
-            | ElementKind::Fragment
-            | ElementKind::Children
-            | ElementKind::Slot(_) => Layout::Native,
+            ElementKind::Fragment | ElementKind::Children | ElementKind::Slot(_) => Layout::Native,
             ElementKind::Tag(spec) => spec.layout,
         }
     }
@@ -137,6 +133,28 @@ impl ElementKind {
             ElementKind::Tag(spec) => spec.css,
             _ => "",
         }
+    }
+
+    /// What the first token after its attributes is: `@link`'s `href`,
+    /// `@image`'s `src`, or its row's [`TagArg`].
+    pub fn arg(&self) -> TagArg {
+        match self {
+            ElementKind::Link => TagArg::Attr("href"),
+            ElementKind::Image => TagArg::Attr("src"),
+            ElementKind::Tag(spec) => spec.arg,
+            _ => TagArg::Child,
+        }
+    }
+
+    /// The HTML attribute its leading argument fills, when it has one;
+    /// `in_picture`: the element is directly inside `@picture`.
+    pub fn leading_attribute(&self, in_picture: bool) -> Option<&'static str> {
+        self.arg().attribute(in_picture)
+    }
+
+    /// Whether its indented body is kept exactly as written (`@script`).
+    pub fn is_verbatim(&self) -> bool {
+        self.spec().is_some_and(|spec| spec.verbatim)
     }
 
     /// Is this the table element named `name` (e.g. `"main"`)?
@@ -153,7 +171,6 @@ impl ElementKind {
             "paragraph" => ElementKind::Paragraph,
             "link" => ElementKind::Link,
             "image" => ElementKind::Image,
-            "script" => ElementKind::Script,
             "fragment" => ElementKind::Fragment,
             "children" => ElementKind::Children,
             "slot" => ElementKind::Slot(String::new()),
@@ -170,7 +187,6 @@ impl ElementKind {
             "paragraph",
             "link",
             "image",
-            "script",
             "fragment",
             "children",
             "slot",
@@ -187,8 +203,39 @@ pub enum TagArg {
     /// (`@h1 Hello {@text [color red] world}`). The element's layout
     /// decides how it combines with the lines under it.
     Child,
-    /// Emitted as this HTML attribute (`@iframe URL` sets `src`).
+    /// Its leading attribute: the first token fills this HTML attribute
+    /// (`@iframe URL` sets `src`), and the rest of the text is content, or
+    /// an error on an element without content. The token ends at a space
+    /// outside `"..."` and `${...}`.
     Attr(&'static str),
+    /// `@source`'s leading attribute, which depends on where it is:
+    /// `srcset` directly inside `@picture`, `src` elsewhere (`@video`,
+    /// `@audio`).
+    Source,
+}
+
+impl TagArg {
+    /// The HTML attribute the leading argument fills; `in_picture`: the
+    /// element is directly inside `@picture`.
+    pub fn attribute(self, in_picture: bool) -> Option<&'static str> {
+        match self {
+            TagArg::Child => None,
+            TagArg::Attr(attr) => Some(attr),
+            TagArg::Source if in_picture => Some("srcset"),
+            TagArg::Source => Some("src"),
+        }
+    }
+
+    /// The attributes the leading argument may fill, wherever the element
+    /// is: one, or `src` and `srcset` for `@source`.
+    pub fn attributes(self) -> Vec<&'static str> {
+        let mut out: Vec<&'static str> = [self.attribute(false), self.attribute(true)]
+            .into_iter()
+            .flatten()
+            .collect();
+        out.dedup();
+        out
+    }
 }
 
 /// How an element lays out what is inside it: one value per element,
@@ -253,6 +300,9 @@ pub struct TagSpec {
     /// Its text is shown as written (`@code`, `@textarea`): a `{@...}` in
     /// it is text, not an inline element. Escapes and `$names` still work.
     pub literal: bool,
+    /// Its indented body is foreign text, kept exactly as written
+    /// (`@script`'s JavaScript): nothing in it is parsed as htmlang.
+    pub verbatim: bool,
 }
 
 impl TagSpec {
@@ -263,6 +313,7 @@ impl TagSpec {
         arg: TagArg::Child,
         layout: Layout::Native,
         literal: false,
+        verbatim: false,
     };
 }
 
@@ -326,10 +377,11 @@ pub static TAGS: &[TagSpec] = &[
     TagSpec { name: "h6", html: "h6", css: "margin:0;", layout: Layout::Text, ..TagSpec::DEFAULT },
     TagSpec { name: "input", html: "input", layout: Layout::Void, ..TagSpec::DEFAULT },
     TagSpec { name: "hr", html: "hr", layout: Layout::Void, ..TagSpec::DEFAULT },
-    TagSpec { name: "source", html: "source", arg: TagArg::Attr("src"), layout: Layout::Void, ..TagSpec::DEFAULT },
+    TagSpec { name: "source", html: "source", arg: TagArg::Source, layout: Layout::Void, ..TagSpec::DEFAULT },
     TagSpec { name: "video", html: "video", arg: TagArg::Attr("src"), layout: Layout::Native, ..TagSpec::DEFAULT },
     TagSpec { name: "audio", html: "audio", arg: TagArg::Attr("src"), layout: Layout::Native, ..TagSpec::DEFAULT },
     TagSpec { name: "iframe", html: "iframe", arg: TagArg::Attr("src"), layout: Layout::Native, ..TagSpec::DEFAULT },
+    TagSpec { name: "script", html: "script", arg: TagArg::Attr("src"), layout: Layout::Native, verbatim: true, ..TagSpec::DEFAULT },
     // Flow containers
     TagSpec { name: "hgroup", html: "hgroup", layout: Layout::Column, ..TagSpec::DEFAULT },
     TagSpec { name: "menu", html: "menu", css: "margin:0;padding-left:0;list-style:none;", layout: Layout::Column, ..TagSpec::DEFAULT },
@@ -464,12 +516,14 @@ pub fn directive(name: &str) -> Option<&'static DirectiveSpec> {
 }
 
 /// What the lines indented under `@name` are: the directive's body kind,
-/// or an element's (`@script` holds JavaScript, every other element
-/// htmlang).
+/// or an element's (verbatim for a row that says so, `@script`; htmlang
+/// for every other element).
 pub fn body_kind(name: &str) -> BodyKind {
     match directive(name) {
         Some(spec) => spec.body,
-        None if name == "script" => BodyKind::Verbatim,
+        None if ElementKind::from_name(name).is_some_and(|kind| kind.is_verbatim()) => {
+            BodyKind::Verbatim
+        }
         None => BodyKind::Htmlang,
     }
 }
@@ -567,6 +621,42 @@ mod tests {
         for name in names {
             assert!(super::directive(name).is_none(), "@{}", name);
         }
+    }
+
+    #[test]
+    fn each_row_names_at_most_one_leading_attribute() {
+        let leading = |name: &str, in_picture: bool| {
+            ElementKind::from_name(name)
+                .unwrap()
+                .leading_attribute(in_picture)
+        };
+        for (name, attr) in [
+            ("link", "href"),
+            ("area", "href"),
+            ("image", "src"),
+            ("script", "src"),
+            ("iframe", "src"),
+            ("video", "src"),
+            ("audio", "src"),
+            ("track", "src"),
+            ("embed", "src"),
+            ("form", "action"),
+            ("object", "data"),
+            ("optgroup", "label"),
+        ] {
+            assert_eq!(leading(name, false), Some(attr), "@{}", name);
+            assert_eq!(leading(name, true), Some(attr), "@{}", name);
+        }
+        assert_eq!(leading("source", false), Some("src"));
+        assert_eq!(leading("source", true), Some("srcset"));
+        for name in ["el", "text", "h1", "button", "slot", "fragment", "picture"] {
+            assert_eq!(leading(name, false), None, "@{}", name);
+        }
+        // @script is an ordinary row whose body is kept as written
+        let script = ElementKind::from_name("script").unwrap();
+        assert!(script.is_verbatim() && script.spec().is_some());
+        assert_eq!(super::body_kind("script"), super::BodyKind::Verbatim);
+        assert_eq!(super::body_kind("el"), super::BodyKind::Htmlang);
     }
 
     #[test]

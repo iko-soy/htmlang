@@ -1697,3 +1697,43 @@ fn a_flex_longhand_keeps_width_fill_growing() {
         out
     );
 }
+
+#[test]
+fn an_image_written_with_src_has_one_src() {
+    // It used to write `src=""` for the missing argument, then `src="a.png"`
+    let html = compile("@image [src=a.png, alt=x]\n");
+    assert_eq!(html.matches("src=").count(), 1, "{}", html);
+    assert!(html.contains(r#"<img src="a.png" alt="x">"#), "{}", html);
+}
+
+#[test]
+fn a_source_in_a_picture_is_a_srcset() {
+    // `<source src>` inside `<picture>` is ignored by the browser
+    let html = compile("@picture\n  @source [type=image/webp] a.webp\n  @image [alt=x] a.jpg\n");
+    assert!(
+        html.contains(r#"<source srcset="a.webp" type="image/webp">"#),
+        "{}",
+        html
+    );
+}
+
+#[test]
+fn a_form_s_action_is_its_first_word_only() {
+    // `@form /subscribe Sign up` gave action="/subscribe Sign up"
+    let html = compile("@form /subscribe Sign up\n");
+    assert!(html.contains(r#"action="/subscribe""#), "{}", html);
+    assert!(html.contains("<span>Sign up</span>"), "{}", html);
+}
+
+#[test]
+fn inline_works_with_the_src_attribute_too() {
+    // `@image [src=a.svg, inline]` left `inline` unused and wrote the `<img>`
+    let dir = scratch_dir("inline_src_attribute");
+    std::fs::write(dir.join("a.svg"), "<svg viewBox=\"0 0 1 1\"></svg>").unwrap();
+    let html = compile_in(
+        &dir,
+        "@image [src=a.svg, inline, alt=x]\n@image [inline, alt=x] a.svg\n",
+    );
+    assert_eq!(html.matches("<svg").count(), 2, "{}", html);
+    assert!(!html.contains("<img"), "{}", html);
+}

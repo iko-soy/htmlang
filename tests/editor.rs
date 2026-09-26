@@ -101,3 +101,22 @@ fn grammar_literal_elements_are_the_compilers() {
         );
     }
 }
+
+#[test]
+fn grammar_leading_arguments_are_the_compilers() {
+    let grammar = grammar();
+    let compiled: BTreeSet<String> = ElementKind::all_names()
+        .filter(|name| {
+            ElementKind::from_name(name).is_some_and(|kind| !kind.arg().attributes().is_empty())
+        })
+        .map(str::to_string)
+        .collect();
+    let rule = pattern(&grammar, "leading-argument");
+    // The names are the group after the `@`
+    let names = &rule[rule.find("@(?:").expect("an element name") + 1..];
+    assert_eq!(
+        alternatives(names),
+        compiled,
+        "update the `leading-argument` rule of the TextMate grammar"
+    );
+}

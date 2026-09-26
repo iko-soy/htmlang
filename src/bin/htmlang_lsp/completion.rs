@@ -57,7 +57,12 @@ pub(crate) fn completions(text: &str, position: Position) -> Vec<CompletionItem>
             .as_deref()
             .map(|name| param_completions(text, name, before, edit_range))
             .unwrap_or_default();
-        items.extend(attr_completions(edit_range, element.as_deref()));
+        let given = given_by_the_argument(text, position);
+        items.extend(
+            attr_completions(edit_range, element.as_deref())
+                .into_iter()
+                .filter(|item| !given.contains(&item.label.trim_end_matches('='))),
+        );
         return items;
     }
 
@@ -422,6 +427,60 @@ pub(crate) fn path_completions(uri: &Url, position: Position) -> Vec<CompletionI
 /// nearest unmatched `[`. Returns the bare name without the leading `@`
 /// (e.g. `"input"`).
 pub(crate) fn owning_element(text: &str, position: Position) -> Option<String> {
+    owning_list(text, position).map(|(_, _, name)| name)
+}
+
+/// The attributes not to offer in the list at `position`: the leading
+/// attribute of an element whose leading argument is written after the
+/// list (`href` in `@link [|] /about About`), which would give it twice.
+fn given_by_the_argument(text: &str, position: Position) -> Vec<&'static str> {
+    let Some((line, bracket, name)) = owning_list(text, position) else {
+        return Vec::new();
+    };
+    let Some(kind) = ElementKind::from_name(&name) else {
+        return Vec::new();
+    };
+    let leading = kind.arg().attributes();
+    if leading.is_empty() {
+        return leading;
+    }
+    // Find the list's `]` and look at what follows it on its line
+    let lines: Vec<&str> = text.lines().collect();
+    let mut depth = 0;
+    let mut quoted = false;
+    for (index, l) in lines.iter().enumerate().skip(line) {
+        let start = if index == line { bracket } else { 0 };
+        let mut chars = l[start..].char_indices();
+        while let Some((i, c)) = chars.next() {
+            match c {
+                '\\' => {
+                    chars.next();
+                }
+                '"' => quoted = !quoted,
+                _ if quoted => {}
+                '[' => depth += 1,
+                ']' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        let after = l[start + i + 1..].trim();
+                        let chain = after.starts_with('>');
+                        return if after.is_empty() || chain {
+                            Vec::new()
+                        } else {
+                            leading
+                        };
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    Vec::new()
+}
+
+/// The line and column of the `[` of the list around `position`, and the
+/// name of the element before it.
+fn owning_list(text: &str, position: Position) -> Option<(usize, usize, String)> {
     let lines: Vec<&str> = text.lines().collect();
     // First, locate the line that contains the unmatched `[`. We scan from
     // the cursor back, tracking depth.
@@ -477,7 +536,7 @@ pub(crate) fn owning_element(text: &str, position: Position) -> Option<String> {
     if name.is_empty() {
         return None;
     }
-    Some(name.to_string())
+    Some((line_idx, bracket_col, name.to_string()))
 }
 
 /// Attributes the LSP knows are specifically meaningful for a given element.
@@ -600,7 +659,7 @@ fn element_specific_attrs(element: &str) -> &'static [&'static str] {
         "time" => &["datetime"],
         "abbr" => &["title"],
         "label" => &["for"],
-        "picture" | "source" => &["src", "srcset", "sizes", "media", "type"],
+        "source" => &["src", "srcset", "sizes", "media", "type"],
         "meta" => &["name", "content", "charset"],
         "blockquote" | "q" => &["cite"],
         "ins" | "del" => &["cite", "datetime"],
@@ -1317,6 +1376,40 @@ mod tests {
             };
         assert_eq!(insert("spacing"), "spacing ");
         assert_eq!(insert("wrap"), "wrap");
+    }
+
+    #[test]
+    fn the_attribute_a_leading_argument_fills_is_not_offered_again() {
+        let labels = |text: &str, line: u32, character: u32| -> Vec<String> {
+            completions(text, Position::new(line, character))
+                .into_iter()
+                .map(|i| i.label)
+                .collect()
+        };
+        let has = |labels: &[String], label: &str| labels.iter().any(|l| l == label);
+        // The argument is written: `href=` would give it twice
+        let text = "@link [] /about About";
+        assert!(!has(&labels(text, 0, 7), "href="));
+        assert!(has(&labels(text, 0, 7), "target="));
+        let text = "@image [alt=x, ] logo.png";
+        assert!(!has(&labels(text, 0, 15), "src="));
+        let text = "@source [] a.webp";
+        let offered = labels(text, 0, 9);
+        assert!(!has(&offered, "src=") && !has(&offered, "srcset="));
+        // Across lines, with a `]` inside quotes
+        let text = "@form [\n  title=\"a]\",\n  \n] /subscribe";
+        assert!(!has(&labels(text, 2, 2), "action="));
+        // No argument: the attribute is how the value is given
+        let text = "@link []\n  About";
+        assert!(has(&labels(text, 0, 7), "href="));
+        let text = "@image [";
+        assert!(has(&labels(text, 0, 8), "src="));
+        // A chain is not an argument
+        let text = "@link [] > @b About";
+        assert!(has(&labels(text, 0, 7), "href="));
+        // Elements without a leading argument are unaffected
+        let text = "@input [] x";
+        assert!(has(&labels(text, 0, 8), "type="));
     }
 
     #[test]

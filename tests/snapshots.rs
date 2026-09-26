@@ -6077,14 +6077,10 @@ fn fragment_script_and_void_elements_drop_nothing_silently() {
     let d = parse_diagnostics("@fragment [padding 4, id=x]\n  @text a\n");
     assert_eq!(coded(&d, "unexpected-argument").len(), 1, "{:?}", d);
 
-    let d = parse_diagnostics("@script [padding 4, src=a.js] b.js\n");
-    let found = coded(&d, "unexpected-argument");
-    assert_eq!(found.len(), 2, "{:?}", d);
-    assert!(
-        found.iter().any(|d| d.message.contains("[src=b.js]")),
-        "{:?}",
-        d
-    );
+    // A style on @script is an error; its leading argument is its src
+    let d = parse_diagnostics("@script [padding 4, defer] b.js\n");
+    assert_eq!(coded(&d, "unexpected-argument").len(), 1, "{:?}", d);
+    assert_eq!(d.len(), 1, "{:?}", d);
 
     for src in [
         "@hr\n  child\n",
@@ -6099,7 +6095,7 @@ fn fragment_script_and_void_elements_drop_nothing_silently() {
     let html = compile("@script [src=app.js, type=module, data-x=1, id=s, class=c, defer]\n");
     assert!(
         html.contains(
-            r#"<script id="s" class="c" src="app.js" type="module" data-x="1" defer></script>"#
+            r#"<script src="app.js" id="s" class="c" type="module" data-x="1" defer></script>"#
         ),
         "{}",
         html
@@ -6730,6 +6726,11 @@ fn snapshot_layout_direction() {
     snapshot_test("layout_direction");
 }
 
+#[test]
+fn snapshot_leading_argument() {
+    snapshot_test("leading_argument");
+}
+
 /// The body of the rule for `selector` in `css`, which must be there.
 fn rule<'a>(css: &'a str, selector: &str) -> &'a str {
     let start = css
@@ -6937,4 +6938,243 @@ fn an_element_inside_text_is_not_a_child_of_the_row_around_it() {
     // The inline @el's parent is the text, not the row
     let out = compile("@el [md:flex-direction row]\n  @paragraph\n    a {@el [width fill] b}\n");
     assert!(!out.contains(":where("), "{}", out);
+}
+
+// ---------------------------------------------------------------------------
+// The leading argument: one rule for every element that has one
+// ---------------------------------------------------------------------------
+
+/// Output with the errors allowed, for tests of what an error leaves.
+fn compile_anyway(input: &str) -> (String, Vec<htmlang::parser::Diagnostic>) {
+    let result = htmlang::parser::parse(input);
+    let html = htmlang::codegen::generate_partial(&result.document);
+    (html, result.diagnostics)
+}
+
+#[test]
+fn the_first_token_fills_the_leading_attribute_and_the_rest_is_content() {
+    let html = compile("@form /subscribe Sign up\n");
+    assert!(
+        html.contains(r#"<form action="/subscribe" class="a"><span>Sign up</span></form>"#),
+        "{}",
+        html
+    );
+    let html = compile("@iframe [title=t] /y fallback\n@object report.pdf The report\n");
+    assert!(
+        html.contains(r#"<iframe src="/y" title="t">fallback</iframe>"#),
+        "{}",
+        html
+    );
+    assert!(
+        html.contains(r#"<object data="report.pdf">The report</object>"#),
+        "{}",
+        html
+    );
+    // The rest is text like any other: inline elements, escapes, $names
+    let html = compile("@let who you\n@link /a Read {@b this}, \\$5 for $who\n");
+    assert!(
+        html.contains(r#"<a href="/a">Read <b>this</b>, $5 for you</a>"#),
+        "{}",
+        html
+    );
+}
+
+#[test]
+fn the_leading_token_is_split_before_anything_is_filled_in() {
+    // A variable holding a space stays one token
+    let html = compile("@let u /a b\n@link $u Text\n@link ${u} Other\n");
+    assert!(html.contains(r#"<a href="/a b">Text</a>"#), "{}", html);
+    assert!(html.contains(r#"<a href="/a b">Other</a>"#), "{}", html);
+    // `${...}` with spaces in it, and quoted text, are one token
+    let html = compile("@let n 2\n@link /page/${$n + 1} Next page\n@link \"/my page\" Mine\n");
+    assert!(
+        html.contains(r#"<a href="/page/3">Next page</a>"#),
+        "{}",
+        html
+    );
+    assert!(html.contains(r#"<a href="/my page">Mine</a>"#), "{}", html);
+    let html = compile("@image [alt=x] \"a photo.png\"\n");
+    assert!(
+        html.contains(r#"<img src="a photo.png" alt="x">"#),
+        "{}",
+        html
+    );
+    // A quoted variable gives its text
+    let html = compile("@let to \"/a b\"\n@link $to Go\n");
+    assert!(html.contains(r#"<a href="/a b">Go</a>"#), "{}", html);
+}
+
+#[test]
+fn a_leading_argument_and_its_attribute_together_are_an_error() {
+    let (html, d) = compile_anyway("@link [href=/a] About\n");
+    let found = coded(&d, "duplicate-attribute");
+    assert_eq!(found.len(), 1, "{:?}", d);
+    let error = found[0];
+    assert_eq!(error.severity, htmlang::parser::Severity::Error);
+    assert!(
+        error.message.contains("'About' as its href") && error.message.contains("`@link /a About`"),
+        "{}",
+        error.message
+    );
+    assert_eq!(error.subject.as_deref(), Some("About"));
+    assert_eq!(error.column, Some(16));
+    // The attribute is kept, once, and the text is the content
+    assert!(html.contains(r#"<a href="/a">About</a>"#), "{}", html);
+
+    for (src, word) in [
+        ("@image [src=a.png, alt=x] b.png\n", "'b.png' as its src"),
+        ("@iframe [src=/x, title=t] /y\n", "'/y' as its src"),
+        ("@form [action=/a] /b\n  x\n", "'/b' as its action"),
+        ("@script [src=a.js] b.js\n", "'b.js' as its src"),
+        (
+            "@picture\n  @source [srcset=a.webp] b.webp\n",
+            "'b.webp' as its srcset in @picture or src elsewhere",
+        ),
+        (
+            "@video\n  @source [src=a.mp4] b.mp4\n",
+            "'b.mp4' as its srcset",
+        ),
+    ] {
+        let d = parse_diagnostics(src);
+        let found = coded(&d, "duplicate-attribute");
+        assert_eq!(found.len(), 1, "{}: {:?}", src, d);
+        assert!(
+            found[0].message.contains(word),
+            "{}: {}",
+            src,
+            found[0].message
+        );
+    }
+    let (html, _) = compile_anyway("@image [src=a.png, alt=x] b.png\n");
+    assert!(html.contains(r#"<img src="a.png" alt="x">"#), "{}", html);
+}
+
+#[test]
+fn the_attribute_form_is_the_leading_argument() {
+    // One src, first, whichever way it is written
+    let html = compile("@image [alt=x, src=a.png]\n@image [alt=x] a.png\n");
+    assert_eq!(
+        html.matches(r#"<img src="a.png" alt="x">"#).count(),
+        2,
+        "{}",
+        html
+    );
+    // No argument and no attribute: no empty src
+    let html = compile("@image [alt=x]\n");
+    assert!(html.contains(r#"<img alt="x">"#), "{}", html);
+    // The text of a link without an argument is on the lines under it
+    let html = compile("@link [class=c, href=/b]\n  Text on its own line\n");
+    assert!(
+        html.contains(r#"<a href="/b" class="c">Text on its own line</a>"#),
+        "{}",
+        html
+    );
+}
+
+#[test]
+fn words_after_the_argument_of_an_element_without_content_are_an_error() {
+    let (html, d) = compile_anyway("@image [alt=Logo] logo.png Our logo\n");
+    let found = coded(&d, "unexpected-argument");
+    assert_eq!(found.len(), 1, "{:?}", d);
+    assert!(
+        found[0].message.contains("'Our logo' would go nowhere"),
+        "{}",
+        found[0].message
+    );
+    assert!(found[0].message.contains("alt="), "{}", found[0].message);
+    assert_eq!(found[0].column, Some(27));
+    assert!(
+        html.contains(r#"<img src="logo.png" alt="Logo">"#),
+        "{}",
+        html
+    );
+    for src in [
+        "@video\n  @track [kind=captions] a.vtt English\n",
+        "@embed a.svg b\n",
+        "@picture\n  @source a.webp 2x\n",
+        "@map\n  @area [alt=x] /a b\n",
+    ] {
+        let d = parse_diagnostics(src);
+        assert_eq!(
+            coded(&d, "unexpected-argument").len(),
+            1,
+            "{}: {:?}",
+            src,
+            d
+        );
+    }
+}
+
+#[test]
+fn source_fills_srcset_in_a_picture_and_src_elsewhere() {
+    let html = compile(
+        "@let @art [file]\n  @source [type=image/avif] $file\n@picture\n  @source a.webp\n  @art [file b.avif]\n  @image [alt=x] c.jpg\n@video [aria-label=v]\n  @source d.mp4\n",
+    );
+    assert!(html.contains(r#"<source srcset="a.webp">"#), "{}", html);
+    assert!(
+        html.contains(r#"<source srcset="b.avif" type="image/avif">"#),
+        "{}",
+        html
+    );
+    assert!(html.contains(r#"<source src="d.mp4">"#), "{}", html);
+}
+
+#[test]
+fn script_takes_its_src_as_its_leading_argument() {
+    let html = compile("@script [type=module, defer] app.js\n");
+    assert!(
+        html.contains(r#"<script src="app.js" type="module" defer></script>"#),
+        "{}",
+        html
+    );
+    // Every HTML attribute passes through
+    let html =
+        compile("@script [nonce=abc, data-x=1, class=s, id=i, crossorigin=anonymous] a.js\n");
+    assert!(
+        html.contains(
+            r#"<script src="a.js" id="i" class="s" nonce="abc" data-x="1" crossorigin="anonymous"></script>"#
+        ),
+        "{}",
+        html
+    );
+    // A src and a body: an error, whichever way the src is written
+    for src in [
+        "@script app.js\n  console.log(1)\n",
+        "@script [src=app.js]\n  console.log(1)\n",
+        "@script [defer] app.js console.log(1)\n",
+    ] {
+        let d = parse_diagnostics(src);
+        let found = coded(&d, "unexpected-content");
+        assert_eq!(found.len(), 1, "{}: {:?}", src, d);
+        assert!(
+            found[0]
+                .message
+                .contains("both a src ('app.js') and a body"),
+            "{}",
+            found[0].message
+        );
+    }
+    // Without a src, the body is JavaScript, kept as written, also at the
+    // end of a chain
+    let html = compile("@el > @script\n  if (a < b) { @notanelement(); }\n");
+    assert!(
+        html.contains("<script>if (a < b) { @notanelement(); }</script>"),
+        "{}",
+        html
+    );
+}
+
+#[test]
+fn a_leading_attribute_passed_to_a_function_s_root_is_given_twice() {
+    let d = parse_diagnostics(
+        "@let @nav-link [label]\n  @link /x $label\n@nav-link [label A, href=/y]\n@nav-link [label B, target=_blank]\n",
+    );
+    let found = coded(&d, "duplicate-attribute");
+    assert_eq!(found.len(), 1, "{:?}", d);
+    assert_eq!(found[0].line, 3);
+    assert!(
+        found[0].message.contains("'/x' as its href") && found[0].message.contains("@nav-link"),
+        "{}",
+        found[0].message
+    );
 }

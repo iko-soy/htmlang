@@ -382,24 +382,65 @@ impl Text {
         }
     }
 
-    /// Split off the first word (a URL), with the rest as text:
-    /// `@link /about About us`.
-    pub fn split_first_word(&self) -> (String, Option<Text>) {
-        let Some(space) = self.raw.find(char::is_whitespace) else {
-            return (self.raw.clone(), None);
-        };
-        let word = self.raw[..space].to_string();
-        let rest_start = self.raw.len() - self.raw[space..].trim_start().len();
-        if rest_start >= self.raw.len() {
-            return (word, None);
-        }
+    /// Split off the leading argument, the first token, with the rest as
+    /// text: `/about` and `About us` in `@link /about About us`. The token
+    /// ends at a space outside `"..."` and `${...}`, so neither is split,
+    /// and it is taken before any `$name` is filled in.
+    pub fn split_leading(&self) -> (Arg, Option<Text>) {
+        let end = leading_token_len(&self.raw);
         let shifted = Shifted { base: self.span };
+        let token = Arg {
+            raw: self.raw[..end].to_string(),
+            span: shifted.span(0, end),
+        };
+        let rest_start = self.raw.len() - self.raw[end..].trim_start().len();
+        if rest_start >= self.raw.len() {
+            return (token, None);
+        }
         let reader = Reader {
             text: &self.raw,
             spans: &shifted,
         };
-        (word, Some(reader.text(rest_start, self.raw.len()).0))
+        (token, Some(reader.text(rest_start, self.raw.len()).0))
     }
+}
+
+/// The length of the first token of `s`: up to the first whitespace that
+/// isn't inside `"..."` or `${...}` and isn't escaped.
+pub fn leading_token_len(s: &str) -> usize {
+    let mut i = 0;
+    while i < s.len() {
+        let rest = &s[i..];
+        let escape = escape_len(rest);
+        if escape > 0 {
+            i += escape;
+            continue;
+        }
+        if rest.starts_with('"') {
+            // To the closing quote, or the end of the text
+            let mut j = 1;
+            while j < rest.len() && !rest[j..].starts_with('"') {
+                j += match escape_len(&rest[j..]) {
+                    0 => rest[j..].chars().next().map_or(1, char::len_utf8),
+                    n => n,
+                };
+            }
+            i += (j + 1).min(rest.len());
+            continue;
+        }
+        if rest.starts_with("${")
+            && let Some(close) = crate::interp::matching_brace(&rest[1..])
+        {
+            i += close + 2;
+            continue;
+        }
+        let c = rest.chars().next().unwrap_or(' ');
+        if c.is_whitespace() {
+            break;
+        }
+        i += c.len_utf8();
+    }
+    i
 }
 
 impl Tree {
@@ -2356,6 +2397,34 @@ mod tests {
             panic!()
         };
         assert!(source.raw.ends_with('}'));
+    }
+
+    #[test]
+    fn the_leading_token_keeps_quotes_and_expressions_whole() {
+        fn token(s: &str) -> &str {
+            &s[..leading_token_len(s)]
+        }
+        assert_eq!(token("/about About us"), "/about");
+        assert_eq!(token("$url More"), "$url");
+        assert_eq!(token("/page/${$n + 1} Next"), "/page/${$n + 1}");
+        assert_eq!(token("${ {\"a\": 1} } x"), "${ {\"a\": 1} }");
+        assert_eq!(token("\"my page.html\" Open"), "\"my page.html\"");
+        assert_eq!(token("\"a \\\" b\" c"), "\"a \\\" b\"");
+        assert_eq!(token("a\\,b c"), "a\\,b");
+        assert_eq!(token("${unclosed x"), "${unclosed");
+        assert_eq!(token("\"unclosed x"), "\"unclosed x");
+        assert_eq!(token("single"), "single");
+
+        let tree = parse("@link /page/${$n + 1} Next  page\n");
+        let NodeKind::Element(line) = &tree.nodes[0].kind else {
+            panic!("an element")
+        };
+        let (token, rest) = line.text.as_ref().unwrap().split_leading();
+        assert_eq!(token.raw, "/page/${$n + 1}");
+        assert_eq!(token.span.column, 6);
+        let rest = rest.unwrap();
+        assert_eq!(rest.raw, "Next  page");
+        assert_eq!(rest.span.column, 22);
     }
 
     #[test]

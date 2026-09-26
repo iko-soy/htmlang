@@ -35,13 +35,15 @@ pub(crate) const ELEMENTS: &[Doc] = &[
         "A paragraph of flowing text (`<p>`), which holds inline `{@...}` elements like any text.",
         "@paragraph\n  Read the {@link /docs docs}.",
     ),
-    doc("link", "Link (`<a>`); text after the URL is its content.", "@link /about About us"),
-    doc("image", "Image (`<img>`); the argument is the source.", "@image [alt=Logo, width 120] logo.png"),
+    doc("link", "Link (`<a>`): the first word after its attributes is its `href`, and the rest is its content.", "@link /about About us"),
+    doc("image", "Image (`<img>`): the one word after its attributes is its `src` (quote one with a space in it).", "@image [alt=Logo, width 120] logo.png"),
     doc(
         "script",
-        "Script (`<script>`): HTML attributes such as `src=` and `defer`, and JavaScript as its \
-         indented body, kept verbatim. It isn't shown, so it takes no styles.",
-        "@script [src=app.js, defer]",
+        "Script (`<script>`): the word after its attributes is its `src`; or its JavaScript as \
+         an indented body, kept verbatim (not both: the browser doesn't run the body of a script \
+         with a src). HTML attributes such as `defer` and `type=module` pass through. It isn't \
+         shown, so it takes no styles.",
+        "@script [defer] app.js",
     ),
     doc(
         "fragment",
@@ -81,12 +83,12 @@ pub(crate) const ELEMENTS: &[Doc] = &[
         "@ol [spacing 4]\n  @li First",
     ),
     doc("li", "List item.", "@li First"),
-    doc("form", "Form; the argument is its `action`.", "@form [method=post] /subscribe"),
+    doc("form", "Form: the first word after its attributes is its `action`, and the rest is its content.", "@form [method=post] /subscribe"),
     doc("input", "Form input (void element).", "@input [type=email, name=email, required]"),
     doc("button", "Button.", "@button [type=submit] Send"),
-    doc("iframe", "Embedded page; the argument is its `src`.", "@iframe [sandbox] https://example.com"),
-    doc("video", "Video; the argument is its `src`.", "@video [controls] movie.mp4"),
-    doc("audio", "Audio; the argument is its `src`.", "@audio [controls] song.mp3"),
+    doc("iframe", "Embedded page: the first word after its attributes is its `src`.", "@iframe [sandbox, title=Example] https://example.com"),
+    doc("video", "Video: the first word after its attributes is its `src`, and the rest is its content (the fallback, `@source` and `@track`).", "@video [controls] movie.mp4"),
+    doc("audio", "Audio: the first word after its attributes is its `src`, and the rest is its content.", "@audio [controls] song.mp3"),
     doc("strong", "Important text (`<strong>`), bold in the browser's own style.", "@paragraph\n  {@strong Note:} save your work first."),
     doc("em", "Stressed text (`<em>`), italic in the browser's own style.", "@paragraph\n  I {@em did} say so."),
     doc("b", "Text set apart in bold without extra importance (`<b>`): a name, a keyword.", "@paragraph\n  Built with {@b htmlang}."),
@@ -99,8 +101,9 @@ pub(crate) const ELEMENTS: &[Doc] = &[
     doc("menu", "List of commands (`<menu>`), shown without markers like `@ul`.", "@menu [spacing 4]\n  @li > @button Copy"),
     doc("caption", "Table title (`<caption>`), the first child of `@table`.", "@table\n  @caption Team\n  @tr\n    @td Ada"),
     doc("tfoot", "Table footer rows (`<tfoot>`).", "@tfoot\n  @tr\n    @td Total"),
-    doc("optgroup", "Group of options in a `@select`; the argument is its `label`.", "@select [aria-label=Fruit]\n  @optgroup Citrus\n    @option Lemon"),
-    doc("track", "Captions or subtitles for `@video`; the argument is its `src`.", "@track [kind=captions, srclang=en] captions.vtt"),
+    doc("optgroup", "Group of options in a `@select`: the first word after its attributes is its `label` (quote one with a space in it).", "@select [aria-label=Fruit]\n  @optgroup \"Citrus fruits\"\n    @option Lemon"),
+    doc("track", "Captions or subtitles for `@video`: the one word after its attributes is its `src`.", "@track [kind=captions, srclang=en] captions.vtt"),
+    doc("source", "A media source: the one word after its attributes is its `srcset` inside `@picture`, and its `src` inside `@video` or `@audio`.", "@picture\n  @source [type=image/avif] photo.avif\n  @image [alt=Photo] photo.jpg"),
 ];
 
 /// Directives (names without `@`).
@@ -220,8 +223,20 @@ pub(crate) fn element_summary(name: &str) -> Option<String> {
     } else {
         let spec = kind.spec()?;
         let mut summary = format!("Renders `<{}>`.", spec.html);
+        let rest = if kind.layout() == Layout::Void {
+            ""
+        } else {
+            ", and the rest is its content"
+        };
         match spec.arg {
-            TagArg::Attr(attr) => summary.push_str(&format!(" The argument is its `{}`.", attr)),
+            TagArg::Attr(attr) => summary.push_str(&format!(
+                " The first word after its attributes is its `{}`{}.",
+                attr, rest
+            )),
+            TagArg::Source => summary.push_str(
+                " The word after its attributes is its `srcset` inside `@picture`, its `src` \
+                 elsewhere.",
+            ),
             TagArg::Child if spec.literal => summary.push_str(
                 " Text after it is its content, shown as written: a `{@...}` in it is text.",
             ),
@@ -232,8 +247,8 @@ pub(crate) fn element_summary(name: &str) -> Option<String> {
     // @fragment, @children, @slot and @script have no layout of their own
     let placeholder = matches!(
         kind,
-        ElementKind::Fragment | ElementKind::Children | ElementKind::Slot(_) | ElementKind::Script
-    );
+        ElementKind::Fragment | ElementKind::Children | ElementKind::Slot(_)
+    ) || kind.is_verbatim();
     if !placeholder {
         summary.push(' ');
         summary.push_str(layout_summary(kind.layout()));

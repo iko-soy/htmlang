@@ -310,7 +310,7 @@
   "External script": {
     "prefix": "@script-src",
     "body": [
-      "@script [src=${1:app.js}, ${2:defer}]",
+      "@script [${2:defer}] ${1:app.js}",
       "$0"
     ],
     "description": "A script loaded from a file"

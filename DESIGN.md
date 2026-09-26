@@ -523,8 +523,8 @@ below.
 | `@in-front` / `@behind` | div, absolute | Overlay layers that fill the parent |
 | `@text` | span | Styled inline text |
 | `@paragraph` | p | A paragraph of flowing text |
-| `@link URL` | a | Link, whose content is the text after the URL |
-| `@image SRC` | img | Image |
+| `@link URL` | a | Link: the URL is its `href`, and the text after it is its content |
+| `@image SRC` | img | Image: the one word after its attributes is its `src` |
 | `@fragment` | (none) | Its children, without a wrapper element (so it takes no attributes) |
 
 Every element has one [layout](#rows-columns-and-text):
@@ -539,10 +539,7 @@ Every element has one [layout](#rows-columns-and-text):
 | void | `@image`, `@input`, `@hr`, `@br`, `@wbr`, `@col`, `@source`, `@track`, `@embed`, `@area` |
 
 `@fragment`, `@children` and `@slot` have no element of their own: what
-they hold takes the layout of the element they are in. For `@form URL`, the
-URL is the form's `action`; for `@video`, `@audio`, `@iframe`, `@source`,
-`@track` and `@embed`, the argument is the `src`; `@object`'s is its `data`,
-`@area`'s its `href`, and `@optgroup`'s its `label`. In a native element,
+they hold takes the layout of the element they are in. In a native element,
 and at the top of the page, lines of text are separated by a line break,
 which HTML shows as a space except where whitespace is kept, as in `@pre`
 and `@textarea`.
@@ -582,10 +579,8 @@ written with [directives](#page-and-head). `<data>` and `<slot>` share their
 names with `@data` and `@slot`, and `<template>` holds content that only a
 script uses; these, and `<svg>` and `<math>`, are written with `@raw`.
 
-`@script` takes HTML attributes (`@script [src=app.js, defer]`) and its code
-as a verbatim body; it isn't shown, so a style on it is an error. An element
-without a closing tag (`@input`, `@hr`, `@br`, `@image`, `@source`, ...)
-takes no content.
+An element without a closing tag (`@input`, `@hr`, `@br`, `@image`,
+`@source`, ...) takes no content.
 
 Browser default margins on headings, paragraphs, lists and figures are reset
 to 0, so `spacing` controls the gaps. Lists (`@ul`, `@ol`, `@menu`) and list
@@ -605,6 +600,64 @@ the list.
 @details [open]
   @summary Question
   @text The answer.
+```
+
+### The leading argument
+
+An element that points at a URL or a file takes it as the first word after
+its attributes, its leading argument, which fills one HTML attribute:
+
+| Element | Leading argument |
+|---|---|
+| `@link`, `@area` | `href` |
+| `@image`, `@script`, `@iframe`, `@video`, `@audio`, `@track`, `@embed` | `src` |
+| `@source` | `srcset` directly inside `@picture`, `src` inside `@video` and `@audio` |
+| `@form` | `action` |
+| `@object` | `data` |
+| `@optgroup` | `label` |
+
+The first word is taken before any `$name` in it is filled in, and it ends
+at the first space that isn't inside `"..."` or `${...}`: `@link $url More`
+and `@link /page/${$n + 1} Next` take the whole `$url` and
+`/page/${$n + 1}`, and `@link "/my page" Open` takes `/my page`. After it,
+the rest of the text is the element's content, read like any text; an
+element without content (`@image`, `@source`, `@track`, `@embed`, `@area`)
+takes nothing more, and a word after its argument is an error (write a
+text alternative as `alt=...`). A value with a space in it is quoted, as
+an `@optgroup`'s label: `@optgroup "Citrus fruits"`. The first word is
+always the argument, so on an element whose attribute is often left out
+(`@form`, `@video`, `@audio`), text goes on the lines under it: `@form Sign
+in` would make `Sign` the form's action.
+
+The attribute can be written as an attribute instead, and it means the same:
+`@link [href=/about]` with its text on the lines under it, or
+`@image [src=logo.svg, inline]`. Both at once, as in
+`@link [href=/a] About`, is an error that says which word was taken as the
+`href`.
+
+```
+@nav [flex-direction row, spacing 16]
+  @link /docs The docs
+  @link [aria-current=page] /pricing Pricing
+@image [alt=The team, width 320] "team photo.jpg"
+@picture
+  @source [type=image/avif] hero.avif
+  @image [alt=The office] hero.jpg
+@video [controls] intro.mp4
+  @track [kind=captions, srclang=en] intro.vtt
+  Your browser doesn't play this video.
+```
+
+`@script` is an element like the others: its leading argument is its `src`,
+any HTML attribute passes through (`@script [type=module, defer] app.js`),
+and without a `src` its indented body is its JavaScript, kept exactly as
+written. A `src` and a body together are an error, since the browser runs
+only the file. It isn't shown, so a style on it is an error.
+
+```
+@script [defer] analytics.js
+@script
+  document.body.dataset.ready = "yes"
 ```
 
 ### HTML attributes
