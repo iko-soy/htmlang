@@ -1592,3 +1592,22 @@ fn text_lines_at_the_top_of_the_page_were_glued() {
     let out = compile("Read\nmore\n");
     assert!(out.contains("Read\nmore"), "{}", out);
 }
+
+#[test]
+fn a_fragment_s_lines_were_glued_to_the_lines_around_it() {
+    // `<pre>sm\nnt</pre>`: a line before or after a @fragment in a native
+    // element (or at the top of the page) had no line break
+    let out = compile("@pre\n  s\n  @fragment\n    m\n    n\n  t\n");
+    assert!(out.contains(">s\nm\nn\nt</pre>"), "{}", out);
+    let out = compile("@let @two\n  @fragment\n    a\n    b\nx\n@two\n@two\ny\n");
+    assert!(out.ends_with("</style>x\na\nb\na\nb\ny"), "{}", out);
+    // In a text element and a column nothing changes
+    let out = compile("@h2 s\n  @fragment\n    m\n  t\n");
+    assert!(out.contains(">s m t</h2>"), "{}", out);
+    let out = compile("@el s\n  @fragment\n    m\n  t\n");
+    assert!(
+        out.contains("<span>s</span><span>m</span><span>t</span>"),
+        "{}",
+        out
+    );
+}

@@ -394,6 +394,15 @@ mod tests {
     }
 
     #[test]
+    fn the_hover_of_code_and_textarea_says_their_text_is_shown_as_written() {
+        let says = |name: &str, text: &str| hover(name).is_some_and(|h| h.contains(text));
+        assert!(says("@code", "shown as written"));
+        assert!(says("@textarea", "shown as written"));
+        assert!(!says("@kbd", "shown as written"));
+        assert!(says("@kbd", "Text after it is its content"));
+    }
+
+    #[test]
     fn every_htmlang_attribute_has_a_hover() {
         for name in vocab::HTMLANG_ATTRIBUTES {
             let text = hover(name);

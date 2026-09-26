@@ -932,10 +932,30 @@ fn generate_children(
     styles: &mut StyleCollector,
     ctx: &mut GenContext,
 ) {
-    let mut previous: Option<bool> = None;
+    generate_run(children, layout, &mut None, out, styles, ctx);
+}
+
+/// [`generate_children`], with `previous` saying whether what was written
+/// last was a line of text (`None`: nothing yet). A `@fragment`'s children
+/// are written as if they stood in its place, so its lines are separated
+/// from the lines around it like any other lines.
+fn generate_run(
+    children: &[Node],
+    layout: Option<Layout>,
+    previous: &mut Option<bool>,
+    out: &mut String,
+    styles: &mut StyleCollector,
+    ctx: &mut GenContext,
+) {
     for child in children {
+        if let Node::Element(elem) = child
+            && elem.kind == ElementKind::Fragment
+        {
+            generate_run(&elem.children, layout, previous, out, styles, ctx);
+            continue;
+        }
         let start = out.len();
-        if let Some(previous_is_text) = previous
+        if let Some(previous_is_text) = *previous
             && let Some(sep) = separator(layout, previous_is_text, child)
         {
             out.push(sep);
@@ -948,7 +968,7 @@ fn generate_children(
             out.truncate(start);
             continue;
         }
-        previous = Some(matches!(child, Node::Text(_)));
+        *previous = Some(matches!(child, Node::Text(_)));
     }
 }
 

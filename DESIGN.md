@@ -108,9 +108,9 @@ other. Inside a line of text, `{...}` holds an inline element, and
 
 How an element's lines combine is its [layout](#rows-columns-and-text)'s
 business: in a row or column each line is a child; in a text element lines
-flow. Text that `@if`, `@each` or a function writes counts as lines written
-in its place, so in a text element it flows with the rest, joined with a
-space.
+flow. Text that `@if`, `@each`, `@fragment` or a function writes counts as
+lines written in its place, so in a text element it flows with the rest,
+joined with a space, and in a native element it is on lines of its own.
 
 The text of `@code` and `@textarea` is shown as written: a `{@...}` in it is
 text, on its line, in the lines under it and inline, so a page can show
