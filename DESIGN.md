@@ -254,7 +254,7 @@ flow.**
 
 | Layout | Elements | What is inside it |
 |---|---|---|
-| column | `@el`, and the containers: `@section`, `@nav`, `@form`, `@ul`, `@li`, ... | Each line of text is a child of its own, and the children are laid out top to bottom |
+| column | `@el`, and the containers: `@section`, `@nav`, `@form`, `@ul`, `@li`, ... | Each line of text is a child of its own, and the children are laid out top to bottom (side by side with `flex-direction row`) |
 | row | `@row` | The same, side by side |
 | grid | `@grid` | Each line of text is a cell |
 | text | `@paragraph`, `@text`, `@link`, `@h1` … `@h6`, `@button`, `@label`, `@td`, `@strong`, `@em`, ... | The argument, the lines and the children flow as one run of text, joined with spaces |
@@ -280,10 +280,10 @@ its children, and how it sits in its parent:
 | Attribute | Effect |
 |---|---|
 | `spacing N` | Gap between children |
-| `width fill` / `width shrink` / `width N` | Take the remaining space in a row (the full width anywhere else), fit the content, or an exact size |
-| `height fill` / `height shrink` / `height N` | Take the remaining space in a column (the full height anywhere else), fit the content, or an exact size |
-| `center-x`, `center-y` | Center the element in its parent |
-| `align-left`, `align-right`, `align-top`, `align-bottom` | Align the element in its parent |
+| `width fill` / `width shrink` / `width N` | In a row, take the remaining width or keep the content's width; in a column or anywhere else, take the full width or fit the content; or an exact size |
+| `height fill` / `height shrink` / `height N` | In a column, take the remaining height or keep the content's height; in a row or anywhere else, take the full height or fit the content; or an exact size |
+| `center-x`, `center-y` | Center the element in its parent (auto margins) |
+| `align-left`, `align-right`, `align-top`, `align-bottom` | Align the element in its parent (an auto margin on the other side) |
 | `wrap` | Let a row wrap onto more lines |
 | `grid-cols N`, `grid-rows N` | Equal grid columns or rows (on `@grid`) |
 | `col-span N`, `row-span N` | Cells a grid child spans |
@@ -292,9 +292,16 @@ its children, and how it sits in its parent:
 children, so they go on a row, column or grid. On a text, native or void
 element they are an error: text has no gap between its lines. For a flex
 layout of your own on such an element, write the CSS (`@label [display
-flex, gap 8]`). How a child's `width fill`, `center-x` or `align-*` works
-depends on its parent's layout: in a row, `width fill` takes the remaining
-width, and in a column, `height fill` takes the remaining height.
+flex, gap 8]`).
+
+A child's `fill` and `shrink` follow the direction its parent's CSS
+actually sets: a row for `@row`, a column for `@el` and the other columns,
+or whatever the parent's own `flex-direction` (or `flex-flow`) says. Along
+that direction, `fill` takes the remaining space and `shrink` keeps the
+content's size; across it, `fill` is the full size and `shrink` fits the
+content. `center-x`, `center-y` and `align-*` are auto margins, which work
+in either direction. A layout word never overrides a CSS property the
+element writes itself: `[width fill, min-width 200]` keeps its 200px.
 
 ```
 @row [spacing 8]
@@ -304,11 +311,42 @@ width, and in a column, `height fill` takes the remaining height.
   @text [center-x] Centered
   @el [height fill, background #dbeafe] Fills the rest of the column
   @text [align-right] Right-aligned
+@nav [flex-direction row, spacing 20]
+  @link /features Features
+  @el [width fill]
+  @link /signup Sign up
 @grid [grid-cols 3, spacing 8, md:grid-cols 4]
   @el [col-span 2, background #fef3c7] Two columns wide
   @el [background #fde68a] One
   @el [background #fcd34d] One
 ```
+
+A direction set under a media or container prefix (`md:flex-direction
+row`, `print:`, `cq-md:`) switches the children's `fill` and `shrink` in
+that same condition. As in elm-ui, whose child rules are keyed on the
+parent's class (`.r > .wf`), each child gets a rule keyed on its parent's
+class in the parent's `@media` or `@container` block. A width prefix holds
+from its width up, so `sm:flex-direction column` still applies at `lg:`
+unless `lg:` sets a direction of its own. A direction under a state prefix
+(`hover:`, `first:`, `children:`) leaves the children's layout words as
+they are.
+
+```
+@header [spacing 16, md:flex-direction row, md:align-items center]
+  @text [font-weight 800] Launchpad
+  @el [width fill]
+  @nav [flex-direction row, spacing 20]
+    @link /features Features
+    @link /pricing Pricing
+@section [padding 24]
+  @el [width fill, max-width 800, center-x, spacing 16]
+    The full width up to 800px, in the middle
+```
+
+On a phone the header is a column and its `@el [width fill]` is the full
+width; from md up it is a row and the `@el` takes the free space, pushing
+the navigation to the right. The section's `@el` is the usual centred
+column: the full width, at most 800px, with auto margins on both sides.
 
 Everything else about layout is plain CSS: `justify-content`, `align-items`,
 `flex 1 1 240px`, `grid-template-areas`, `position`.

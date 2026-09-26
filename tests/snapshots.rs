@@ -6389,9 +6389,14 @@ fn spacing_goes_only_on_a_row_column_or_grid() {
 
 #[test]
 fn fill_and_center_compile_against_the_parent_s_layout() {
-    // A list is a column: center-x is align-self, height fill is flex
+    // A list is a column: height fill is flex; center-x is auto margins,
+    // as in any parent
     let out = compile("@ul [height 200]\n  @li [center-x] a\n  @li [height fill] b\n");
-    assert!(out.contains("align-self:center;"), "{}", out);
+    assert!(
+        out.contains("margin-left:auto;margin-right:auto;"),
+        "{}",
+        out
+    );
     assert!(out.contains("flex:1;min-height:0;"), "{}", out);
     // `children:` styles go on the children, whose parent is the element
     let out = compile("@row [children:width fill]\n  @el A\n  @el B\n");
@@ -6718,4 +6723,218 @@ fn the_new_elements_attributes_are_known_html_attributes() {
             diags
         );
     }
+}
+
+#[test]
+fn snapshot_layout_direction() {
+    snapshot_test("layout_direction");
+}
+
+/// The body of the rule for `selector` in `css`, which must be there.
+fn rule<'a>(css: &'a str, selector: &str) -> &'a str {
+    let start = css
+        .find(&format!("{}{{", selector))
+        .unwrap_or_else(|| panic!("no rule for {} in {}", selector, css))
+        + selector.len()
+        + 1;
+    &css[start..start + css[start..].find('}').unwrap()]
+}
+
+#[test]
+fn flex_direction_decides_what_fill_means_for_the_children() {
+    // A column made a row: `width fill` takes the remaining width
+    let out = compile("@nav [flex-direction row]\n  @el [width fill] a\n");
+    assert!(rule(&out, ".b").contains("flex:1;min-width:0;"), "{}", out);
+    assert!(!rule(&out, ".b").contains("width:100%"), "{}", out);
+    // A row made a column: `width fill` is the full width, not flex
+    let out = compile("@row [flex-direction column]\n  @el [width fill] a\n");
+    assert!(rule(&out, ".b").contains("width:100%;"), "{}", out);
+    assert!(!rule(&out, ".b").contains("flex:1"), "{}", out);
+    // `height fill` in a column made a row is the full height
+    let out = compile("@el [flex-direction row-reverse]\n  @el [height fill] a\n");
+    assert!(rule(&out, ".b").contains("height:100%;"), "{}", out);
+    // `flex-flow` sets the direction too
+    let out = compile("@el [flex-flow row wrap]\n  @el [width fill] a\n");
+    assert!(rule(&out, ".b").contains("flex:1;min-width:0;"), "{}", out);
+    // A direction only the browser knows keeps the element's own
+    let out = compile("@el [flex-direction var(--dir)]\n  @el [width fill] a\n");
+    assert!(rule(&out, ".b").contains("width:100%;"), "{}", out);
+}
+
+#[test]
+fn a_prefixed_direction_moves_the_children_s_words_with_it() {
+    let out = compile(
+        "@header [spacing 16, md:flex-direction row, md:align-items center]\n  @text [font-weight 800] Launchpad\n  @el [width fill]\n",
+    );
+    // Full width while the header is a column...
+    assert!(rule(&out, ".c").contains("width:100%;"), "{}", out);
+    // ...and the remaining width from md up, in the header's own block,
+    // keyed on its class
+    assert!(
+        out.contains(
+            "@media(min-width:768px){:where(.a)>.c{width:auto;flex:1;min-width:0;}.a{flex-direction:row;align-items:center;}}"
+        ),
+        "{}",
+        out
+    );
+    // Container and media conditions work the same way
+    let out = compile(
+        "@el [cq-md:flex-direction row, landscape:flex-direction row]\n  @el [width fill] a\n",
+    );
+    assert!(
+        out.contains("@container(min-width:768px){:where(.a)>.b{width:auto;flex:1;min-width:0;}"),
+        "{}",
+        out
+    );
+    assert!(
+        out.contains("@media(orientation:landscape){:where(.a)>.b{width:auto;flex:1;min-width:0;}"),
+        "{}",
+        out
+    );
+}
+
+#[test]
+fn a_direction_under_a_breakpoint_holds_at_the_wider_ones() {
+    // The row is a column from sm up, so the child's `lg:width fill` is
+    // the full width
+    let out = compile("@row [sm:flex-direction column]\n  @el [width 200, lg:width fill] a\n");
+    assert!(
+        out.contains("@media(min-width:1024px){.b{width:100%;}}"),
+        "{}",
+        out
+    );
+    // Back to a row at lg: the rule there undoes the column's
+    let out =
+        compile("@row [sm:flex-direction column, lg:flex-direction row]\n  @el [width fill] a\n");
+    assert!(
+        out.contains(
+            "@media(min-width:640px){:where(.a)>.b{flex:0 1 auto;min-width:auto;width:100%;}"
+        ),
+        "{}",
+        out
+    );
+    assert!(
+        out.contains("@media(min-width:1024px){:where(.a)>.b{width:auto;flex:1;min-width:0;}"),
+        "{}",
+        out
+    );
+}
+
+#[test]
+fn a_direction_under_a_state_prefix_leaves_the_children_s_words() {
+    // `hover:` isn't a block of its own: the children compile against the
+    // direction without a prefix
+    let out = compile("@el [hover:flex-direction row]\n  @el [width fill] a\n");
+    assert!(rule(&out, ".b").contains("width:100%;"), "{}", out);
+    assert!(!out.contains(":where("), "{}", out);
+    // A grid has no direction, whatever flex-direction says
+    let out = compile("@grid [md:flex-direction row]\n  @el [width fill] a\n");
+    assert!(!out.contains(":where("), "{}", out);
+}
+
+#[test]
+fn center_and_align_are_auto_margins_in_any_parent() {
+    for parent in ["@el", "@row", "@grid", "@nav [flex-direction row]"] {
+        let out = compile(&format!(
+            "{}\n  @el [center-x] a\n  @el [center-y] b\n  @el [align-left] c\n  @el [align-right] d\n  @el [align-top] e\n  @el [align-bottom] f\n",
+            parent
+        ));
+        assert!(!out.contains("align-self"), "{}: {}", parent, out);
+        for margins in [
+            "margin-left:auto;margin-right:auto;",
+            "margin-top:auto;margin-bottom:auto;",
+            "{display:flex;flex-direction:column;margin-right:auto;}",
+            "{display:flex;flex-direction:column;margin-left:auto;}",
+            "{display:flex;flex-direction:column;margin-bottom:auto;}",
+            "{display:flex;flex-direction:column;margin-top:auto;}",
+        ] {
+            assert!(out.contains(margins), "{}: {} in {}", parent, margins, out);
+        }
+    }
+}
+
+#[test]
+fn the_centred_column_needs_no_css_width() {
+    let out = compile("@section\n  @el [width fill, max-width 800, center-x] a\n");
+    assert!(
+        rule(&out, ".b").contains("width:100%;max-width:800px;margin-left:auto;margin-right:auto;"),
+        "{}",
+        out
+    );
+}
+
+#[test]
+fn shrink_fits_the_content_across_the_direction() {
+    // Across a column (and outside flex) the width fits the content...
+    for parent in ["@el", "@grid", "@row [flex-direction column]"] {
+        let out = compile(&format!("{}\n  @el [width shrink] a\n", parent));
+        assert!(
+            rule(&out, ".b").contains("width:fit-content;"),
+            "{}: {}",
+            parent,
+            out
+        );
+    }
+    // ...along a row it keeps the content's width
+    let out = compile("@row\n  @el [width shrink] a\n");
+    assert!(rule(&out, ".b").contains("flex-shrink:0;"), "{}", out);
+    // The same for the height, the other way round
+    let out = compile("@row\n  @el [height shrink] a\n");
+    assert!(rule(&out, ".b").contains("height:fit-content;"), "{}", out);
+    let out = compile("@el\n  @el [height shrink] a\n");
+    assert!(rule(&out, ".b").contains("flex-shrink:0;"), "{}", out);
+}
+
+#[test]
+fn a_layout_word_leaves_what_you_write_yourself() {
+    // Written before or after `width fill`, the element's own min-width wins
+    for attrs in ["min-width 200, width fill", "width fill, min-width 200"] {
+        let out = compile(&format!("@row\n  @el [{}] a\n", attrs));
+        assert!(
+            rule(&out, ".b").contains("flex:1;min-width:200px;")
+                || rule(&out, ".b").contains("min-width:200px;flex:1;"),
+            "{}: {}",
+            attrs,
+            out
+        );
+        assert!(!out.contains("min-width:0"), "{}: {}", attrs, out);
+    }
+    // Also where the parent's direction changes
+    let out = compile("@el [md:flex-direction row]\n  @el [width fill, min-width 200] a\n");
+    assert!(out.contains(":where(.a)>.b{width:auto;flex:1;}"), "{}", out);
+    // Only the last `width` counts
+    let out = compile("@row\n  @el [width fill, width 300] a\n");
+    assert!(!rule(&out, ".b").contains("flex:1"), "{}", out);
+}
+
+#[test]
+fn children_styles_follow_a_prefixed_direction() {
+    let out = compile("@row [children:width fill, md:flex-direction column]\n  @el A\n");
+    assert!(out.contains(".a > *{flex:1;min-width:0;}"), "{}", out);
+    assert!(
+        out.contains("@media(min-width:768px){.a>*{flex:0 1 auto;min-width:auto;width:100%;}"),
+        "{}",
+        out
+    );
+}
+
+#[test]
+fn elements_with_the_same_css_but_other_keyed_rules_get_two_classes() {
+    // In a column, `width fill` and `width 100%` are the same CSS, but only
+    // the first becomes flex where the parent turns into a row
+    let out = compile("@el [md:flex-direction row]\n  @el [width fill] a\n  @el [width 100%] b\n");
+    assert!(
+        out.contains("<div class=\"b\"><span>a</span></div><div class=\"c\">"),
+        "{}",
+        out
+    );
+    assert!(out.contains(":where(.a)>.b{"), "{}", out);
+    assert!(!out.contains(":where(.a)>.c{"), "{}", out);
+}
+
+#[test]
+fn an_element_inside_text_is_not_a_child_of_the_row_around_it() {
+    // The inline @el's parent is the text, not the row
+    let out = compile("@el [md:flex-direction row]\n  @paragraph\n    a {@el [width fill] b}\n");
+    assert!(!out.contains(":where("), "{}", out);
 }

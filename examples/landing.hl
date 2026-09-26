@@ -51,14 +51,13 @@
 @el [color var(--ink), dark:background #0b1220, dark:color #e2e8f0]
   -- Navigation
   @header [padding 16 24, border-bottom 1 solid var(--line)]
-    @row [max-width 1100, center-x, spacing 24, align-items center, width 100%]
+    @row [width fill, max-width 1100, center-x, spacing 24, align-items center]
       @text [font-weight 800, font-size 18] Launchpad
       @spacer
-      @nav
-        @row [spacing 20, color var(--muted)]
-          @link [hover:color var(--ink)] #features Features
-          @link [hover:color var(--ink)] #pricing Pricing
-          @link [hover:color var(--ink)] /docs Docs
+      @nav [flex-direction row, spacing 20, color var(--muted)]
+        @link [hover:color var(--ink)] #features Features
+        @link [hover:color var(--ink)] #pricing Pricing
+        @link [hover:color var(--ink)] /docs Docs
       @primary-link [href /signup, padding 8 16] Sign up
 
   -- Hero
@@ -119,7 +118,7 @@
       Start for free
 
   @footer [padding 32 24, color var(--muted), font-size 14]
-    @row [max-width 1100, center-x, width 100%, wrap, spacing 16]
+    @row [width fill, max-width 1100, center-x, wrap, spacing 16]
       @text © 2026 Launchpad
       @spacer
       @link [hover:color var(--ink)] /privacy Privacy

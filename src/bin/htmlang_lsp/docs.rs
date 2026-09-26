@@ -28,7 +28,7 @@ const fn doc(name: &'static str, summary: &'static str, usage: &'static str) -> 
 #[rustfmt::skip]
 pub(crate) const ELEMENTS: &[Doc] = &[
     doc("row", "Horizontal layout: a flex row.", "@row [spacing 10]\n  @text A\n  @text B"),
-    doc("el", "The container: a flex column (only `@row` lays out horizontally).", "@el [padding 20, background white]\n  Content"),
+    doc("el", "The container: a flex column. `flex-direction row` lays its children out side by side, and their `fill` and `shrink` follow.", "@el [padding 20, background white]\n  Content"),
     doc("text", "Styled inline text (`<span>`).", "@text [font-weight bold, font-size 24] Hello"),
     doc(
         "paragraph",
@@ -138,14 +138,15 @@ pub(crate) const ATTRIBUTES: &[Doc] = &[
     doc("spacing", "Gap between children, on a row, column or grid.", "spacing 20"),
     doc("padding", "Inner space: 1 to 4 values; bare numbers are px.", "padding 12 24"),
     doc("margin", "Outer space: 1 to 4 values; bare numbers are px.", "margin 0 auto"),
-    doc("width", "`fill` takes the remaining space, `shrink` fits the content, or a size.", "width fill"),
-    doc("height", "`fill` takes the remaining space, `shrink` fits the content, or a size.", "height 200"),
-    doc("center-x", "Centers the element horizontally in its parent.", "center-x"),
-    doc("center-y", "Centers the element vertically in its parent.", "center-y"),
-    doc("align-left", "Aligns the element to the left of its parent.", "align-left"),
-    doc("align-right", "Aligns the element to the right of its parent.", "align-right"),
-    doc("align-top", "Aligns the element to the top of its parent.", "align-top"),
-    doc("align-bottom", "Aligns the element to the bottom of its parent.", "align-bottom"),
+    doc("width", "`fill` takes the remaining width in a row and the full width in a column (or anywhere else); `shrink` keeps the content's width in a row and fits the content elsewhere; or a size. Follows the parent's `flex-direction`, also under a prefix such as `md:`.", "width fill"),
+    doc("height", "`fill` takes the remaining height in a column and the full height in a row (or anywhere else); `shrink` keeps the content's height in a column and fits the content elsewhere; or a size. Follows the parent's `flex-direction`, also under a prefix such as `md:`.", "height 200"),
+    doc("flex-direction", "CSS's direction of a row or column. The children's `width`/`height` `fill` and `shrink` follow it, also when it is set under a media or container prefix.", "@header [spacing 16, md:flex-direction row]\n  @text Logo\n  @el [width fill]"),
+    doc("center-x", "Centers the element horizontally in its parent (auto margins, in a row or a column).", "center-x"),
+    doc("center-y", "Centers the element vertically in its parent (auto margins, in a row or a column).", "center-y"),
+    doc("align-left", "Aligns the element to the left of its parent (`margin-right: auto`).", "align-left"),
+    doc("align-right", "Aligns the element to the right of its parent (`margin-left: auto`).", "align-right"),
+    doc("align-top", "Aligns the element to the top of its parent (`margin-bottom: auto`).", "align-top"),
+    doc("align-bottom", "Aligns the element to the bottom of its parent (`margin-top: auto`).", "align-bottom"),
     doc("wrap", "Lets a row's children wrap onto new lines.", "wrap"),
     doc("grid-cols", "Number of equal grid columns.", "grid-cols 3"),
     doc("grid-rows", "Number of equal grid rows.", "grid-rows 2"),
@@ -193,7 +194,8 @@ pub(crate) fn layout_summary(layout: Layout) -> &'static str {
     match layout {
         Layout::Column => {
             "Layout: column. Each line of text is a child of its own, and `spacing` is the gap \
-             between the children."
+             between the children. `flex-direction row` (also as `md:flex-direction row`) lays \
+             them out side by side."
         }
         Layout::Row => {
             "Layout: row. Each line of text is a child of its own, and `spacing` is the gap \

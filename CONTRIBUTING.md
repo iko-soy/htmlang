@@ -30,6 +30,10 @@ Linux, macOS, and Windows. Your change should pass all three.
     `Env`, one frame per block, so a definition is visible to the end of
     its block and a function keeps the frames of its definition.
   - `diagnostic.rs` — `Diagnostic` and the stable diagnostic codes.
+  - `codegen.rs` — writes the HTML and the CSS. A parent's `Flow` (the
+    direction its CSS sets, with the changes under media and container
+    prefixes) is what its children's `fill` and `shrink` compile against;
+    the rules for a change are keyed on the parent's class in that block.
   - `ast.rs` — the element kinds; every plain HTML element is one row in
     `TAGS` with its one `Layout` (column, row, grid, text, native or void,
     which decides its text lines, `spacing` and its children's layout

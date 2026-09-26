@@ -5,7 +5,7 @@
       "@page [lang ${1:en}] ${2:My Page}",
       "@let --${3:brand} ${4:#3b82f6}",
       "",
-      "@el [max-width ${5:800}, center-x, padding ${6:40}, spacing ${7:20}]",
+      "@el [width fill, max-width ${5:800}, center-x, padding ${6:40}, spacing ${7:20}]",
       "  $0"
     ],
     "description": "A page with a title, tokens and a centered column"
@@ -146,14 +146,12 @@
       "  {\"label\": \"${2:Home}\", \"url\": \"/\"},",
       "  {\"label\": \"${3:About}\", \"url\": \"/about\"}",
       "]",
-      "@header [padding ${4:12 24}, border-bottom 1 solid #e5e7eb]",
-      "  @row [spacing ${5:20}, align-items center]",
-      "    @text [font-weight bold] ${6:Logo}",
-      "    @spacer",
-      "    @nav",
-      "      @row [spacing $5]",
-      "        @each \\$link in \\$$1",
-      "          @link [hover:text-decoration underline] \\$link.url \\$link.label",
+      "@header [flex-direction row, spacing ${5:20}, align-items center, padding ${4:12 24}, border-bottom 1 solid #e5e7eb]",
+      "  @text [font-weight bold] ${6:Logo}",
+      "  @spacer",
+      "  @nav [flex-direction row, spacing $5]",
+      "    @each \\$link in \\$$1",
+      "      @link [hover:text-decoration underline] \\$link.url \\$link.label",
       "$0"
     ],
     "description": "A header with a logo, a spacer and links from data"

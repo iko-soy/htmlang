@@ -43,7 +43,9 @@ unless you write some, and nothing is added that you didn't ask for.
   `@h1`, `@button`, `@td`) let their lines flow, joined with spaces, and an
   `@el` inside text is laid out inline. Layout attributes (`width fill`,
   `center-x`, `align-right`, `wrap`) say how an element sits inside its
-  parent.
+  parent, and follow the direction the parent's CSS sets: `@nav
+  [flex-direction row]` is a row, and `md:flex-direction row` makes a
+  column a row from that width up, children included.
 - **Styling is CSS.** Any other attribute is a CSS property with its CSS
   name and value: `padding 20`, `border 1 solid #eee`,
   `grid-template-columns 1fr 2fr`. In lengths, a bare number means pixels.

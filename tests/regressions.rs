@@ -1620,3 +1620,39 @@ fn a_video_s_captions_are_its_track_not_its_source() {
     let src = "@video [controls] a.mp4\n  @track [kind=captions, srclang=en] a.vtt\n";
     assert!(!has_code(src, 1, "missing-captions"), "{:?}", codes(src));
 }
+
+// --- Layout words and the parent's direction ---
+
+#[test]
+fn width_shrink_in_a_column_fits_the_content() {
+    // It was `flex-shrink:0`, and the element still stretched to the
+    // column's full width
+    let out = compile("@el\n  @el [width shrink, background red] a\n");
+    assert!(out.contains("width:fit-content;background:red;"), "{}", out);
+    assert!(!out.contains("flex-shrink"), "{}", out);
+}
+
+#[test]
+fn width_fill_in_a_row_made_a_column_is_not_flex() {
+    // `flex:1` grew the child in height once the row was a column
+    let out = compile("@row [flex-direction column]\n  @el [width fill] a\n");
+    assert!(!out.contains("flex:1"), "{}", out);
+    assert!(out.contains("width:100%"), "{}", out);
+    // Also when the row turns into a column at a breakpoint
+    let out = compile("@row [sm:flex-direction column]\n  @el [width fill] a\n");
+    assert!(
+        out.contains(
+            "@media(min-width:640px){:where(.a)>.b{flex:0 1 auto;min-width:auto;width:100%;}"
+        ),
+        "{}",
+        out
+    );
+}
+
+#[test]
+fn an_explicit_min_width_before_width_fill_is_kept() {
+    // `min-width 200, width fill` in a row came out as `min-width:0`
+    let out = compile("@row\n  @el [min-width 200, width fill] a\n");
+    assert!(out.contains("min-width:200px;flex:1;"), "{}", out);
+    assert!(!out.contains("min-width:0"), "{}", out);
+}

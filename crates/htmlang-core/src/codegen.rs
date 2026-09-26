@@ -58,6 +58,9 @@ struct StyleEntry {
     portrait: String,
     /// Container query overrides: (breakpoint_prefix, css)
     container: Vec<(String, String)>,
+    /// What else tells two elements with the same CSS apart: the rules
+    /// keyed on this class (see [`StyleCollector::keyed`]). Not written.
+    distinct: String,
 }
 
 struct StyleCollector {
@@ -66,6 +69,12 @@ struct StyleCollector {
     /// Using u64 as the key keeps lookups allocation-free; on the rare case of
     /// a hash collision we fall back to a full equality check against the entry.
     index: HashMap<u64, Vec<usize>>,
+    /// Rules for an element's children, keyed on its class and written in
+    /// the block of a condition: `(prefix, selector, body)`, e.g.
+    /// `("md:", ":where(.a)>.b", "flex:1;")` (see [`Flow`]).
+    keyed: Vec<(&'static str, String, String)>,
+    /// The keyed rules already added
+    keyed_seen: std::collections::HashSet<(&'static str, String, String)>,
 }
 
 impl StyleCollector {
@@ -73,7 +82,26 @@ impl StyleCollector {
         StyleCollector {
             entries: Vec::new(),
             index: HashMap::new(),
+            keyed: Vec::new(),
+            keyed_seen: std::collections::HashSet::new(),
         }
+    }
+
+    /// Add a rule for `selector` under the condition `prefix`, once.
+    fn add_keyed(&mut self, prefix: &'static str, selector: String, body: String) {
+        let rule = (prefix, selector, body);
+        if self.keyed_seen.insert(rule.clone()) {
+            self.keyed.push(rule);
+        }
+    }
+
+    /// The keyed rules under `prefix`, as `(selector, body)`.
+    fn keyed_under(&self, prefix: &str) -> Vec<(&str, &str)> {
+        self.keyed
+            .iter()
+            .filter(|(p, _, _)| *p == prefix)
+            .map(|(_, selector, body)| (selector.as_str(), body.as_str()))
+            .collect()
     }
 
     /// Returns a class name for this style combination, or None if all empty.
@@ -90,6 +118,7 @@ impl StyleCollector {
         landscape: String,
         portrait: String,
         container: Vec<(String, String)>,
+        distinct: String,
     ) -> Option<String> {
         if base.is_empty()
             && pseudo.is_empty()
@@ -116,6 +145,7 @@ impl StyleCollector {
         landscape.hash(&mut h);
         portrait.hash(&mut h);
         container.hash(&mut h);
+        distinct.hash(&mut h);
         let sig = h.finish();
 
         if let Some(indices) = self.index.get(&sig) {
@@ -131,6 +161,7 @@ impl StyleCollector {
                     && e.landscape == landscape
                     && e.portrait == portrait
                     && e.container == container
+                    && e.distinct == distinct
                 {
                     return Some(e.class_name.clone());
                 }
@@ -150,6 +181,7 @@ impl StyleCollector {
             landscape,
             portrait,
             container,
+            distinct,
         });
         self.index.entry(sig).or_default().push(idx);
         Some(name)
@@ -217,8 +249,8 @@ impl StyleCollector {
                 &mut css,
                 &format!("@media (min-width: {})", bp_width),
                 &format!("@media(min-width:{})", bp_width),
+                &self.keyed_under(&format!("{}:", bp_name)),
                 &bp_pairs,
-                "",
                 dev,
             );
         }
@@ -234,8 +266,8 @@ impl StyleCollector {
             &mut css,
             "@media (prefers-color-scheme: dark)",
             "@media(prefers-color-scheme:dark)",
+            &self.keyed_under("dark:"),
             &dark_pairs,
-            "",
             dev,
         );
 
@@ -250,8 +282,8 @@ impl StyleCollector {
             &mut css,
             "@media print",
             "@media print",
+            &self.keyed_under("print:"),
             &print_pairs,
-            "",
             dev,
         );
 
@@ -266,8 +298,8 @@ impl StyleCollector {
             &mut css,
             "@media (prefers-reduced-motion: no-preference)",
             "@media(prefers-reduced-motion:no-preference)",
+            &self.keyed_under("motion-safe:"),
             &motion_safe_pairs,
-            "",
             dev,
         );
 
@@ -282,8 +314,8 @@ impl StyleCollector {
             &mut css,
             "@media (prefers-reduced-motion: reduce)",
             "@media(prefers-reduced-motion:reduce)",
+            &self.keyed_under("motion-reduce:"),
             &motion_reduce_pairs,
-            "",
             dev,
         );
 
@@ -298,8 +330,8 @@ impl StyleCollector {
             &mut css,
             "@media (orientation: landscape)",
             "@media(orientation:landscape)",
+            &self.keyed_under("landscape:"),
             &landscape_pairs,
-            "",
             dev,
         );
 
@@ -314,8 +346,8 @@ impl StyleCollector {
             &mut css,
             "@media (orientation: portrait)",
             "@media(orientation:portrait)",
+            &self.keyed_under("portrait:"),
             &portrait_pairs,
-            "",
             dev,
         );
 
@@ -333,8 +365,8 @@ impl StyleCollector {
                 &mut css,
                 &format!("@container (min-width: {})", bp_width),
                 &format!("@container(min-width:{})", bp_width),
+                &self.keyed_under(&format!("cq-{}:", bp_name)),
                 &cq_pairs,
-                "",
                 dev,
             );
         }
@@ -392,22 +424,52 @@ fn emit_grouped_rules(
     }
 }
 
-/// Emit an `@media` / `@container` block containing grouped class rules.
-/// Skips the block entirely if no non-empty bodies are present.
+/// Emit `(selector, body)` rules in their order, merging a run of rules
+/// with the same body into one rule with a selector list (the order
+/// matters: two rules may apply to one element).
+fn emit_selector_rules(out: &mut String, rules: &[(&str, &str)], indent: &str, dev: bool) {
+    let mut i = 0;
+    while i < rules.len() {
+        let body = rules[i].1;
+        let run = rules[i..].iter().take_while(|(_, b)| *b == body).count();
+        if !body.is_empty() {
+            let selectors: Vec<&str> = rules[i..i + run].iter().map(|(s, _)| *s).collect();
+            out.push_str(indent);
+            out.push_str(&selectors.join(","));
+            if dev {
+                out.push(' ');
+            }
+            out.push('{');
+            out.push_str(body);
+            out.push('}');
+            if dev {
+                out.push('\n');
+            }
+        }
+        i += run;
+    }
+}
+
+/// Emit an `@media` / `@container` block containing the rules keyed on a
+/// parent's class (`(selector, body)`), then grouped class rules. Skips the
+/// block entirely if no non-empty bodies are present.
 fn emit_media_block(
     out: &mut String,
     header_dev: &str,
     header_min: &str,
+    keyed: &[(&str, &str)],
     pairs: &[(&str, &str)],
-    selector_suffix: &str,
     dev: bool,
 ) {
-    if pairs.iter().all(|(_, body)| body.is_empty()) {
+    if keyed.is_empty() && pairs.iter().all(|(_, body)| body.is_empty()) {
         return;
     }
     let mut inner = String::new();
     let inner_indent = if dev { "  " } else { "" };
-    emit_grouped_rules(&mut inner, pairs, selector_suffix, inner_indent, dev);
+    // Keyed rules come first: they have the specificity of one class, like
+    // a class rule, so the child's own rules in the block still win
+    emit_selector_rules(&mut inner, keyed, inner_indent, dev);
+    emit_grouped_rules(&mut inner, pairs, "", inner_indent, dev);
     if inner.is_empty() {
         return;
     }
@@ -425,6 +487,8 @@ struct GenContext {
     /// Writing inside a text element, at any depth: htmlang's own `<div>`s
     /// are `<span>`s there, which text can hold.
     in_text: bool,
+    /// How the element whose children are being written lays them out
+    flow: Flow,
 }
 
 impl GenContext {
@@ -595,6 +659,7 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
         depth: 0,
         has_interactive: false,
         in_text: false,
+        flow: Flow::default(),
     };
 
     let mut body = String::new();
@@ -855,6 +920,7 @@ fn generate_partial_inner(doc: &Document, dev: bool) -> String {
         depth: 0,
         has_interactive: false,
         in_text: false,
+        flow: Flow::default(),
     };
     let mut body = String::new();
 
@@ -1080,7 +1146,7 @@ fn generate_element(
         return;
     }
 
-    let site = Site::new(elem, parent);
+    let mut own = Flow::of(elem);
     let tag = match &elem.kind {
         ElementKind::Row | ElementKind::El => "div",
         ElementKind::Text => "span",
@@ -1104,7 +1170,8 @@ fn generate_element(
     }
 
     // Compute CSS for each state and get a class name
-    let gen_class = compute_class(&elem.attrs, &site, styles);
+    let gen_class = element_class(elem, &Site::new(elem, parent, &ctx.flow, &own), styles);
+    own.class = gen_class.clone();
     let (id, user_class) = extract_id_class(&elem.attrs);
 
     if ctx.dev && elem.line_num > 0 {
@@ -1153,7 +1220,9 @@ fn generate_element(
     ctx.depth += 1;
     let outer_in_text = ctx.in_text;
     ctx.in_text = in_text || layout == Layout::Text;
+    let outer_flow = std::mem::replace(&mut ctx.flow, own);
     generate_children(&elem.children, Some(layout), out, styles, ctx);
+    ctx.flow = outer_flow;
     ctx.in_text = outer_in_text;
     ctx.depth -= 1;
 
@@ -1171,7 +1240,8 @@ fn generate_self_closing(
     styles: &mut StyleCollector,
     ctx: &mut GenContext,
 ) {
-    let gen_class = compute_class(&elem.attrs, &Site::new(elem, parent), styles);
+    let own = Flow::default();
+    let gen_class = element_class(elem, &Site::new(elem, parent, &ctx.flow, &own), styles);
     let (id, user_class) = extract_id_class(&elem.attrs);
 
     let (tag, kind_label) = match &elem.kind {
@@ -1263,7 +1333,9 @@ fn generate_text_segments(
             TextSegment::Inline(elem) => {
                 let mut buf = String::new();
                 // An element inside a line of text is in text
+                let outer_flow = std::mem::take(&mut ctx.flow);
                 generate_element(elem, Some(Layout::Text), &mut buf, styles, ctx);
+                ctx.flow = outer_flow;
                 out.push_str(buf.trim_end());
             }
         }
@@ -1274,7 +1346,12 @@ fn generate_text_segments(
 // Style helpers
 // ---------------------------------------------------------------------------
 
-fn compute_class(attrs: &[Attribute], site: &Site, styles: &mut StyleCollector) -> Option<String> {
+fn compute_class(
+    attrs: &[Attribute],
+    site: &Site,
+    styles: &mut StyleCollector,
+    distinct: String,
+) -> Option<String> {
     let base = attrs_to_css(attrs, "", site);
 
     // Collect pseudo-state overrides
@@ -1391,6 +1468,7 @@ fn compute_class(attrs: &[Attribute], site: &Site, styles: &mut StyleCollector) 
         landscape,
         portrait,
         container,
+        distinct,
     )
 }
 
@@ -1517,10 +1595,11 @@ fn emit_class_attr(out: &mut String, gen_class: Option<&str>, user_class: Option
 /// Where an element is written, which its CSS depends on.
 struct Site<'a> {
     kind: &'a ElementKind,
-    /// The layout of what contains it: its children's `width fill`,
-    /// `center-x` and `align-*` compile against it. `None` at the top of
-    /// the page.
-    parent: Option<Layout>,
+    /// How its parent lays out its children: its `width fill`, `height
+    /// fill` and `shrink` compile against it.
+    parent: &'a Flow,
+    /// How it lays out its own children, for its `children:` styles.
+    own: &'a Flow,
     /// It has `@in-front` / `@behind` children.
     has_overlay_children: bool,
     /// A row, column or grid inside text, laid out inline.
@@ -1528,15 +1607,372 @@ struct Site<'a> {
 }
 
 impl Site<'_> {
-    /// Where an element in `parent` is.
-    fn new<'a>(elem: &'a Element, parent: Option<Layout>) -> Site<'a> {
+    /// Where an element in a parent with the layout `layout` and the flow
+    /// `parent` is.
+    fn new<'a>(
+        elem: &'a Element,
+        layout: Option<Layout>,
+        parent: &'a Flow,
+        own: &'a Flow,
+    ) -> Site<'a> {
         Site {
             kind: &elem.kind,
             parent,
+            own,
             has_overlay_children: has_overlay_children(elem),
-            inline: parent == Some(Layout::Text) && elem.kind.layout().is_container(),
+            inline: layout == Some(Layout::Text) && elem.kind.layout().is_container(),
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Direction: what a child's `fill` and `shrink` compile against
+// ---------------------------------------------------------------------------
+
+/// The way a flex row or column lays out its children.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Axis {
+    Row,
+    Column,
+}
+
+impl Axis {
+    /// The direction a `flex-direction` or `flex-flow` value sets, if it
+    /// names one (not `var(--dir)`, which only the browser knows).
+    fn of_value(value: &str) -> Option<Axis> {
+        value.split_whitespace().find_map(|word| match word {
+            "row" | "row-reverse" => Some(Axis::Row),
+            "column" | "column-reverse" => Some(Axis::Column),
+            _ => None,
+        })
+    }
+}
+
+/// The prefixes whose styles are written in a block of their own (`@media`
+/// or `@container`), in the order the blocks are written. A parent's
+/// `flex-direction` under one of them changes its children's layout words
+/// in that block.
+fn block_prefixes() -> impl Iterator<Item = &'static str> {
+    crate::vocab::RESPONSIVE_PREFIXES
+        .iter()
+        .chain(crate::vocab::MEDIA_PREFIXES)
+        .chain(crate::vocab::CONTAINER_QUERY_PREFIXES)
+        .copied()
+}
+
+/// The prefixes whose styles apply whenever `prefix`'s do, in the order
+/// the cascade applies them: no prefix, the smaller widths of the same kind
+/// (`md:` holds from 768px up, so `sm:` holds there too), then `prefix`.
+fn in_effect(prefix: &str) -> Vec<&str> {
+    if prefix.is_empty() {
+        return vec![""];
+    }
+    // `children:` styles are another element's
+    if prefix == "children:" {
+        return vec![prefix];
+    }
+    let mut prefixes = vec![""];
+    for widths in [
+        crate::vocab::RESPONSIVE_PREFIXES,
+        crate::vocab::CONTAINER_QUERY_PREFIXES,
+    ] {
+        if let Some(i) = widths.iter().position(|p| *p == prefix) {
+            prefixes.extend_from_slice(&widths[..i]);
+        }
+    }
+    prefixes.push(prefix);
+    prefixes
+}
+
+/// An attribute's prefix (`""` for none) and the rest of its key.
+fn split_prefix(key: &str) -> (&str, &str) {
+    match crate::vocab::prefix_len(key) {
+        Some(len) => key.split_at(len),
+        None => ("", key),
+    }
+}
+
+/// How an element lays out its children, as its CSS sets it: the
+/// direction its children's `width`/`height` `fill` and `shrink` compile
+/// against. That is the direction of `@row` or of a column, or the one its
+/// own `flex-direction` (or `flex-flow`) sets, with or without a media or
+/// container prefix. Like elm-ui's `.r > .wf`, the rules for a direction
+/// set under a prefix are keyed on the element's class: `@media (...) {
+/// :where(.a)>.b {...} }`.
+#[derive(Clone, Default)]
+struct Flow {
+    /// Without a prefix; `None` when the element isn't a flex row or column
+    /// (a grid, text, HTML's own layout, the top of the page)
+    base: Option<Axis>,
+    /// The direction under each block prefix that sets one, in block order
+    changes: Vec<(&'static str, Axis)>,
+    /// The element's generated class, which the rules for the changes are
+    /// keyed on
+    class: Option<String>,
+}
+
+impl Flow {
+    fn of(elem: &Element) -> Flow {
+        let mut base = match elem.kind.layout() {
+            Layout::Row => Axis::Row,
+            Layout::Column => Axis::Column,
+            _ => return Flow::default(),
+        };
+        let mut changes: Vec<(&'static str, Axis)> = Vec::new();
+        for attr in elem.attrs.iter().filter(|a| !a.html) {
+            let (prefix, name) = split_prefix(&attr.key);
+            if !matches!(name, "flex-direction" | "flex-flow") {
+                continue;
+            }
+            let Some(axis) = attr.value.as_deref().and_then(Axis::of_value) else {
+                continue;
+            };
+            if prefix.is_empty() {
+                base = axis;
+            } else if let Some(prefix) = block_prefixes().find(|p| *p == prefix) {
+                // The later one wins, as in the CSS
+                changes.retain(|(p, _)| *p != prefix);
+                changes.push((prefix, axis));
+            }
+        }
+        changes.sort_by_key(|(p, _)| block_prefixes().position(|q| q == *p));
+        Flow {
+            base: Some(base),
+            changes,
+            class: None,
+        }
+    }
+
+    /// The direction under `prefix`: the latest one set among the prefixes
+    /// in effect there (a state such as `hover:` keeps the direction without
+    /// a prefix).
+    fn at(&self, prefix: &str) -> Option<Axis> {
+        let base = self.base?;
+        let changed = in_effect(prefix).into_iter().rev().find_map(|p| {
+            self.changes
+                .iter()
+                .find(|(q, _)| *q == p)
+                .map(|&(_, axis)| axis)
+        });
+        Some(changed.unwrap_or(base))
+    }
+}
+
+/// `width` or `height`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Dim {
+    Width,
+    Height,
+}
+
+/// What a `width` or `height` says.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Size {
+    Fill,
+    Shrink,
+    /// A size of its own (`width 300`)
+    Set,
+}
+
+impl Size {
+    fn of(value: &str) -> Size {
+        match value.trim() {
+            "fill" => Size::Fill,
+            "shrink" => Size::Shrink,
+            _ => Size::Set,
+        }
+    }
+}
+
+/// The declarations `fill` and `shrink` make in a parent laid out along
+/// `axis` (`None`: not a flex row or column). Along the parent's direction,
+/// `fill` takes the remaining space and `shrink` keeps the content's size;
+/// across it (or outside flex), `fill` is the full size and `shrink` fits
+/// the content.
+fn sizing(dim: Dim, size: Size, axis: Option<Axis>) -> &'static [(&'static str, &'static str)] {
+    match (dim, size, axis) {
+        (_, Size::Set, _) => &[],
+        (Dim::Width, Size::Fill, Some(Axis::Row)) => &[("flex", "1"), ("min-width", "0")],
+        (Dim::Width, Size::Fill, _) => &[("width", "100%")],
+        (Dim::Width, Size::Shrink, Some(Axis::Row)) => &[("flex-shrink", "0")],
+        (Dim::Width, Size::Shrink, _) => &[("width", "fit-content")],
+        (Dim::Height, Size::Fill, Some(Axis::Column)) => &[("flex", "1"), ("min-height", "0")],
+        (Dim::Height, Size::Fill, _) => &[("height", "100%")],
+        (Dim::Height, Size::Shrink, Some(Axis::Column)) => &[("flex-shrink", "0")],
+        (Dim::Height, Size::Shrink, _) => &[("height", "fit-content")],
+    }
+}
+
+/// Every property `fill` and `shrink` of `dim` can set, with its initial
+/// value (`flex` covers `flex-shrink`).
+fn sizing_properties(dim: Dim) -> [(&'static str, &'static str); 3] {
+    match dim {
+        Dim::Width => [
+            ("flex", "0 1 auto"),
+            ("min-width", "auto"),
+            ("width", "auto"),
+        ],
+        Dim::Height => [
+            ("flex", "0 1 auto"),
+            ("min-height", "auto"),
+            ("height", "auto"),
+        ],
+    }
+}
+
+/// What an element's attributes under some prefixes say about its size.
+#[derive(Default)]
+struct Sizes {
+    /// The last `width` and `height`
+    width: Option<Size>,
+    height: Option<Size>,
+    /// A `fill` or `shrink` for the width / height is among them (a later
+    /// size may replace it)
+    width_word: bool,
+    height_word: bool,
+    /// It writes `flex` (or `flex-grow`, `flex-shrink`, `flex-basis`),
+    /// `min-width`, `min-height` itself
+    flex: bool,
+    min_width: bool,
+    min_height: bool,
+}
+
+impl Sizes {
+    /// Read `attrs` under `prefixes`, a later prefix over an earlier one.
+    fn of(attrs: &[Attribute], prefixes: &[&str]) -> Sizes {
+        let mut sizes = Sizes::default();
+        for &want in prefixes {
+            for attr in attrs.iter().filter(|a| !a.html) {
+                let (prefix, name) = split_prefix(&attr.key);
+                let Some(value) = attr.value.as_deref().filter(|v| !v.trim().is_empty()) else {
+                    continue;
+                };
+                if prefix != want {
+                    continue;
+                }
+                match name {
+                    "width" => {
+                        let size = Size::of(value);
+                        sizes.width = Some(size);
+                        sizes.width_word |= size != Size::Set;
+                    }
+                    "height" => {
+                        let size = Size::of(value);
+                        sizes.height = Some(size);
+                        sizes.height_word |= size != Size::Set;
+                    }
+                    "flex" | "flex-grow" | "flex-shrink" | "flex-basis" => sizes.flex = true,
+                    "min-width" => sizes.min_width = true,
+                    "min-height" => sizes.min_height = true,
+                    _ => {}
+                }
+            }
+        }
+        sizes
+    }
+
+    /// The element writes `property` itself: a layout word leaves it alone.
+    fn writes(&self, property: &str) -> bool {
+        match property {
+            "flex" | "flex-shrink" => self.flex,
+            "min-width" => self.min_width,
+            "min-height" => self.min_height,
+            "width" => self.width == Some(Size::Set),
+            "height" => self.height == Some(Size::Set),
+            _ => false,
+        }
+    }
+}
+
+/// The rule that gives an element's `fill` and `shrink`, as its attributes
+/// under `prefixes` set them, their meaning in a parent laid out along
+/// `axis`. Every other property a layout word could have set is put back to
+/// its initial value, so the rule is right whichever earlier rule it
+/// overrides. Properties the element writes itself are left alone.
+fn sizing_rule(attrs: &[Attribute], prefixes: &[&str], axis: Axis) -> String {
+    let sizes = Sizes::of(attrs, prefixes);
+    let mut sets: Vec<(&str, &str)> = Vec::new();
+    let mut resets: Vec<(&str, &str)> = Vec::new();
+    for (dim, size, word) in [
+        (Dim::Width, sizes.width, sizes.width_word),
+        (Dim::Height, sizes.height, sizes.height_word),
+    ] {
+        if !word {
+            continue;
+        }
+        if let Some(size) = size {
+            sets.extend_from_slice(sizing(dim, size, Some(axis)));
+        }
+        resets.extend_from_slice(&sizing_properties(dim));
+    }
+    let mut css = String::new();
+    let mut written: Vec<&str> = Vec::new();
+    for &(property, value) in &resets {
+        if sets.iter().any(|&(p, _)| p == property) || written.contains(&property) {
+            continue;
+        }
+        written.push(property);
+        if !sizes.writes(property) {
+            push_css(&mut css, property, value);
+        }
+    }
+    for &(property, value) in &sets {
+        if !sizes.writes(property) {
+            push_css(&mut css, property, value);
+        }
+    }
+    css
+}
+
+/// The rules an element's `fill` and `shrink` need under each prefix where
+/// the direction of `flow` (its parent's) changes: `(prefix, body)`. With
+/// `children`, for the `children:` styles of the element whose flow it is.
+fn sizing_changes(attrs: &[Attribute], flow: &Flow, children: bool) -> Vec<(&'static str, String)> {
+    flow.changes
+        .iter()
+        .map(|&(prefix, axis)| {
+            let body = if children {
+                sizing_rule(attrs, &["children:"], axis)
+            } else {
+                sizing_rule(attrs, &in_effect(prefix), axis)
+            };
+            (prefix, body)
+        })
+        .filter(|(_, body)| !body.is_empty())
+        .collect()
+}
+
+/// An element's generated class, with the rules keyed on classes that its
+/// `fill` and `shrink` need where a direction changes under a prefix (see
+/// [`Flow`]): its own, keyed on its parent's class (`:where(.a)>.b`, one
+/// class of specificity like any class rule), and its `children:` styles',
+/// keyed on its own (`.b>*`, like `children:`'s own `.b > *`).
+fn element_class(elem: &Element, site: &Site, styles: &mut StyleCollector) -> Option<String> {
+    let as_child = match site.parent.class {
+        Some(_) => sizing_changes(&elem.attrs, site.parent, false),
+        None => Vec::new(),
+    };
+    let for_children = sizing_changes(&elem.attrs, site.own, true);
+    // Two elements with the same CSS but different rules keyed on them
+    // need two classes
+    let mut distinct = String::new();
+    for (list, mark) in [(&as_child, '<'), (&for_children, '>')] {
+        for (prefix, body) in list {
+            distinct.push(mark);
+            distinct.push_str(prefix);
+            distinct.push_str(body);
+        }
+    }
+    let class = compute_class(&elem.attrs, site, styles, distinct)?;
+    if let Some(parent) = &site.parent.class {
+        for (prefix, body) in as_child {
+            styles.add_keyed(prefix, format!(":where(.{})>.{}", parent, class), body);
+        }
+    }
+    for (prefix, body) in for_children {
+        styles.add_keyed(prefix, format!(".{}>*", class), body);
+    }
+    Some(class)
 }
 
 /// The `display` of a layout (nothing for text, native and void elements,
@@ -1556,11 +1992,12 @@ fn layout_css(layout: Layout, inline: bool) -> &'static str {
 fn attrs_to_css(attrs: &[Attribute], state_prefix: &str, site: &Site) -> String {
     let mut css = String::new();
     let kind = site.kind;
-    // `children:` styles go on the children, whose parent is this element
-    let parent = if state_prefix == "children:" {
-        Some(kind.layout())
+    // The direction `fill` and `shrink` compile against: `children:` styles
+    // go on the children, whose parent is this element
+    let axis = if state_prefix == "children:" {
+        site.own.base
     } else {
-        site.parent
+        site.parent.at(state_prefix)
     };
 
     // Base element styles only for the default (non-state) pass
@@ -1580,7 +2017,7 @@ fn attrs_to_css(attrs: &[Attribute], state_prefix: &str, site: &Site) -> String 
     // `children:` they go on the children, whose layout isn't known here.
     let lays_out_children = kind.layout().is_container() || state_prefix == "children:";
 
-    for attr in attrs {
+    for (index, attr) in attrs.iter().enumerate() {
         if attr.html {
             continue;
         }
@@ -1638,35 +2075,36 @@ fn attrs_to_css(attrs: &[Attribute], state_prefix: &str, site: &Site) -> String 
                 }
             }
 
-            // Sizing
-            "width" => {
-                if let Some(v) = val {
-                    match v {
-                        "fill" => match parent {
-                            Some(Layout::Row) => {
-                                push_css(&mut css, "flex", "1");
-                                push_css(&mut css, "min-width", "0");
-                            }
-                            _ => push_css(&mut css, "width", "100%"),
-                        },
-                        "shrink" => push_css(&mut css, "flex-shrink", "0"),
-                        _ => push_css(&mut css, "width", &css_px(v)),
+            // Sizing: `fill` and `shrink` compile against the parent's
+            // direction. Only the last `width` (`height`) counts, as for
+            // any style written twice.
+            "width" | "height" if val.is_some_and(|v| Size::of(v) != Size::Set) => {
+                let later = attrs[index + 1..].iter().any(|a| {
+                    !a.html
+                        && a.key.strip_prefix(state_prefix) == Some(effective_key)
+                        && a.value.as_deref().is_some_and(|v| !v.trim().is_empty())
+                });
+                if later {
+                    continue;
+                }
+                let dim = if effective_key == "width" {
+                    Dim::Width
+                } else {
+                    Dim::Height
+                };
+                let size = Size::of(val.unwrap_or_default());
+                // What the element writes itself, which a layout word
+                // leaves alone
+                let sizes = Sizes::of(attrs, &in_effect(state_prefix));
+                for &(property, value) in sizing(dim, size, axis) {
+                    if !sizes.writes(property) {
+                        push_css(&mut css, property, value);
                     }
                 }
             }
-            "height" => {
+            "width" | "height" => {
                 if let Some(v) = val {
-                    match v {
-                        "fill" => match parent {
-                            Some(Layout::Column) => {
-                                push_css(&mut css, "flex", "1");
-                                push_css(&mut css, "min-height", "0");
-                            }
-                            _ => push_css(&mut css, "height", "100%"),
-                        },
-                        "shrink" => push_css(&mut css, "flex-shrink", "0"),
-                        _ => push_css(&mut css, "height", &css_px(v)),
-                    }
+                    push_css(&mut css, effective_key, &css_px(v));
                 }
             }
             "min-width" => {
@@ -1690,43 +2128,19 @@ fn attrs_to_css(attrs: &[Attribute], state_prefix: &str, site: &Site) -> String 
                 }
             }
 
-            // Alignment
-            "center-x" => match parent {
-                Some(Layout::Column) => {
-                    push_css(&mut css, "align-self", "center");
-                }
-                _ => {
-                    push_css(&mut css, "margin-left", "auto");
-                    push_css(&mut css, "margin-right", "auto");
-                }
-            },
-            "center-y" => match parent {
-                Some(Layout::Row) => push_css(&mut css, "align-self", "center"),
-                _ => {
-                    push_css(&mut css, "margin-top", "auto");
-                    push_css(&mut css, "margin-bottom", "auto");
-                }
-            },
-            "align-left" => match parent {
-                Some(Layout::Column) => {
-                    push_css(&mut css, "align-self", "flex-start");
-                }
-                _ => push_css(&mut css, "margin-right", "auto"),
-            },
-            "align-right" => match parent {
-                Some(Layout::Column) => {
-                    push_css(&mut css, "align-self", "flex-end");
-                }
-                _ => push_css(&mut css, "margin-left", "auto"),
-            },
-            "align-top" => match parent {
-                Some(Layout::Row) => push_css(&mut css, "align-self", "flex-start"),
-                _ => push_css(&mut css, "margin-bottom", "auto"),
-            },
-            "align-bottom" => match parent {
-                Some(Layout::Row) => push_css(&mut css, "align-self", "flex-end"),
-                _ => push_css(&mut css, "margin-top", "auto"),
-            },
+            // Alignment: auto margins, which work along either direction
+            "center-x" => {
+                push_css(&mut css, "margin-left", "auto");
+                push_css(&mut css, "margin-right", "auto");
+            }
+            "center-y" => {
+                push_css(&mut css, "margin-top", "auto");
+                push_css(&mut css, "margin-bottom", "auto");
+            }
+            "align-left" => push_css(&mut css, "margin-right", "auto"),
+            "align-right" => push_css(&mut css, "margin-left", "auto"),
+            "align-top" => push_css(&mut css, "margin-bottom", "auto"),
+            "align-bottom" => push_css(&mut css, "margin-top", "auto"),
 
             // Typography
             "letter-spacing" => {

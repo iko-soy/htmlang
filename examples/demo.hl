@@ -65,6 +65,9 @@
     @paragraph
       {@code @el} stacks its children in a column and {@code @row} lays them
       out side by side. {@code spacing} is the gap between children.
+      {@code flex-direction row} makes any column a row, also from a width
+      up ({@code md:flex-direction row}), and the children's
+      {@code width fill} follows it.
     @row [spacing $unit, wrap]
       @el [$card, width fill] width fill
       @el [$card, width fill] shares the row
@@ -73,6 +76,9 @@
       @text [font-weight 700] Logo
       @spacer
       @text @spacer pushes this to the end
+    @el [spacing $unit, md:flex-direction row]
+      @el [$card, width fill] Stacked on a phone
+      @el [$card, width fill] side by side from md up
     @row [spacing $unit, height 120]
       @el [$card, align-top] align-top
       @el [$card, center-y] center-y
@@ -275,8 +281,7 @@
   -- Raw HTML is the escape hatch
   @raw <hr style="border: none; border-top: 1px dashed #cbd5e1">
 
-  @footer [padding-block $gutter, color var(--muted), font-size 14, print:display none]
-    @row [spacing $unit]
-      @text © 2026 htmlang
-      @spacer
-      @link [hover:color var(--brand)] https://github.com/iko-soy/htmlang Source
+  @footer [flex-direction row, spacing $unit, padding-block $gutter, color var(--muted), font-size 14, print:display none]
+    @text © 2026 htmlang
+    @spacer
+    @link [hover:color var(--brand)] https://github.com/iko-soy/htmlang Source

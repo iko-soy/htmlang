@@ -1,0 +1,32 @@
+@page Layout direction
+-- A column that becomes a row from md up: the children's layout words
+-- follow it there
+@header [spacing 16, md:flex-direction row, md:align-items center]
+  @text [font-weight 800] Launchpad
+  @el [width fill]
+  @nav [flex-direction row, spacing 20]
+    @link /features Features
+    @link /pricing Pricing
+
+-- The centred column: the full width up to 800px, in the middle
+@section [padding 24]
+  @el [width fill, max-width 800, center-x, spacing 8]
+    @text [width shrink, background #eef2ff] Fits its text
+    @text [align-right] On the right
+
+-- A row that stacks from sm up and is a row again from lg up
+@row [spacing 12, sm:flex-direction column, lg:flex-direction row]
+  @el [width fill, min-width 200] Keeps its own min-width
+  @el [width 240, lg:width fill] Fixed, then fills
+  @el [width shrink] Shrinks
+
+-- `children:` styles follow the direction too
+@row [spacing 8, children:width fill, md:flex-direction column]
+  @el A
+  @el B
+
+-- The direction of a media or container condition
+@el [container-type inline-size]
+  @el [cq-md:flex-direction row, print:flex-direction row]
+    @el [width fill] One
+    @el [height fill] Two
