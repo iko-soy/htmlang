@@ -7,5 +7,6 @@
 @each $tag in $site.tags
   @text [color blue] $tag
 
-@each $label, $url in $site.links
-  @link $url $label
+@text ${length($site.links)} links
+@each $link in $site.links
+  @link $link.url $link.label

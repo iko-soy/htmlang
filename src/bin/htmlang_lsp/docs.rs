@@ -104,10 +104,10 @@ pub(crate) const DIRECTIVES: &[Doc] = &[
     doc("else", "Fallback branch of `@if` or `@each`.", "@else\n  @text None"),
     doc(
         "each",
-        "Repeats its body for each item of a list or range; `$_index` counts from 0.",
-        "@each $item in apple, banana\n  @text $item\n@each $i in 1..10 step 2\n  @text $i",
+        "Repeats its body for each item of a list or range; an optional second variable is the index, from 0. Records from `@data` have fields `$item.key`.",
+        "@each $item, $i in apple, banana\n  @text $i: $item\n@each $post in $posts\n  @text $post.title",
     ),
-    doc("data", "Loads data as variables: a JSON file, a glob of them, or `env:NAME`.", "@data $site site.json"),
+    doc("data", "Loads data as variables: a JSON file, inline JSON, a glob of files (a list of records), or `env:NAME`.", "@data $site site.json\n@data $links [{\"label\": \"Home\", \"url\": \"/\"}]"),
 ];
 
 /// htmlang's own attributes, plus CSS properties htmlang treats specially.

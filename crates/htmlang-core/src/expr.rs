@@ -19,7 +19,9 @@
 //!          | NAME "(" expr ("," expr)* ")" | "(" expr ")"
 //! ```
 //!
-//! A bare word (`dark`, `red`, `#3b82f6`, `10px`) is a string. Functions:
+//! A bare word (`dark`, `red`, `#3b82f6`, `10px`) is a string. A variable
+//! loaded from a JSON array is a list: `length` counts its items and
+//! `contains` tests membership. Functions:
 //! `if(cond, a, b)`, text (`uppercase`, `lowercase`, `capitalize`, `trim`,
 //! `length`, `reverse`, `truncate(s, n)`, `replace(s, old, new)`,
 //! `default(s, fallback)`) and colors (`lighten(c, pct)`, `darken(c, pct)`,
@@ -33,6 +35,8 @@ pub enum Value {
     Num(f64),
     Str(String),
     Bool(bool),
+    /// A list's items as text (from a JSON array).
+    List(Vec<String>),
 }
 
 impl Value {
@@ -42,6 +46,7 @@ impl Value {
             Value::Bool(b) => *b,
             Value::Num(n) => *n != 0.0,
             Value::Str(s) => !s.is_empty() && s != "false" && s != "0",
+            Value::List(items) => !items.is_empty(),
         }
     }
 
@@ -49,7 +54,7 @@ impl Value {
         match self {
             Value::Num(n) => Some(*n),
             Value::Str(s) => s.trim().parse().ok(),
-            Value::Bool(_) => None,
+            Value::Bool(_) | Value::List(_) => None,
         }
     }
 }
@@ -61,13 +66,14 @@ impl fmt::Display for Value {
             Value::Num(n) => write!(f, "{}", n),
             Value::Str(s) => f.write_str(s),
             Value::Bool(b) => write!(f, "{}", b),
+            Value::List(items) => f.write_str(&items.join(", ")),
         }
     }
 }
 
 /// Resolves a variable name (the text after `$`). Returns `None` for
 /// undefined variables.
-pub type Resolver<'a> = &'a dyn Fn(&str) -> Option<String>;
+pub type Resolver<'a> = &'a dyn Fn(&str) -> Option<Value>;
 
 /// Evaluate `src`. Undefined variables are empty strings.
 pub fn eval(src: &str, resolve: Resolver) -> Result<Value, String> {
@@ -276,7 +282,10 @@ impl Parser<'_> {
             (">", None) => l > r,
             ("<=", None) => l <= r,
             (">=", None) => l >= r,
-            ("contains", _) => l.contains(&r),
+            ("contains", _) => match &left {
+                Value::List(items) => items.contains(&r),
+                _ => l.contains(&r),
+            },
             ("starts-with", _) => l.starts_with(&r),
             ("ends-with", _) => l.ends_with(&r),
             _ => unreachable!(),
@@ -321,7 +330,7 @@ impl Parser<'_> {
         match token {
             Token::Num(n) => Ok(Value::Num(n)),
             Token::Str(s) => Ok(Value::Str(interpolate(&s, self.resolve))),
-            Token::Var(name) => Ok(Value::Str((self.resolve)(&name).unwrap_or_default())),
+            Token::Var(name) => Ok((self.resolve)(&name).unwrap_or(Value::Str(String::new()))),
             Token::Word(w) if w == "true" => Ok(Value::Bool(true)),
             Token::Word(w) if w == "false" => Ok(Value::Bool(false)),
             Token::Word(name) if self.peek() == Some(&Token::LParen) => {
@@ -404,7 +413,13 @@ fn call(name: &str, args: Vec<Value>) -> Result<Value, String> {
             })
         }
         "trim" => { arity(1)?; Value::Str(text(0).trim().to_string()) }
-        "length" => { arity(1)?; Value::Num(text(0).chars().count() as f64) }
+        "length" => {
+            arity(1)?;
+            Value::Num(match &args[0] {
+                Value::List(items) => items.len(),
+                other => other.to_string().chars().count(),
+            } as f64)
+        }
         "reverse" => { arity(1)?; Value::Str(text(0).chars().rev().collect()) }
         "truncate" => {
             arity(2)?;
@@ -503,7 +518,7 @@ fn interpolate(s: &str, resolve: Resolver) -> String {
         if end == 0 {
             out.push('$');
         } else {
-            out.push_str(&resolve(&after[..end]).unwrap_or_default());
+            out.push_str(&resolve(&after[..end]).map(|v| v.to_string()).unwrap_or_default());
         }
         rest = &after[end..];
     }
@@ -516,13 +531,17 @@ mod tests {
     use super::*;
 
     fn ev(src: &str) -> Value {
-        let resolve = |name: &str| match name {
-            "count" => Some("3".to_string()),
-            "name" => Some("World".to_string()),
-            "theme" => Some("dark".to_string()),
-            "tricky" => Some("a == b".to_string()),
-            "empty" => Some(String::new()),
-            _ => None,
+        let resolve = |name: &str| {
+            let text = |s: &str| Some(Value::Str(s.to_string()));
+            match name {
+                "tags" => Some(Value::List(vec!["rust".into(), "web dev".into()])),
+                "count" => text("3"),
+                "name" => text("World"),
+                "theme" => text("dark"),
+                "tricky" => text("a == b"),
+                "empty" => text(""),
+                _ => None,
+            }
         };
         eval(src, &resolve).unwrap()
     }
@@ -571,6 +590,14 @@ mod tests {
         assert_eq!(ev("darken(#ffffff, 50)").to_string(), "#808080");
         assert_eq!(ev("mix(#000000, #ffffff, 50)").to_string(), "#808080");
         assert_eq!(ev("alpha(#3b82f6, 0.5)").to_string(), "#3b82f67f");
+    }
+
+    #[test]
+    fn lists() {
+        assert_eq!(ev("length($tags)").to_string(), "2");
+        assert!(ev("$tags contains \"web dev\"").truthy());
+        assert!(!ev("$tags contains web").truthy());
+        assert_eq!(ev("$tags").to_string(), "rust, web dev");
     }
 
     #[test]

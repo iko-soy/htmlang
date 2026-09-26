@@ -355,17 +355,17 @@ fn htmlang_attributes_sharing_html_names_do_not_warn() {
 }
 
 #[test]
-fn data_glob_loads_each_file_under_its_stem() {
+fn data_glob_loads_a_list_of_records() {
     let dir = scratch_dir("data_glob");
     std::fs::create_dir_all(dir.join("posts")).unwrap();
     std::fs::write(dir.join("posts/a.json"), r#"{"title": "First"}"#).unwrap();
     std::fs::write(dir.join("posts/b.json"), r#"{"title": "Second"}"#).unwrap();
     let out = compile_in(
         &dir,
-        "@data $posts posts/*.json\n@text $posts._count: $posts.a.title, $posts.b.title\n@each $p in $posts\n  @text [class=item] $p",
+        "@data $posts posts/*.json\n@text ${length($posts)} posts\n@each $p, $i in $posts\n  @text $i $p.title ($p.file)",
     );
-    assert!(out.contains("2: First, Second"), "{}", out);
-    assert!(out.contains(">a<") && out.contains(">b<"), "{}", out);
+    assert!(out.contains("2 posts"), "{}", out);
+    assert!(out.contains(">0 First (a)<") && out.contains(">1 Second (b)<"), "{}", out);
 }
 
 #[test]

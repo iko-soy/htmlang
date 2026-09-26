@@ -267,11 +267,161 @@ pub fn upgrade(input: &str) -> Upgrade {
         output.push('\n');
     }
     let (output, unaliased) = drop_include_aliases(&output);
+    let (output, data_changes) = upgrade_lists(&output, &mut manual);
     Upgrade {
         output,
-        changes: changes + unaliased,
+        changes: changes + unaliased + data_changes,
         manual,
     }
+}
+
+/// Lists and loops, on the otherwise upgraded text (line numbers in notes
+/// are the upgraded file's):
+/// - `@each $label, $url in Home /, About /about` (items split on spaces)
+///   → inline records: `@data $label-url [{"label": "Home", ...}]` and
+///   `@each $item in $label-url` with `$item.label`
+/// - `$_index` → a named index: `@each $x, $index in ...`
+/// - `$posts._count` → `length($posts)`
+fn upgrade_lists(text: &str, manual: &mut Vec<(usize, String)>) -> (String, usize) {
+    let mut lines: Vec<String> = text.split('\n').map(String::from).collect();
+    let mut changes = 0;
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i].clone();
+        let trimmed = line.trim_start();
+        let pad = &line[..line.len() - trimmed.len()];
+        if let Some(count_line) = replace_counts(&line) {
+            lines[i] = count_line;
+            changes += 1;
+            continue;
+        }
+        if let Some(rest) = trimmed.strip_prefix("@data $")
+            && let Some((name, source)) = rest.split_once(' ')
+            && source.contains('*')
+            && text.contains(&format!("${}.", name))
+        {
+            manual.push((
+                i + 1,
+                format!(
+                    "`${name}` is now a list with one record per file: use `@each $item in ${name}` \
+                     and `$item.key` (`$item.file` is the file name); `${name}.STEM.key` no longer works"
+                ),
+            ));
+        }
+        let Some((names, list)) = trimmed.strip_prefix("@each ").and_then(|r| r.split_once(" in "))
+        else {
+            i += 1;
+            continue;
+        };
+        let vars: Vec<String> =
+            names.split(',').map(|v| v.trim().trim_start_matches('$').to_string()).collect();
+        let list = list.trim().to_string();
+        let lines_ref: Vec<&str> = lines.iter().map(String::as_str).collect();
+        let end = block_end(&lines_ref, i);
+        let uses_index = lines[i + 1..end].iter().any(|l| replace_var(l, "_index", "\0") != *l);
+        let items: Vec<&str> = list.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
+        let literal = !list.starts_with('$') && !list.contains("..");
+        let destructures = vars.len() > 2 || items.iter().any(|item| item.contains(' '));
+
+        if vars.len() >= 2 && literal && destructures {
+            let json_text = |s: &str| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""));
+            let records: Vec<String> = items
+                .iter()
+                .map(|item| {
+                    let parts: Vec<&str> = item.splitn(vars.len(), ' ').collect();
+                    let fields: Vec<String> = vars
+                        .iter()
+                        .enumerate()
+                        .map(|(k, var)| {
+                            format!("{}: {}", json_text(var), json_text(parts.get(k).unwrap_or(&"")))
+                        })
+                        .collect();
+                    format!("{{{}}}", fields.join(", "))
+                })
+                .collect();
+            let data = vars.join("-");
+            let index = if uses_index { ", $index" } else { "" };
+            let mut new = vec![
+                format!("{pad}@data ${} [{}]", data, records.join(", ")),
+                format!("{pad}@each $item{} in ${}", index, data),
+            ];
+            for body_line in &lines[i + 1..end] {
+                let mut body_line = replace_var(body_line, "_index", "$index");
+                for var in &vars {
+                    body_line = replace_var(&body_line, var, &format!("$item.{}", var));
+                }
+                new.push(body_line);
+            }
+            let added = new.len();
+            lines.splice(i..end, new);
+            changes += 1;
+            i += added;
+            continue;
+        }
+        if vars.len() > 2 || (vars.len() == 2 && list.starts_with('$')) {
+            manual.push((
+                i + 1,
+                format!(
+                    "the second variable of `@each` is now always the index: if `{}` holds \
+                     records, write `@each $item in {}` and use `$item.KEY`",
+                    list, list
+                ),
+            ));
+        }
+        if uses_index {
+            let index = match vars.get(1) {
+                Some(index) => index.clone(),
+                None => {
+                    lines[i] = format!("{pad}@each ${}, $index in {}", vars[0], list);
+                    "index".to_string()
+                }
+            };
+            for body_line in &mut lines[i + 1..end] {
+                *body_line = replace_var(body_line, "_index", &format!("${}", index));
+            }
+            changes += 1;
+        }
+        i += 1;
+    }
+    (lines.join("\n"), changes)
+}
+
+/// `$posts._count` → `length($posts)` in an expression, `${length($posts)}`
+/// elsewhere. `None` when the line has none.
+fn replace_counts(line: &str) -> Option<String> {
+    if !line.contains("._count") {
+        return None;
+    }
+    let trimmed = line.trim_start();
+    let expression_line = ["@if ", "@else if "].iter().any(|p| trimmed.starts_with(p))
+        || trimmed
+            .strip_prefix("@let ")
+            .and_then(|r| r.split_once(' '))
+            .is_some_and(|(_, v)| v.trim_start().starts_with('='));
+    let is_name = |c: char| c.is_alphanumeric() || matches!(c, '_' | '-' | '.');
+    let mut out = String::new();
+    let mut rest = line;
+    // Inside `${...}`: already an expression
+    let mut depth = 0usize;
+    while let Some(pos) = rest.find('$') {
+        depth = depth.saturating_sub(rest[..pos].matches('}').count());
+        out.push_str(&rest[..pos]);
+        let after = &rest[pos + 1..];
+        if after.starts_with('{') {
+            depth += 1;
+        }
+        let end = after.find(|c: char| !is_name(c)).unwrap_or(after.len());
+        match after[..end].strip_suffix("._count") {
+            Some(name) if expression_line || depth > 0 => {
+                out.push_str(&format!("length(${})", name))
+            }
+            Some(name) => out.push_str(&format!("${{length(${})}}", name)),
+            None => out.push_str(&rest[pos..pos + 1 + end]),
+        }
+        rest = &after[end..];
+    }
+    out.push_str(rest);
+    Some(out)
 }
 
 /// `@include lib.hl as ui` → `@include lib.hl`, and `@ui.card` / `$ui.x`
@@ -1674,6 +1824,24 @@ mod tests {
             up("@svg [width 24, color red, class icon] a.svg"),
             "@image [inline, width 24, color red, class=icon] a.svg"
         );
+    }
+
+    #[test]
+    fn loops_and_lists() {
+        assert_eq!(
+            up("@each $label, $url in About us /about, Home /\n  @link $url $label\n"),
+            "@data $label-url [{\"label\": \"About\", \"url\": \"us /about\"}, {\"label\": \"Home\", \"url\": \"/\"}]\n@each $item in $label-url\n  @link $item.url $item.label\n"
+        );
+        assert_eq!(
+            up("@each $x in a, b\n  @text $_index: $x\n"),
+            "@each $x, $index in a, b\n  @text $index: $x\n"
+        );
+        assert_eq!(
+            up("@if $posts._count > 0\n  @text ${$posts._count} posts\n"),
+            "@if length($posts) > 0\n  @text ${length($posts)} posts\n"
+        );
+        let result = super::upgrade("@data $p posts/*.json\n@text $p.a.title\n@each $a, $b in $list\n  x\n");
+        assert_eq!(result.manual.len(), 2, "{:?}", result.manual);
     }
 
     #[test]

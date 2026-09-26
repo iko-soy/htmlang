@@ -1396,10 +1396,21 @@ fn let_string_interpolation() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn each_destructuring_pairs() {
-    let output = compile("@each $name, $role in Alice Admin, Bob User\n  @text $name is $role");
-    assert!(output.contains("Alice is Admin"));
-    assert!(output.contains("Bob is User"));
+fn each_binds_records() {
+    let output = compile(
+        "@data $people [{\"name\": \"Alice Smith\", \"role\": \"Admin, Owner\"}, {\"name\": \"Bob\"}]\n@each $p in $people\n  @text $p.name is $p.role\n  @each $x in $p.missing\n    @text never",
+    );
+    assert!(output.contains("Alice Smith is Admin, Owner"), "{}", output);
+    assert!(output.contains("Bob is"), "{}", output);
+    assert!(!output.contains("never"), "{}", output);
+}
+
+#[test]
+fn each_second_variable_is_the_index() {
+    let output = compile("@each $item, $i in New York, Paris\n  @text $i=$item");
+    assert!(output.contains("0=New York") && output.contains("1=Paris"), "{}", output);
+    let diags = parse_diagnostics("@each $a, $b, $c in x\n  @text $a");
+    assert!(diags.iter().any(|d| d.message.contains("`$item, $index`")), "{:?}", diags);
 }
 
 // ---------------------------------------------------------------------------
@@ -4104,10 +4115,10 @@ fn test_warning_unused_function() {
 
 #[test]
 fn test_each_index_variable() {
-    let html = compile("@each $item in A, B, C\n  @text $_index");
-    assert!(html.contains(">0<"), "first item should have $_index = 0");
-    assert!(html.contains(">1<"), "second item should have $_index = 1");
-    assert!(html.contains(">2<"), "third item should have $_index = 2");
+    let html = compile("@each $item, $i in A, B, C\n  @text $i");
+    assert!(html.contains(">0<"), "first item should have index 0");
+    assert!(html.contains(">1<"), "second item should have index 1");
+    assert!(html.contains(">2<"), "third item should have index 2");
 }
 
 #[test]
@@ -4424,14 +4435,6 @@ fn parser_multiple_errors() {
         "parser should report multiple errors, got {}",
         errors.len()
     );
-}
-
-#[test]
-fn repeat_with_index() {
-    let output = compile("@each $_ in 1..3\n  @text $_index");
-    assert!(output.contains("0"), "should have index 0");
-    assert!(output.contains("1"), "should have index 1");
-    assert!(output.contains("2"), "should have index 2");
 }
 
 // ---------------------------------------------------------------------------

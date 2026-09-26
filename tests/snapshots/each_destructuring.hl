@@ -1,6 +1,7 @@
 @page Destructuring
 
-@each $name, $role in Alice Admin, Bob User, Carol Editor
+@data $name-role [{"name": "Alice", "role": "Admin"}, {"name": "Bob", "role": "User"}, {"name": "Carol", "role": "Editor"}]
+@each $item in $name-role
   @row [spacing 10]
-    @text [bold] $name
-    @text $role
+    @text [bold] $item.name
+    @text $item.role

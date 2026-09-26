@@ -104,8 +104,7 @@ impl ParseContext {
     fn eval(&mut self, src: &str, line: usize) -> Option<crate::expr::Value> {
         track_var_refs(src, &mut self.used_variables);
         let vars = &self.variables;
-        let resolve = |name: &str| vars.get(name).cloned();
-        let result = crate::expr::eval(src, &resolve);
+        let result = crate::expr::eval(src, &|name: &str| lookup(vars, name));
         match result {
             Ok(value) => Some(value),
             Err(message) => {
@@ -644,8 +643,8 @@ impl Evaluator {
         // --- @data (load JSON file into variables) ---
 
         // @data $name file.json         values as $name.key
-        // @data $name dir/*.json        each file as $name.STEM.key; $name
-        //                               lists the stems, $name._count counts them
+        // @data $name dir/*.json        a list of the files' records
+        // @data $name [...] / {...}     inline JSON
         // @data $name env:NAME [DEFAULT] an environment variable
         if let Some(rest) = content.strip_prefix("@data ") {
             let rest = rest.trim();
@@ -687,55 +686,48 @@ impl Evaluator {
                 return Ok(None);
             }
 
-            let filename = substitute_vars(&filename, &ctx.variables);
-            if filename.contains('*') {
-                self.load_data_glob(&prefix, &filename, line_num, &content, ctx);
-                return Ok(None);
-            }
-
-            let filename = substitute_vars(&filename, &ctx.variables);
-            let resolved = match &ctx.base_path {
-                Some(base) => base.join(&filename),
-                None => PathBuf::from(&filename),
-            };
-
-            let json_text = match std::fs::read_to_string(&resolved) {
-                Ok(text) => text,
-                Err(e) => {
-                    ctx.diagnostics.push(Diagnostic {
-                        line: line_num,
-                        column: None,
-                        message: format!("cannot load data '{}': {}", filename, e),
-                        severity: Severity::Error,
-                        source_line: Some(content.clone()),
-                    });
+            // Inline JSON: @data $links [{"label": "Home", "url": "/"}]
+            let (json_text, source) = if filename.starts_with(['[', '{']) {
+                (filename, "the inline data".to_string())
+            } else {
+                let filename = substitute_vars(&filename, &ctx.variables);
+                if filename.contains('*') {
+                    self.load_data_glob(&prefix, &filename, line_num, &content, ctx);
                     return Ok(None);
                 }
-            };
-
-            match parse_json_with_error(&json_text) {
-                Ok(json) => {
-                    let mut sub = HashMap::new();
-                    flatten_json(&prefix, &json, &mut sub);
-                    for (k, v) in sub {
-                        ctx.variables.insert(k, v);
+                let resolved = match &ctx.base_path {
+                    Some(base) => base.join(&filename),
+                    None => PathBuf::from(&filename),
+                };
+                match std::fs::read_to_string(&resolved) {
+                    Ok(text) => {
+                        ctx.included_files.push(resolved);
+                        (text, format!("'{}'", filename))
+                    }
+                    Err(e) => {
+                        ctx.diagnostics.push(Diagnostic {
+                            line: line_num,
+                            column: None,
+                            message: format!("cannot load data '{}': {}", filename, e),
+                            severity: Severity::Error,
+                            source_line: Some(content.clone()),
+                        });
+                        return Ok(None);
                     }
                 }
-                Err(detail) => {
-                    ctx.diagnostics.push(Diagnostic {
-                        line: line_num,
-                        column: None,
-                        message: format!("invalid JSON in '{}': {}", filename, detail),
-                        severity: Severity::Error,
-                        source_line: Some(content.clone()),
-                    });
-                }
+            };
+            match parse_json_with_error(&json_text) {
+                Ok(json) => flatten_json(&prefix, &json, &mut ctx.variables),
+                Err(detail) => ctx.diagnostics.push(Diagnostic {
+                    line: line_num,
+                    column: None,
+                    message: format!("invalid JSON in {}: {}", source, detail),
+                    severity: Severity::Error,
+                    source_line: Some(content.clone()),
+                }),
             }
-
-            ctx.included_files.push(resolved);
             return Ok(None);
         }
-
 
         // --- @if / @else ---
 
@@ -814,8 +806,8 @@ impl Evaluator {
         Ok(Some(vec![Node::Text(segments)]))
     }
 
-    /// `@data $name dir/*.json`: load every matching file as
-    /// `$name.STEM.key`, list the stems in `$name` and count them.
+    /// `@data $name dir/*.json`: a list with one record per matching file
+    /// (in name order), whose `file` is the file's name without extension.
     fn load_data_glob(
         &mut self,
         name: &str,
@@ -856,7 +848,7 @@ impl Evaluator {
             }
         };
         files.sort();
-        let mut stems = Vec::new();
+        let mut records = Vec::new();
         for file in files {
             let stem = file
                 .file_stem()
@@ -877,12 +869,19 @@ impl Evaluator {
                 }
             };
             match parse_json_with_error(&text) {
-                Ok(json) => {
-                    let mut vars = HashMap::new();
-                    flatten_json(&format!("{}.{}", name, stem), &json, &mut vars);
-                    ctx.variables.extend(vars);
-                    stems.push(stem);
+                Ok(JsonValue::Object(mut pairs)) => {
+                    if !pairs.iter().any(|(key, _)| key == "file") {
+                        pairs.push(("file".to_string(), JsonValue::Str(stem)));
+                    }
+                    records.push(JsonValue::Object(pairs));
                 }
+                Ok(_) => ctx.diagnostics.push(Diagnostic {
+                    line: line_num,
+                    column: None,
+                    message: format!("'{}' should hold a JSON object", file.display()),
+                    severity: Severity::Error,
+                    source_line: Some(content.to_string()),
+                }),
                 Err(detail) => ctx.diagnostics.push(Diagnostic {
                     line: line_num,
                     column: None,
@@ -893,11 +892,12 @@ impl Evaluator {
             }
             ctx.included_files.push(file);
         }
-        ctx.variables
-            .insert(format!("{}._count", name), stems.len().to_string());
-        ctx.variables.insert(name.to_string(), stems.join(", "));
+        flatten_json(name, &JsonValue::Array(records), &mut ctx.variables);
     }
 
+    /// `@each $item in LIST` or `@each $item, $index in LIST`. A LIST from
+    /// JSON binds each record or value to `$item`; any other list is text,
+    /// split on commas, or a range `A..B [step N]`.
     fn eval_each(
         &mut self,
         header: &str,
@@ -906,25 +906,24 @@ impl Evaluator {
         line_num: usize,
         ctx: &mut ParseContext,
     ) -> Result<Vec<Node>, ParseError> {
-        // Support: @each $var in list  OR  @each $var, $index in list
-        // OR  @each $name, $url in Alice /alice, Bob /bob (destructuring)
-        let (var_names, list_str) = if let Some((before_in, after_in)) = header.split_once(" in ") {
-            let before_in = before_in.trim();
-            let vars: Vec<String> = before_in
-                .split(',')
-                .map(|v| v.trim().strip_prefix('$').unwrap_or(v.trim()).to_string())
-                .collect();
-            (vars, after_in.trim().to_string())
-        } else {
+        let Some((names, list_src)) = header.split_once(" in ") else {
             return Err(ParseError {
                 line: line_num,
-                message: "@each requires: @each $var in list".to_string(),
+                message: "@each requires: @each $item in LIST".to_string(),
             });
         };
-        let var_name = var_names[0].clone();
-        let index_var = var_names.get(1).cloned();
-
-        if list_str.trim_end().ends_with(']') && list_str.contains("[page ") {
+        let names: Vec<&str> = names.split(',').map(|v| v.trim().trim_start_matches('$')).collect();
+        if names.len() > 2 {
+            return Err(ParseError {
+                line: line_num,
+                message: "@each takes `$item` or `$item, $index`: to loop over records, \
+                          load them with @data and use `$item.key`"
+                    .to_string(),
+            });
+        }
+        let (item, index) = (names[0], names.get(1).copied());
+        let list_src = list_src.trim();
+        if list_src.ends_with(']') && list_src.contains("[page ") {
             return Err(ParseError {
                 line: line_num,
                 message: "@each pagination (`[page N]`) was removed: split the list or \
@@ -932,68 +931,61 @@ impl Evaluator {
                     .to_string(),
             });
         }
-        track_var_refs(&list_str, &mut ctx.used_variables);
-        let list_str = substitute_vars(&list_str, &ctx.variables);
-        // Support range syntax: @each $i in 1..5  or  @each $i in 0..100 step 10
-        let items: Vec<String> = if let Some((start_s, rest)) = list_str.split_once("..") {
-            let (end_s, step) = if let Some((e, s)) = rest.split_once(" step ") {
-                (e.trim(), s.trim().parse::<i64>().unwrap_or(1).max(1))
-            } else {
-                (rest.trim(), 1i64)
-            };
-            if let (Ok(start), Ok(end)) = (start_s.trim().parse::<i64>(), end_s.parse::<i64>())
-            {
-                numeric_range(start, end, step)
-            } else {
-                list_str
-                    .split(',')
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect()
+        track_var_refs(list_src, &mut ctx.used_variables);
+
+        // A list loaded from JSON, by name
+        let data_list = list_src.strip_prefix('$').and_then(|name| {
+            let len = ctx.variables.get(&format!("{}#", name))?.parse::<usize>().ok()?;
+            Some((name.to_string(), len))
+        });
+        let undefined = list_src.strip_prefix('$').filter(|name| {
+            name.chars().all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '.'))
+                && !ctx.variables.contains_key(*name)
+        });
+        let text_items: Vec<String> = match (&data_list, undefined) {
+            (Some(_), _) => Vec::new(),
+            // A missing variable is an empty list: quietly for a record's
+            // missing field (`$post.tags`), with a warning otherwise
+            (None, Some(name)) => {
+                let root = name.split('.').next().unwrap_or(name);
+                if !ctx.variables.contains_key(root) {
+                    ctx.diagnostics.push(Diagnostic {
+                        line: line_num,
+                        column: None,
+                        message: format!("undefined variable '${}'", name),
+                        severity: Severity::Warning,
+                        source_line: Some(format!("@each {}", header)),
+                    });
+                }
+                Vec::new()
             }
-        } else {
-            list_str
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect()
+            (None, None) => text_list_items(&substitute_vars(list_src, &ctx.variables)),
         };
+        let count = data_list.as_ref().map_or(text_items.len(), |(_, len)| *len);
 
         if body.is_empty() {
             return Ok(Vec::new());
         }
-        // An empty list renders the @else body
-        if items.is_empty() {
+        if count == 0 {
             return Ok(self.eval_scoped(empty, ctx));
         }
-
         let saved_vars = ctx.variables.clone();
-        let mut all_nodes = Vec::new();
-
-        let has_extra_vars = var_names.len() > 2
-            || (var_names.len() == 2 && items.first().is_some_and(|it| it.contains(' ')));
-
-        for (i, item) in items.iter().enumerate() {
-            // Always expose $_index for the current iteration
-            ctx.variables.insert("_index".to_string(), i.to_string());
-            if has_extra_vars {
-                // Destructuring: split item by spaces and assign to each variable
-                let parts: Vec<&str> = item.splitn(var_names.len(), ' ').collect();
-                for (vi, vn) in var_names.iter().enumerate() {
-                    let val = parts.get(vi).unwrap_or(&"").to_string();
-                    ctx.variables.insert(vn.clone(), val);
-                }
-            } else {
-                ctx.variables.insert(var_name.clone(), item.clone());
-                if let Some(ref idx_name) = index_var {
-                    ctx.variables.insert(idx_name.clone(), i.to_string());
+        let mut nodes = Vec::new();
+        for i in 0..count {
+            match &data_list {
+                Some((name, _)) => bind_item(&mut ctx.variables, &format!("{}.{}", name, i), item),
+                None => {
+                    let text = text_items.get(i).cloned().unwrap_or_default();
+                    ctx.variables.insert(item.to_string(), text);
                 }
             }
-            all_nodes.extend(self.eval_block(body, ctx));
+            if let Some(index) = index {
+                ctx.variables.insert(index.to_string(), i.to_string());
+            }
+            nodes.extend(self.eval_block(body, ctx));
         }
-
         ctx.variables = saved_vars;
-        Ok(all_nodes)
+        Ok(nodes)
     }
 
     fn define_function(
@@ -1656,7 +1648,7 @@ fn suggest_var_name(input: &str, vars: &HashMap<String, String>) -> Option<Strin
     let max_allowed = 2usize.min(input_chars.len().saturating_sub(1));
     let mut best: Option<String> = None;
     let mut best_dist = usize::MAX;
-    for name in vars.keys() {
+    for name in vars.keys().filter(|k| !k.ends_with('#')) {
         let nlen = name.chars().count();
         if nlen.abs_diff(input_chars.len()) > max_allowed {
             continue;
@@ -2498,6 +2490,41 @@ fn parse_text_segments(input: &str, ctx: &mut ParseContext) -> Vec<TextSegment> 
 
 /// Inclusive integer range from `start` to `end` (counting down when
 /// `start > end`), stepping by `step`. Stops instead of overflowing.
+/// The items of a text list: a range `A..B [step N]`, or comma-separated.
+fn text_list_items(list: &str) -> Vec<String> {
+    if let Some((start, rest)) = list.split_once("..") {
+        let (end, step) = match rest.split_once(" step ") {
+            Some((end, step)) => (end.trim(), step.trim().parse::<i64>().unwrap_or(1).max(1)),
+            None => (rest.trim(), 1),
+        };
+        if let (Ok(start), Ok(end)) = (start.trim().parse::<i64>(), end.parse::<i64>()) {
+            return numeric_range(start, end, step);
+        }
+    }
+    list.split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+/// Make `$target` (and `$target.key`, and nested lists) a copy of the list
+/// item stored under `source`.
+fn bind_item(vars: &mut HashMap<String, String>, source: &str, target: &str) {
+    let under = |key: &str, name: &str| {
+        key.strip_prefix(name)
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with(['.', '#']))
+    };
+    vars.retain(|key, _| !under(key, target));
+    let copies: Vec<(String, String)> = vars
+        .iter()
+        .filter(|(key, _)| under(key, source))
+        .map(|(key, value)| (format!("{}{}", target, &key[source.len()..]), value.clone()))
+        .collect();
+    vars.extend(copies);
+    // A record has no text of its own
+    vars.entry(target.to_string()).or_default();
+}
+
 fn numeric_range(start: i64, end: i64, step: i64) -> Vec<String> {
     let mut items = Vec::new();
     let mut n = start;
@@ -3029,8 +3056,7 @@ fn substitute_vars(input: &str, vars: &HashMap<String, String>) -> String {
             && let Some(close) = matching_brace(after)
         {
             let source = &after[1..close];
-            let resolve = |name: &str| vars.get(name).cloned();
-            match crate::expr::eval(source, &resolve) {
+            match crate::expr::eval(source, &|name: &str| lookup(vars, name)) {
                 Ok(value) => result.push_str(&value.to_string()),
                 Err(_) => result.push_str(&rest[pos..pos + 1 + close + 1]),
             }
@@ -3541,41 +3567,34 @@ fn flatten_json(prefix: &str, value: &JsonValue, vars: &mut HashMap<String, Stri
             }
         }
         JsonValue::Array(items) => {
-            vars.insert(format!("{}._count", prefix), items.len().to_string());
-            // Check if all items are objects with the same keys
-            let all_objects = items.iter().all(|v| matches!(v, JsonValue::Object(_)));
-            if all_objects && !items.is_empty() {
-                // Collect keys from first object for destructuring
-                if let JsonValue::Object(first_pairs) = &items[0] {
-                    let keys: Vec<String> = first_pairs.iter().map(|(k, _)| k.clone()).collect();
-                    vars.insert(format!("{}._keys", prefix), keys.join(","));
-                }
-                // Each item becomes space-separated values, items comma-separated
-                let csv: Vec<String> = items
-                    .iter()
-                    .map(|item| {
-                        if let JsonValue::Object(pairs) = item {
-                            pairs
-                                .iter()
-                                .map(|(_, v)| json_value_to_string(v))
-                                .collect::<Vec<_>>()
-                                .join(" ")
-                        } else {
-                            json_value_to_string(item)
-                        }
-                    })
-                    .collect();
-                vars.insert(prefix.to_string(), csv.join(","));
-            } else {
-                // Primitive array: comma-separated
-                let csv: Vec<String> = items.iter().map(json_value_to_string).collect();
-                vars.insert(prefix.to_string(), csv.join(","));
-            }
+            // A list: its length under `NAME#` (see `lookup`), its text
+            // items joined as its value, and each item as `NAME.INDEX`
+            vars.insert(format!("{}#", prefix), items.len().to_string());
+            let text: Vec<String> = items
+                .iter()
+                .map(json_value_to_string)
+                .filter(|s| !s.is_empty())
+                .collect();
+            vars.insert(prefix.to_string(), text.join(", "));
             // Also set indexed access: prefix.0, prefix.1, etc.
             for (i, item) in items.iter().enumerate() {
                 flatten_json(&format!("{}.{}", prefix, i), item, vars);
             }
         }
+    }
+}
+
+/// Resolve `$name` for an expression: a list if `name` was loaded from a
+/// JSON array, else its text.
+fn lookup(vars: &HashMap<String, String>, name: &str) -> Option<crate::expr::Value> {
+    use crate::expr::Value;
+    match vars.get(&format!("{}#", name)).and_then(|n| n.parse::<usize>().ok()) {
+        Some(len) => Some(Value::List(
+            (0..len)
+                .map(|i| vars.get(&format!("{}.{}", name, i)).cloned().unwrap_or_default())
+                .collect(),
+        )),
+        None => vars.get(name).cloned().map(Value::Str),
     }
 }
 

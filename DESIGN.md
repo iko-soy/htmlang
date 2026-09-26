@@ -340,10 +340,10 @@ Conditions and computed values (`@let x = ...`) are expressions:
 |---|---|
 | Values | numbers, `"strings"` (with `$var` interpolation), `$variables`, `true`, `false`, and bare words (`dark`, `#fff`) as strings |
 | Arithmetic | `+ - * / %` with the usual precedence, unary `-`, `( )` |
-| Comparison | `== != < > <= >=` (numeric when both sides are numbers), `contains`, `starts-with`, `ends-with` |
+| Comparison | `== != < > <= >=` (numeric when both sides are numbers), `contains` (in text, or as an item of a list), `starts-with`, `ends-with` |
 | Logic | `and`, `or`, `not`; empty, `false` and `0` are false |
 | Choice | `if(CONDITION, A, B)` |
-| Text functions | `uppercase(s)`, `lowercase(s)`, `capitalize(s)`, `trim(s)`, `length(s)`, `reverse(s)`, `truncate(s, n)`, `replace(s, old, new)`, `default(s, fallback)` |
+| Text functions | `uppercase(s)`, `lowercase(s)`, `capitalize(s)`, `trim(s)`, `length(s)` (a list's items, or a text's characters), `reverse(s)`, `truncate(s, n)`, `replace(s, old, new)`, `default(s, fallback)` |
 | Color functions | `lighten(c, pct)`, `darken(c, pct)`, `alpha(c, a)`, `mix(c1, c2, pct)` |
 
 Variables are looked up while evaluating, so a value containing `==` or spaces
@@ -373,27 +373,39 @@ All control flow runs at compile time.
 @else
   @text Few
 
-@each $item in $items
-  @text $_index: $item
+@each $item, $i in $items
+  @text $i: $item
 @else
   @text The list is empty.
 
-@each $i in 1..10 step 3
-  @text $i
-
-@each $label, $url in Home /, About /about
-  @link $url $label
+@each $n in 1..10 step 3
+  @text $n
 ```
 
-A range counts down when its start is greater than its end.
+`@each $item in LIST` loops over a list: a list loaded with `@data`, text
+split on commas, or a range (which counts down when its start is greater than
+its end). An optional second variable is the index, from 0. An item loaded from
+JSON can be a record, whose fields are `$item.key`:
+
+```
+@data $links [
+  {"label": "About us", "url": "/about"},
+  {"label": "Blog", "url": "/blog"}
+]
+@row [spacing 12]
+  @each $link in $links
+    @link $link.url $link.label
+@text ${length($links)} links
+```
 
 ## Files and data
 
 | Directive | Effect |
 |---|---|
 | `@include file.hl` | Insert another file: its content and definitions (a library of `@let`s emits nothing) |
-| `@data $name file.json` | Load JSON values as variables (`$name.key`) |
-| `@data $name dir/*.json` | Load each file as `$name.STEM.key`; `$name` lists the stems |
+| `@data $name file.json` | Load JSON values as variables (`$name.key`; arrays are lists) |
+| `@data $name [...]` / `@data $name {...}` | Inline JSON (an array may span lines) |
+| `@data $name dir/*.json` | A list with one record per file, in name order; `$item.file` is the file's name |
 | `@data $name env:NAME [default]` | Read an environment variable |
 | `@markdown` / `@markdown file.md` | Markdown, converted to HTML |
 | `@image [inline] file.svg` | Inline an SVG file (`width`, `height`, `color`, `class=`, `id=` apply to it) |
@@ -488,6 +500,9 @@ removed form with its replacement.
 | `$a ~ " " ~ $b` | `"$a $b"` |
 | `@each $x in LIST [page N]` | Split the list, or filter it with `@if` |
 | `...$bundle` | `$bundle` |
+| `@each $a, $b in A x, B y` (items split on spaces) | Records: `@data $rows [{"a": "A", "b": "x"}, ...]` and `@each $row in $rows` with `$row.a` |
+| `$_index` | `@each $item, $i in ...` |
+| `$posts._count`, `$posts._keys`, `$posts.STEM.key` | `length($posts)`; nothing; `@each $post in $posts` with `$post.file` |
 | `@raw """ ... """` | `@raw` with an indented body |
 | `@keyframes NAME` with `from [opacity 0]` | The `@keyframes` rule in `@style` |
 | `@include lib.hl as ui` | `@include lib.hl`, without the `ui.` prefix |

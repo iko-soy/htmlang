@@ -67,9 +67,10 @@
       "  @row [spacing ${4:20}, align-items center]",
       "    @text [bold, color ${5:white}, size ${6:18}] ${7:Logo}",
       "    @el [width fill]",
-      "    @each \\$name, \\$url in ${8:Home /, About /about, Contact /contact}",
-      "      @link \\$url",
-      "        @text [color ${9:#a8b2d1}, hover:color white] \\$name",
+      "    @data \\$links [{\"label\": \"${8:Home}\", \"url\": \"/\"}, {\"label\": \"About\", \"url\": \"/about\"}]",
+      "    @each \\$link in \\$links",
+      "      @link \\$link.url",
+      "        @text [color ${9:#a8b2d1}, hover:color white] \\$link.label",
       "    $0"
     ],
     "description": "Navigation bar with logo and links"

@@ -135,10 +135,15 @@
   -- Control flow: @each, @else, @match, if()
   @titled [title Control flow]
     @column [spacing 6]
-      @each $name, $role in Alice Engineer, Bob Designer, Carol PM
+      @data $team [
+        {"name": "Alice", "role": "Engineer"},
+        {"name": "Bob", "role": "Designer"},
+        {"name": "Carol", "role": "PM"}
+      ]
+      @each $person in $team
         @row [spacing 10, align-items baseline]
-          @text [bold, min-width 80] $name
-          @text [color $muted] $role
+          @text [bold, min-width 80] $person.name
+          @text [color $muted] $person.role
 
     -- @each ... @else fallback for empty list
     @let nothing ""
