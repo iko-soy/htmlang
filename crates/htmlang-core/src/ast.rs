@@ -146,7 +146,7 @@ impl ElementKind {
 pub enum TagArg {
     /// Leading text content (`@section Hello`).
     Child,
-    /// Printed as the element's text (`@item First`).
+    /// Printed as the element's text (`@li First`).
     Text,
     /// Emitted as this HTML attribute (`@iframe URL` sets `src`).
     Attr(&'static str),
@@ -204,8 +204,9 @@ pub static TAGS: &[TagSpec] = &[
     TagSpec { name: "blockquote", html: "blockquote", css: "display:flex;flex-direction:column;margin:0;", wraps_text: true, container: true, ..TagSpec::DEFAULT },
     TagSpec { name: "fieldset", html: "fieldset", css: "display:flex;flex-direction:column;border:1px solid currentColor;padding:8px;margin:0;", wraps_text: true, container: true, ..TagSpec::DEFAULT },
     TagSpec { name: "datalist", html: "datalist", wraps_text: true, container: true, ..TagSpec::DEFAULT },
-    TagSpec { name: "list", html: "ul", css: "margin:0;padding-left:0;list-style:none;", container: true, ..TagSpec::DEFAULT },
-    TagSpec { name: "item", html: "li", css: "display:flex;flex-direction:column;", arg: TagArg::Text, wraps_text: true, container: true, ..TagSpec::DEFAULT },
+    TagSpec { name: "ul", html: "ul", css: "margin:0;padding-left:0;list-style:none;", container: true, ..TagSpec::DEFAULT },
+    TagSpec { name: "ol", html: "ol", css: "margin:0;padding-left:0;list-style:none;", container: true, ..TagSpec::DEFAULT },
+    TagSpec { name: "li", html: "li", css: "display:flex;flex-direction:column;", arg: TagArg::Text, wraps_text: true, container: true, ..TagSpec::DEFAULT },
     TagSpec { name: "dl", html: "dl", css: "margin:0;", wraps_text: true, container: true, ..TagSpec::DEFAULT },
     TagSpec { name: "dt", html: "dt", arg: TagArg::Text, container: true, ..TagSpec::DEFAULT },
     TagSpec { name: "dd", html: "dd", css: "margin:0;display:flex;flex-direction:column;", arg: TagArg::Text, wraps_text: true, container: true, ..TagSpec::DEFAULT },
@@ -253,7 +254,7 @@ pub static TAGS: &[TagSpec] = &[
 ];
 
 /// Elements that print their argument as their text (`@text Hello`,
-/// `@item First`).
+/// `@li First`).
 pub fn renders_argument_as_text(kind: &ElementKind) -> bool {
     *kind == ElementKind::Text || kind.spec().is_some_and(|spec| spec.arg == TagArg::Text)
 }

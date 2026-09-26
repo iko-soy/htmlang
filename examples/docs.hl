@@ -66,10 +66,10 @@
 
     @text [font-weight bold, font-size 24, color $ink] Next steps
 
-    @list [spacing 8]
-      @item
+    @ul [spacing 8]
+      @li
         @link [color $primary] /docs/layout Learn the layout model
-      @item
+      @li
         @link [color $primary] /docs/styling Customize styling
-      @item
+      @li
         @link [color $primary] /docs/functions Extract reusable components

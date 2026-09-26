@@ -244,15 +244,15 @@
     @row [gap $gap, wrap]
       @el [width fill, spacing $base, min-width 240]
         @text [font-weight bold] Unordered
-        @list [spacing 4, list-style disc, padding-inline-start 20]
-          @item [display list-item] Composable with @each
-          @item [display list-item] Indent to nest children
-          @item [display list-item] Bold list items work too
+        @ul [spacing 4, list-style disc, padding-inline-start 20]
+          @li [display list-item] Composable with @each
+          @li [display list-item] Indent to nest children
+          @li [display list-item] Bold list items work too
         @text [font-weight bold] Ordered
-        @list [ordered, list-style decimal, padding-inline-start 20]
-          @item [display list-item] First
-          @item [display list-item] Second
-          @item [display list-item] Third
+        @ol [list-style decimal, padding-inline-start 20]
+          @li [display list-item] First
+          @li [display list-item] Second
+          @li [display list-item] Third
 
       @el [width fill, spacing $base, min-width 240]
         @text [font-weight bold] Table

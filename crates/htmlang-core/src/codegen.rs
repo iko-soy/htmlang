@@ -1148,11 +1148,6 @@ fn generate_element(
         ElementKind::Text => "span",
         ElementKind::Paragraph => "p",
         ElementKind::Link => "a",
-        ElementKind::Tag(spec)
-            if spec.name == "list" && elem.attrs.iter().any(|a| a.key == "ordered") =>
-        {
-            "ol"
-        }
         ElementKind::Tag(spec) => spec.html,
         _ => "",
     };

@@ -226,9 +226,9 @@
     "prefix": "@breadcrumb",
     "body": [
       "@breadcrumb",
-      "  @item > @link ${1:/} ${2:Home}",
-      "  @item > @link ${3:/docs} ${4:Docs}",
-      "  @item ${5:Current Page}",
+      "  @li > @link ${1:/} ${2:Home}",
+      "  @li > @link ${3:/docs} ${4:Docs}",
+      "  @li ${5:Current Page}",
       "  $0"
     ],
     "description": "Breadcrumb navigation with links"

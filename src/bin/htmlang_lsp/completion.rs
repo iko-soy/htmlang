@@ -413,7 +413,7 @@ fn element_specific_attrs(element: &str) -> &'static [&'static str] {
         "progress" => &["value", "max"],
         "details" => &["open"],
         "dialog" => &["open"],
-        "list" => &["ordered", "type", "start"],
+        "ol" => &["type", "start", "reversed"],
         "time" => &["datetime"],
         "abbr" => &["title"],
         "label" => &["for"],

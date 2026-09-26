@@ -712,15 +712,15 @@ fn semantic_aside_renders_aside_tag() {
 
 #[test]
 fn list_renders_ul_by_default() {
-    let output = compile("@page T\n@list\n  @item Hello");
+    let output = compile("@page T\n@ul\n  @li Hello");
     assert!(output.contains("<ul"));
     assert!(output.contains("<li"));
     assert!(output.contains("Hello"));
 }
 
 #[test]
-fn list_renders_ol_with_ordered() {
-    let output = compile("@page T\n@list [ordered]\n  @item First\n  @item Second");
+fn ol_renders_ol() {
+    let output = compile("@page T\n@ol\n  @li First\n  @li Second");
     assert!(output.contains("<ol"));
     assert!(output.contains("<li"));
 }
@@ -728,7 +728,6 @@ fn list_renders_ol_with_ordered() {
 #[test]
 fn removed_aliases_point_to_upgrade() {
     for (src, replacement) in [
-        ("@li Works", "@item"),
         ("@divider", "@hr"),
         ("@el > @col x", "@el"),
         ("Say {@img a.png}", "@image"),
@@ -1092,30 +1091,6 @@ fn comparison_ends_with() {
 // ---------------------------------------------------------------------------
 // Feature tests: element-specific attribute validation
 // ---------------------------------------------------------------------------
-
-#[test]
-fn warning_ordered_on_non_list() {
-    let diags = parse_diagnostics("@el [ordered]");
-    assert!(
-        diags
-            .iter()
-            .any(|d| d.message.contains("ordered") && d.message.contains("@list")),
-        "expected ordered on non-list warning, got: {:?}",
-        diags
-    );
-}
-
-#[test]
-fn no_warning_ordered_on_list() {
-    let diags = parse_diagnostics("@list [ordered]\n  @item x");
-    assert!(
-        !diags
-            .iter()
-            .any(|d| d.message.contains("ordered") && d.message.contains("no effect")),
-        "should not warn about ordered on @list, got: {:?}",
-        diags
-    );
-}
 
 #[test]
 fn warning_controls_on_non_media() {
@@ -1671,7 +1646,7 @@ fn css_caret_color() {
 
 #[test]
 fn css_list_style() {
-    let output = compile("@page T\n@list [list-style disc]");
+    let output = compile("@page T\n@ul [list-style disc]");
     assert!(output.contains("list-style:disc"));
 }
 
@@ -3433,7 +3408,7 @@ fn search_element() {
 
 #[test]
 fn breadcrumb_generates_nav_ol() {
-    let output = compile("@breadcrumb\n  @item > @text Home\n  @item About");
+    let output = compile("@breadcrumb\n  @li > @text Home\n  @li About");
     assert!(output.contains("aria-label=\"breadcrumb\""), "nav: {}", output);
     assert!(output.contains("<ol class="), "ol: {}", output);
     assert!(output.contains("<li class="), "li: {}", output);
@@ -4961,7 +4936,7 @@ fn children_prefix_styles_direct_children() {
 
 #[test]
 fn standard_library_components_compile_cleanly() {
-    let src = "@badge [background red] 3\n@tag v2\n@chip Rust\n@avatar\n  AB\n@spacer\n@tooltip [tip More] Hover\n@carousel\n  @el A\n@breadcrumb\n  @item Home\n@el [$skeleton]\n@el [$no-scrollbar]";
+    let src = "@badge [background red] 3\n@tag v2\n@chip Rust\n@avatar\n  AB\n@spacer\n@tooltip [tip More] Hover\n@carousel\n  @el A\n@breadcrumb\n  @li Home\n@el [$skeleton]\n@el [$no-scrollbar]";
     let diags = parse_diagnostics(src);
     assert!(diags.is_empty(), "standard library produced diagnostics: {:?}", diags);
     let output = compile(src);

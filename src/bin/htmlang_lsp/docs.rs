@@ -70,8 +70,9 @@ pub(crate) const ELEMENTS: &[Doc] = &[
         "Layer filling the parent, painted behind its content.",
         "@el [padding 40]\n  @behind\n    @el [background #fef3c7, width fill, height fill]",
     ),
-    doc("list", "List (`<ul>`; `[ordered]` for `<ol>`).", "@list [ordered]\n  @item First"),
-    doc("item", "List item (`<li>`).", "@item First"),
+    doc("ul", "Bulleted list.", "@ul\n  @li First\n  @li Second"),
+    doc("ol", "Numbered list.", "@ol [list-style decimal]\n  @li First"),
+    doc("li", "List item.", "@li First"),
     doc("form", "Form; the argument is its `action`.", "@form [method=post] /subscribe"),
     doc("input", "Form input (void element).", "@input [type=email, name=email, required]"),
     doc("button", "Button.", "@button [type=submit] Send"),
@@ -127,7 +128,6 @@ pub(crate) const ATTRIBUTES: &[Doc] = &[
     doc("col-span", "Columns a grid child spans.", "col-span 2"),
     doc("row-span", "Rows a grid child spans.", "row-span 2"),
     doc("line-height", "Line height; integers of 2 or more are px.", "line-height 1.5"),
-    doc("ordered", "On `@list`: a numbered list (`<ol>`).", "ordered"),
     doc("inline", "On `@image`: embed the file (SVG markup, or other images as base64) in the page.", "inline"),
     doc("responsive", "On `@image`: widths for a generated `srcset`.", "responsive 400 800 1200"),
 ];
@@ -141,7 +141,7 @@ pub(crate) const COMPONENTS: &[Doc] = &[
     doc("spacer", "Takes up the remaining space in a row or column.", "@spacer"),
     doc("tooltip", "Text that shows `tip` when hovered.", "@tooltip [tip More info] Hover me"),
     doc("carousel", "Horizontally scrolling row that snaps to each child.", "@carousel [spacing 16]\n  @el Slide 1"),
-    doc("breadcrumb", "Breadcrumb trail of `@item`s.", "@breadcrumb\n  @item > @link / Home\n  @item Docs"),
+    doc("breadcrumb", "Breadcrumb trail of `@li`s.", "@breadcrumb\n  @li > @link / Home\n  @li Docs"),
 ];
 
 /// Standard-library attribute bundles, used as `[$name]`.

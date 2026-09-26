@@ -37,10 +37,10 @@
   @row [overflow-x auto, scroll-snap-type x mandatory, scrollbar-width none, children:scroll-snap-align start, children:flex-shrink 0]
     @children
 
--- Breadcrumb trail: each crumb is an @item.
+-- Breadcrumb trail: each crumb is an @li.
 @let breadcrumb
   @nav [aria-label=breadcrumb]
-    @list [ordered, display flex, flex-direction row, flex-wrap wrap, gap 8px]
+    @ol [display flex, flex-direction row, flex-wrap wrap, gap 8px]
       @children
 
 -- Loading placeholder: [$skeleton]

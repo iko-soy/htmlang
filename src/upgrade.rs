@@ -18,9 +18,7 @@ const ELEMENT_ALIASES: &[(&str, &str)] = &[
     ("col", "el"),
     ("p", "paragraph"),
     ("img", "image"),
-    ("li", "item"),
     ("btn", "button"),
-    ("ul", "list"),
     ("divider", "hr"),
     ("opt", "option"),
 ];
@@ -518,26 +516,25 @@ fn rewrite_block(
         return Some(Block { lines: out, end });
     }
 
-    // @breadcrumb: each crumb is now an explicit @item
+    // @breadcrumb: each crumb is now an explicit @li
     if (trimmed == "@breadcrumb" || trimmed.starts_with("@breadcrumb "))
         && !user_defined.contains(&"breadcrumb")
     {
         let child_indent = body.iter().find(|l| !l.trim().is_empty()).map(|l| indent_of(l));
+        let is_item = |t: &str| t == "@li" || t.starts_with("@li ") || t.starts_with("@li[");
         if body.iter().all(|l| {
-            l.trim().is_empty()
-                || Some(indent_of(l)) != child_indent
-                || l.trim().starts_with("@item")
+            l.trim().is_empty() || Some(indent_of(l)) != child_indent || is_item(l.trim())
         }) {
             return None;
         }
         let mut out = vec![line.to_string()];
         for l in body {
             let t = l.trim();
-            if Some(indent_of(l)) == child_indent && !t.is_empty() && !t.starts_with("@item") {
+            if Some(indent_of(l)) == child_indent && !t.is_empty() && !is_item(t) {
                 let wrapped = if t.starts_with('@') {
-                    format!("@item > {}", t)
+                    format!("@li > {}", t)
                 } else {
-                    format!("@item {}", t)
+                    format!("@li {}", t)
                 };
                 out.push(format!("{}{}", " ".repeat(indent_of(l)), wrapped));
             } else {
@@ -1779,7 +1776,7 @@ mod tests {
         assert_eq!(up("@tooltip [tip X] Y"), "@tooltip [tip X] Y");
         assert_eq!(
             up("@breadcrumb\n  @link / Home\n  Current"),
-            "@breadcrumb\n  @item > @link / Home\n  @item Current"
+            "@breadcrumb\n  @li > @link / Home\n  @li Current"
         );
     }
 

@@ -1511,9 +1511,7 @@ const REMOVED_SYNTAX: &[(&str, &str)] = &[
     ("@col", "use `@el`"),
     ("@p", "use `@paragraph`"),
     ("@img", "use `@image`"),
-    ("@li", "use `@item`"),
     ("@btn", "use `@button`"),
-    ("@ul", "use `@list`"),
     ("@divider", "use `@hr`"),
     ("@opt", "use `@option`"),
 ];
@@ -2811,20 +2809,6 @@ fn validate_tree(
                         message: format!(
                             "'{}' has no effect on {} (only works on @textarea)",
                             base,
-                            element_kind_name(&elem.kind)
-                        ),
-                        severity: Severity::Warning,
-                        source_line: None,
-                    });
-                }
-
-                // 'ordered' only on @list
-                if base == "ordered" && !elem.kind.is_tag("list") {
-                    diagnostics.push(Diagnostic {
-                        line: elem.line_num,
-                        column: None,
-                        message: format!(
-                            "'ordered' has no effect on {} (only works on @list)",
                             element_kind_name(&elem.kind)
                         ),
                         severity: Severity::Warning,

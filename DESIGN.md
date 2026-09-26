@@ -90,8 +90,8 @@ verbatim too (a `--` line in them is not a comment).
 
 ## Elements
 
-Layout elements set up flexbox; the rest map to the HTML element of the same
-name. Every container lays its children out in a column, except `@row`.
+The layout and text elements come from elm-ui; every other element has its
+HTML name. Every container lays its children out in a column, except `@row`.
 
 | Element | Output | Purpose |
 |---|---|---|
@@ -110,7 +110,7 @@ Semantic containers, all laid out as columns: `@nav`, `@header`, `@footer`,
 `@details` / `@summary`, `@dialog`, `@figure` / `@figcaption`, `@blockquote` /
 `@cite`, `@fieldset` / `@legend`, `@noscript`.
 
-Content: `@list` / `@item` (`@list [ordered]` for `<ol>`), `@dl` / `@dt` /
+Content: `@ul` / `@ol` / `@li`, `@dl` / `@dt` /
 `@dd`, `@table` / `@thead` / `@tbody` / `@tr` / `@th` / `@td`, `@code`, `@pre`,
 `@hr`, `@mark`, `@kbd`, `@abbr`, `@time`, `@progress`, `@meter`, `@output`,
 `@canvas`, `@iframe src`, `@video src`, `@audio src`, `@picture` / `@source`,
@@ -120,9 +120,9 @@ Form controls: `@input`, `@button`, `@select` / `@option`, `@textarea`,
 `@label`, `@datalist`. `@form URL` sets the form's `action`.
 
 ```
-@list [ordered]
-  @item First
-  @item Second
+@ol
+  @li First
+  @li Second
 @form [method=post] /subscribe
   @label [for=email] Email
   @input [type=email, name=email, id=email, required]
@@ -162,7 +162,7 @@ Use them like elements; your own `@let` with the same name takes precedence.
 | `@spacer` | Takes up the remaining space in a row or column |
 | `@tooltip [tip TEXT]` | Text that shows `TEXT` when hovered |
 | `@carousel` | Horizontally scrolling row that snaps to each child |
-| `@breadcrumb` | Breadcrumb trail of `@item`s |
+| `@breadcrumb` | Breadcrumb trail of `@li`s |
 | `$skeleton`, `$truncate`, `$no-scrollbar` | Attribute bundles: loading placeholder, one-line ellipsis, hidden scrollbars |
 
 ```
@@ -172,8 +172,8 @@ Use them like elements; your own `@let` with the same name takes precedence.
   @spacer
   @tooltip [tip Opens in a new tab] Help
 @breadcrumb
-  @item > @link / Home
-  @item Docs
+  @li > @link / Home
+  @li Docs
 @el [$skeleton, height 20, width fill]
 ```
 
@@ -483,7 +483,7 @@ removed form with its replacement.
 | `@og KEY VALUE` | `@meta og:KEY VALUE` |
 | `@assert`, `@warn`, `@debug`, `@log` | Nothing (the lines are removed) |
 | `@defer` | Its content, directly |
-| `@col`, `@p`, `@img`, `@li`, `@btn`, `@ul`, `@divider`, `@opt` | `@el`, `@paragraph`, `@image`, `@item`, `@button`, `@list`, `@hr`, `@option` |
+| `@col`, `@p`, `@img`, `@li`, `@btn`, `@ul`, `@divider`, `@opt` | `@el`, `@paragraph`, `@image`, `@li`, `@button`, `@ul`, `@hr`, `@option` |
 | `type email`, `id main` (HTML attributes written as styles) | `type=email`, `id=main` |
 | `skeleton`, `no-scrollbar`, `gradient A B` | `$skeleton`, `$no-scrollbar`, `background linear-gradient(A, B)` |
 | `@tooltip TEXT` | `@tooltip [tip TEXT] TEXT` |

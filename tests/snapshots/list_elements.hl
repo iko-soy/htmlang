@@ -1,15 +1,15 @@
 @page List Elements
 
-@list [spacing 8]
-  @item First item
-  @item Second item
-  @item Third item
+@ul [spacing 8]
+  @li First item
+  @li Second item
+  @li Third item
 
-@list [ordered, spacing 4]
-  @item Step one
-  @item Step two
-  @item Step three
+@ol [spacing 4]
+  @li Step one
+  @li Step two
+  @li Step three
 
-@list
-  @item [padding 10, background #f0f0f0, border-radius 4]
+@ul
+  @li [padding 10, background #f0f0f0, border-radius 4]
     @text [font-weight bold] Styled item
