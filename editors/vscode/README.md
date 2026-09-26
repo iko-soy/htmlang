@@ -21,11 +21,12 @@ Syntax highlighting, snippets, and language server support for
   properties link to MDN), function signatures, variable values, and color
   swatches.
 - **Navigation**: go to definition, find references and rename for
-  `$variables`, bundles and `@let` functions. `@include`, `@markdown` and
+  `$variables`, bundles and `@let @name` functions. `@include`, `@markdown` and
   `@data` file paths are links.
 - **Code actions**: fixes keyed on diagnostic codes (replace a misspelled
   name, add a missing `alt` or `type`, include the file that defines an
-  unknown function, write a quoted font stack as `A\, B`), removing unused
+  unknown function, write a quoted font stack as `A\, B`, drop the `$` from
+  `@let $x` and add it to `@each x`), removing unused
   definitions, and extracting a selection
   into a `@let` function or attribute bundle.
 - **Outline and symbols**: the document outline, and `Ctrl-T` workspace

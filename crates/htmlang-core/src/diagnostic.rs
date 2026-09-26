@@ -81,6 +81,8 @@ pub mod code {
     pub const UNEXPECTED_ARGUMENT: &str = "unexpected-argument";
     pub const MISSING_ARGUMENT: &str = "missing-argument";
     pub const INVALID_LOOP: &str = "invalid-loop";
+    /// A `@let` whose name, parameters or body don't fit its kind.
+    pub const INVALID_DEFINITION: &str = "invalid-definition";
     pub const STRAY_ELSE: &str = "stray-else";
 
     // Names
@@ -142,6 +144,7 @@ pub mod code {
         UNEXPECTED_ARGUMENT,
         MISSING_ARGUMENT,
         INVALID_LOOP,
+        INVALID_DEFINITION,
         STRAY_ELSE,
         UNKNOWN_ELEMENT,
         UNKNOWN_ATTRIBUTE,

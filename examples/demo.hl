@@ -28,7 +28,7 @@
 @let label [font-size 12, font-weight 700, color var(--muted), text-transform uppercase, letter-spacing 1]
 
 -- A section of the tour: a function with a parameter, a default, and children
-@let chapter $title $number=
+@let @chapter [title, number ""]
   @section [spacing $gap, padding-block $gutter, border-top 1 solid var(--line)]
     @row [spacing $unit, align-items baseline]
       @if $number
@@ -122,12 +122,12 @@
         Tick the box: has() styles the card around it
 
   -- 4. Functions -----------------------------------------------------------
-  @let stat $value $caption $tone=var(--brand)
+  @let @stat [value, caption, tone var(--brand)]
     @el [$card, spacing 4, flex 1 1 160px]
       @text [font-size 32, font-weight 800, color $tone] $value
       @text [color var(--muted)] $caption
 
-  @let panel $title
+  @let @panel [title]
     @article [$card, spacing $unit]
       @row [align-items center]
         @h3 [font-size 18] $title
@@ -137,7 +137,7 @@
       @slot footer
         @text [font-size 13, color var(--muted)] Default footer
 
-  @let badge $text
+  @let @badge [text]
     @style
       & { animation: rise 0.3s ease; }
       .dot { color: var(--brand); }
@@ -145,9 +145,9 @@
       @text [class=dot] •
       $text
 
-  @let pitch
-    Functions are {@text [font-weight 700] @let} with a body. Their
-    parameters are attributes, and a body can be text like this one.
+  @let @pitch
+    Functions are {@text [font-weight 700] @let @name} with a body. Their
+    parameters are listed like attributes, and a body can be text like this one.
 
   @chapter [title Functions, number 4]
     @paragraph

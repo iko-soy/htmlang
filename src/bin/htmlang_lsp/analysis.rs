@@ -36,8 +36,7 @@ pub(crate) fn document_symbols(text: &str) -> Vec<SymbolInformation> {
     for def in lsp_tree::definitions(text) {
         match def.kind {
             DefinitionKind::Function => {
-                let params: Vec<String> = def.params.iter().map(param_label).collect();
-                let detail = (!params.is_empty()).then(|| format!("({})", params.join(" ")));
+                let detail = (!def.params.is_empty()).then(|| param_list(&def.params));
                 symbols.push(symbol(
                     format!("@{}", def.name),
                     SymbolKind::FUNCTION,
@@ -87,12 +86,17 @@ pub(crate) fn document_symbols(text: &str) -> Vec<SymbolInformation> {
     symbols
 }
 
-/// A parameter as written: `$tone` or `$tone=info`.
-fn param_label(param: &lsp_tree::Param) -> String {
-    match &param.default {
-        Some(default) => format!("${}={}", param.name, default),
-        None => format!("${}", param.name),
-    }
+/// A function's parameters as its definition writes them:
+/// `[title, tone info]`.
+pub(crate) fn param_list(params: &[lsp_tree::Param]) -> String {
+    let written: Vec<String> = params
+        .iter()
+        .map(|param| match &param.default {
+            Some(default) => format!("{} {}", param.name, default),
+            None => param.name.clone(),
+        })
+        .collect();
+    format!("[{}]", written.join(", "))
 }
 
 // ---------------------------------------------------------------------------
@@ -214,6 +218,35 @@ pub(crate) fn code_actions(
                     continue;
                 };
                 if let Some(col) = source_line.find(subject) {
+                    let edit = TextEdit {
+                        range: Range::new(
+                            Position::new(line, col as u32),
+                            Position::new(line, (col + subject.len()) as u32),
+                        ),
+                        new_text: suggestion.to_string(),
+                    };
+                    actions.push(quick_fix(
+                        format!("Replace with '{}'", suggestion),
+                        diag,
+                        uri,
+                        vec![edit],
+                    ));
+                }
+            }
+
+            // Write a name with or without its `$` as the compiler says:
+            // `@let $gap` as `@let gap`, `@each x` as `@each $x`.
+            code::INVALID_DEFINITION | code::INVALID_LOOP => {
+                let (Some(subject), Some(suggestion)) = (subject, suggestion) else {
+                    continue;
+                };
+                // After the directive's own name
+                let skip = source_line.find(['@']).map_or(0, |at| {
+                    at + source_line[at..]
+                        .find(char::is_whitespace)
+                        .unwrap_or(source_line.len() - at)
+                });
+                if let Some(col) = find_word(&source_line[skip..], subject).map(|c| c + skip) {
                     let edit = TextEdit {
                         range: Range::new(
                             Position::new(line, col as u32),
@@ -420,7 +453,7 @@ fn extract_component(lines: &[&str], selection: &Range, uri: &Url) -> Option<Cod
         })
         .collect();
 
-    let fn_def = format!("@let extracted\n{}", fn_body);
+    let fn_def = format!("@let @extracted\n{}", fn_body);
     let fn_call = format!("{}@extracted", " ".repeat(min_indent));
     let replace_edit = TextEdit {
         range: Range::new(
@@ -770,17 +803,21 @@ pub(crate) fn semantic_tokens(text: &str, tree: &Tree, result: &ParseResult) -> 
                 push(directive.name_span, TOKEN_KEYWORD, 0);
                 if let syntax::DirectiveArgs::Let(def) = &directive.args {
                     let function = matches!(def.form, syntax::LetForm::Function(_));
-                    let (token, key) = if function {
-                        (TOKEN_FUNCTION, format!("@{}", def.name))
+                    let (token, key, span) = if function {
+                        // The name with its `@`, like a call's
+                        let mut span = def.name_span;
+                        span.start -= 1;
+                        span.column -= 1;
+                        (TOKEN_FUNCTION, format!("@{}", def.name), span)
                     } else {
-                        (TOKEN_VARIABLE, format!("${}", def.name))
+                        (TOKEN_VARIABLE, format!("${}", def.name), def.name_span)
                     };
                     let modifier = if unused.contains(&key) {
                         MODIFIER_UNUSED
                     } else {
                         0
                     };
-                    push(def.name_span, token, modifier);
+                    push(span, token, modifier);
                 }
             }
             _ => {}
@@ -988,8 +1025,7 @@ pub(crate) fn get_signature_help(text: &str, position: Position) -> Option<Signa
                 .map(|d| Documentation::String(format!("Default: {}", d))),
         })
         .collect();
-    let written: Vec<String> = def.params.iter().map(param_label).collect();
-    let sig_label = format!("@{} {}", fn_name, written.join(" "));
+    let sig_label = format!("@{} {}", fn_name, param_list(&def.params));
 
     // The active parameter: commas before the cursor inside the brackets,
     // or the first parameter before the argument list is entered.
@@ -1065,7 +1101,7 @@ mod tests {
             found
         );
 
-        let found = fixes("@let card $x\n  @el $x\n\n  @el more\n@el\n");
+        let found = fixes("@let @card [x]\n  @el $x\n\n  @el more\n@el\n");
         let (title, edits) = found
             .iter()
             .find(|(t, _)| t.starts_with("Remove"))
@@ -1125,6 +1161,44 @@ mod tests {
     }
 
     #[test]
+    fn dollar_fixes_follow_the_compiler() {
+        let found = fixes("@let $gap 16\n@el [padding $gap]\n");
+        let (_, edits) = found
+            .iter()
+            .find(|(t, _)| t == "Replace with 'gap'")
+            .expect("fix");
+        assert_eq!(edits[0].range.start, Position::new(0, 5));
+        let found = fixes("@each e in a, b\n  @text $e\n");
+        let (_, edits) = found
+            .iter()
+            .find(|(t, _)| t == "Replace with '$e'")
+            .expect("fix");
+        assert_eq!(edits[0].range.start, Position::new(0, 6));
+        let found = fixes("@let @card [$tone red]\n  @el $tone\n@card\n");
+        let (_, edits) = found
+            .iter()
+            .find(|(t, _)| t == "Replace with 'tone'")
+            .expect("fix");
+        assert_eq!(edits[0].range.start, Position::new(0, 12));
+        assert_eq!(edits[0].range.end, Position::new(0, 17));
+    }
+
+    #[test]
+    fn function_definitions_are_shown_as_written() {
+        let text = "@let @card [title, tone info]\n  @el [color $tone] $title\n@card [title A]\n";
+        // `@card` on the definition line is one function token, with its `@`
+        let tokens = semantic_tokens(text, &syntax::parse(text), &htmlang::parser::parse(text));
+        assert_eq!(tokens[1].token_type, TOKEN_FUNCTION);
+        assert_eq!((tokens[1].delta_start, tokens[1].length), (5, 5));
+        let symbols = document_symbols(text);
+        assert_eq!(symbols[0].name, "@card");
+        assert_eq!(
+            symbols[0].container_name.as_deref(),
+            Some("[title, tone info]")
+        );
+    }
+
+    #[test]
     fn variable_tokens_end_where_the_compiler_ends_names() {
         assert_eq!(
             variable_refs("$lang.json costs $5, ${x} $--brand $a- b"),
@@ -1144,14 +1218,14 @@ mod tests {
     #[test]
     fn signature_help_and_inlay_hints_use_definitions() {
         let text =
-            "@let pad [padding 4]\n@let card $title $tone=info\n  @el [$pad] $title\n@card [\n";
+            "@let pad [padding 4]\n@let @card [title, tone info]\n  @el [$pad] $title\n@card [\n";
         let help = get_signature_help(text, Position::new(3, 7)).expect("signature");
-        assert_eq!(help.signatures[0].label, "@card $title $tone=info");
+        assert_eq!(help.signatures[0].label, "@card [title, tone info]");
         let hints = inlay_hints(text, &syntax::parse(text));
         assert_eq!(hints.len(), 1);
         assert_eq!(hints[0].position, Position::new(2, 11));
         // An escaped comma is part of the value, not a second argument
-        let escaped = "@let card $title $tone=info\n  @el $title\n@card [title A\\, B, ";
+        let escaped = "@let @card [title, tone info]\n  @el $title\n@card [title A\\, B, ";
         let help = get_signature_help(escaped, Position::new(2, 20)).expect("signature");
         assert_eq!(help.active_parameter, Some(1));
         let help = get_signature_help(escaped, Position::new(2, 17)).expect("signature");

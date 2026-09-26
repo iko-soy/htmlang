@@ -180,7 +180,7 @@ fn multiline_attributes_still_join() {
 #[test]
 fn multi_line_content_is_a_function() {
     let out = compile(
-        "@let intro\n  First line\n  Second {@text [font-weight bold] line}\n@paragraph\n  @intro\n",
+        "@let @intro\n  First line\n  Second {@text [font-weight bold] line}\n@paragraph\n  @intro\n",
     );
     assert!(out.contains("First line"), "{}", out);
     assert!(out.contains(">line</span>"), "{}", out);
@@ -206,7 +206,7 @@ fn each_else_does_not_leak_variables() {
 #[test]
 fn named_argument_is_not_used_positionally_for_another_param() {
     let out = compile(
-        "@let card $title $variant=primary\n  @text t=$title v=$variant\n@card [variant danger]",
+        "@let @card [title, variant primary]\n  @text t=$title v=$variant\n@card [variant danger]",
     );
     assert!(out.contains("v=danger"), "{}", out);
     assert!(!out.contains("t=danger"), "{}", out);
@@ -585,7 +585,7 @@ fn untaken_branches_are_checked() {
 #[test]
 fn uncalled_functions_and_empty_loops_are_checked() {
     // A function body can call a function defined later in the file
-    let src = "@let a\n  @b\n  @nosuch\n@let b\n  @text hi\n@b\n";
+    let src = "@let @a\n  @b\n  @nosuch\n@let @b\n  @text hi\n@b\n";
     let found = codes(src);
     assert!(has_code(src, 3, "unknown-element"), "{:?}", found);
     assert!(!found.iter().any(|(l, _, _)| *l == 2), "{:?}", found);
@@ -604,7 +604,7 @@ fn uncalled_functions_and_empty_loops_are_checked() {
 
 #[test]
 fn names_used_only_in_code_that_does_not_run_are_used() {
-    let src = "@let color red\n@let card\n  @el hi\n@if false\n  @card [color $color]\n";
+    let src = "@let color red\n@let @card\n  @el hi\n@if false\n  @card [color $color]\n";
     let found = codes(src);
     assert!(
         !found
@@ -618,10 +618,10 @@ fn names_used_only_in_code_that_does_not_run_are_used() {
 #[test]
 fn unevaluated_names_include_functions_from_included_files() {
     let dir = scratch_dir("static_include");
-    std::fs::write(dir.join("lib.hl"), "@let helper\n  @el\n    @children\n").unwrap();
+    std::fs::write(dir.join("lib.hl"), "@let @helper\n  @el\n    @children\n").unwrap();
     std::fs::write(dir.join("bad.hl"), "@if false\n  @oops\n").unwrap();
     let result = parser::parse_with_base(
-        "@let page-body\n  @helper x\n@include lib.hl\n@include bad.hl\n",
+        "@let @page-body\n  @helper x\n@include lib.hl\n@include bad.hl\n",
         Some(&dir),
     );
     let unknown: Vec<_> = result
@@ -730,7 +730,7 @@ fn directives_that_need_their_argument_say_so() {
 fn a_known_name_in_the_wrong_place_is_not_its_own_suggestion() {
     // Called before its `@let` has run: no "did you mean @b?", and `@b`
     // isn't reported unused
-    let result = parser::parse("@let a\n  @el\n    @b\n@a\n@let b\n  @text hi\n");
+    let result = parser::parse("@let @a\n  @el\n    @b\n@a\n@let @b\n  @text hi\n");
     let unknown = result
         .diagnostics
         .iter()
@@ -753,7 +753,7 @@ fn a_known_name_in_the_wrong_place_is_not_its_own_suggestion() {
     // A directive in a chain, and a function inside text
     for (src, says) in [
         ("@el > @if true\n  x\n", "is a directive"),
-        ("@let f\n  @el\nCall {@f}\n", "not inside text"),
+        ("@let @f\n  @el\nCall {@f}\n", "not inside text"),
     ] {
         let d = parser::parse(src)
             .diagnostics
@@ -887,7 +887,7 @@ fn data_is_never_read_as_markup_or_variables() {
 
 #[test]
 fn attribute_names_are_checked_in_code_that_does_not_run() {
-    let result = parser::parse("@let card $t\n  @el [paddin $t, $k 4] $t\n");
+    let result = parser::parse("@let @card [t]\n  @el [paddin $t, $k 4] $t\n");
     let codes: Vec<_> = result.diagnostics.iter().map(|d| d.code).collect();
     assert!(codes.contains(&"unknown-attribute"), "{:?}", codes);
     assert!(codes.contains(&"attribute-from-variable"), "{:?}", codes);
@@ -1008,7 +1008,7 @@ fn quoted_text_inside_a_css_string_is_what_it_says() {
 #[test]
 fn quoted_arguments_lose_their_quotes_in_text() {
     let out = compile(
-        "@let card $lede\n  @el [after:content $lede]\n    $lede\n@card [lede \"Fast, simple\"]",
+        "@let @card [lede]\n  @el [after:content $lede]\n    $lede\n@card [lede \"Fast, simple\"]",
     );
     assert!(out.contains("<span>Fast, simple</span>"), "{}", out);
     assert!(!out.contains("&quot;"), "{}", out);

@@ -1,4 +1,4 @@
-@let layout
+@let @layout
   @el [padding 20]
     @slot header
       @text Default Header

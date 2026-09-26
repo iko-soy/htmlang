@@ -23,15 +23,15 @@
 ]
 
 -- Functions: parameters are attributes, extra attributes style the root
-@let primary-link $href
+@let @primary-link [href]
   @link [$button, background var(--brand), color white, hover:background ${darken($--brand, 8)}] $href
     @children
 
-@let secondary-link $href
+@let @secondary-link [href]
   @link [$button, border 1 solid var(--line), color var(--ink), hover:border-color var(--muted)] $href
     @children
 
-@let section-heading $title $lede
+@let @section-heading [title, lede]
   @el [spacing 8, center-x, max-width 640, text-align center]
     @h2 [font-size 32, color var(--ink)] $title
     @paragraph [color var(--muted), line-height 1.6] $lede

@@ -174,7 +174,7 @@ fixed kind of argument and a fixed kind of body:
 | Directive | Argument | Body |
 |---|---|---|
 | `@page` | attributes and a title | none |
-| `@let` | a name and a value, bundle or parameters | a function's body |
+| `@let` | a name and a value or bundle, or `@name` and parameters | a function's body |
 | `@include` | a file | none |
 | `@data` | a variable and a source | none |
 | `@meta` | a name and a value | none |
@@ -420,8 +420,8 @@ and an HTML attribute can share a name, because the `=` tells them apart:
 @let greeting "Hello from $primary"
 -- An attribute bundle, used as [$card]
 @let card [padding 20, background white, border-radius 8]
--- A function: a @let with an indented body
-@let panel $title
+-- A function: `@` before its name, its parameters in brackets, and a body
+@let @panel [title]
   @el [$card, spacing $gap]
     @text [font-weight bold, color $primary] $title
     @children
@@ -432,7 +432,16 @@ and an HTML attribute can share a name, because the `=` tells them apart:
   Attributes after a bundle override it.
 ```
 
-A definition applies from its own line onward.
+The line alone says what a `@let` defines: an `@` before the name makes a
+function, a `[` after the name an attribute bundle, and anything else a
+value. A value or a bundle is named without `$` and used with it; a function
+is named with `@` and called with it. Only a function has a body, so an
+indented block under a value or a bundle is an error, and so are `@let $x`
+(write `@let x`) and a `@let` without a value.
+
+Values, bundles and functions share one namespace: a `@let` gives its name a
+new meaning, whatever the name meant before. A definition applies from its
+own line onward.
 
 ### Variables
 
@@ -488,10 +497,15 @@ without quotes is inserted as written everywhere.
 
 ### Functions
 
+A function's parameters are listed in brackets after its name and read like
+attributes: a name alone (`title`) is a parameter, and a name and a value
+(`tone #f9fafb`) is a parameter with that default. The body uses them as
+`$title` and `$tone`. `@let @name` without brackets takes no parameters.
+
 A function is called like an element:
 
-- Its parameters are passed as attributes. A parameter with a default
-  (`$tone=info`) can be left out.
+- Its parameters are passed as attributes, `name value`. A parameter with a
+  default can be left out.
 - Any other attributes style the function's root element, so
   `@panel [title Hi, padding 40]` works the same as styling a built-in
   element.
@@ -500,7 +514,7 @@ A function is called like an element:
   the slot's own children are the default content.
 
 ```
-@let card $title $tone=#f9fafb
+@let @card [title, tone #f9fafb]
   @article [padding 16, spacing 8, background $tone, border-radius 8]
     @row [align-items center]
       @h3 $title
@@ -525,7 +539,7 @@ function. Its rules apply inside the function's root element, and `&` is the
 root itself. This requires the body to have a single root element.
 
 ```
-@let note $kind=Note
+@let @note [kind Note]
   @style
     & { border-left: 4px solid #3b82f6; }
     .title { font-weight: bold; }
@@ -539,7 +553,7 @@ root itself. This requires the body to have a single root element.
 A function whose body is text holds multi-line content:
 
 ```
-@let intro
+@let @intro
   htmlang is a layout language.
   It compiles to {@text [font-weight bold] static HTML}.
 
@@ -602,7 +616,8 @@ All control flow runs at compile time.
   @text Few
 ```
 
-`@each $item in LIST` repeats its body for each item. A list can be a list
+`@each $item in LIST` repeats its body for each item. Its variables are
+written with `$`, like `@data $name`. A list can be a list
 loaded with `@data`, a text split on commas, or a range. A range counts down
 when its start is greater than its end, and `step` sets the increment. An
 optional second variable is the index, starting from 0. `@else` gives the
@@ -656,7 +671,7 @@ goes with `@slot NAME` (named blocks, with default content) and `@children`
 
 ```
 -- layout.hl
-@let layout
+@let @layout
   @page My Site
   @el [max-width 800, center-x, spacing 24]
     @header

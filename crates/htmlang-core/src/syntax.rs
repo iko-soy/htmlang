@@ -15,7 +15,10 @@
 //!   element line is a chain of heads `@name [attributes]` joined by `>`,
 //!   then text. A `[` opens an attribute list only right after a head's
 //!   name, or where a directive's grammar has one (`@page [..]`,
-//!   `@let name [..]`); anywhere else it is text.
+//!   `@let name [..]`, `@let @name [..]`); anywhere else it is text.
+//! - What a `@let` defines is decided here, from its line: `@let @name` is
+//!   a function (its body is the indented block), `@let name [..]` an
+//!   attribute bundle and any other `@let name ...` a value.
 //! - Any other line is text, in which `{@name [attributes] text}` is an
 //!   inline element.
 //! - An attribute list (or `@data`'s inline JSON) may continue onto the
@@ -198,32 +201,52 @@ pub enum DirectiveArgs {
     Invalid,
 }
 
-/// `@let NAME ...`.
+/// `@let NAME ...` or `@let @NAME [params]`. Its kind is decided here,
+/// from the line alone: an `@` before the name makes a function, a `[`
+/// after it a bundle, anything else a value.
 #[derive(Clone, Debug)]
 pub struct LetDef {
+    /// Without the function's `@`.
     pub name: String,
+    /// Just the name, without the function's `@`.
     pub name_span: Span,
     pub form: LetForm,
 }
 
 #[derive(Clone, Debug)]
 pub enum LetForm {
-    /// `@let name text` (`None` for a bare `@let name`).
-    Value(Option<Arg>),
+    /// `@let name text`.
+    Value(Arg),
     /// `@let name "text"`: the text between the quotes.
     Quoted(Arg),
     /// `@let name = EXPR`: the expression.
     Computed(Arg),
     /// `@let name [attrs]`.
     Bundle(AttrList),
-    /// `@let name $param $param=default` with an indented body.
-    Function(Vec<Param>),
+    /// `@let @name [param, param default]` (or `@let @name`) with an
+    /// indented body.
+    Function(Function),
 }
 
+/// A function's head: its parameter list as written, and the parameters
+/// read from it.
+#[derive(Clone, Debug, Default)]
+pub struct Function {
+    /// `[param, param default]`; `None` for `@let @name`.
+    pub list: Option<AttrList>,
+    pub params: Vec<Param>,
+}
+
+/// One parameter: `title` (required) or `tone #f9fafb` (with a default).
+/// The body uses it as `$title`.
 #[derive(Clone, Debug)]
 pub struct Param {
     pub name: String,
+    /// The default as written, for `name value`.
     pub default: Option<String>,
+    /// Just the name.
+    pub name_span: Span,
+    /// The whole parameter.
     pub span: Span,
 }
 
@@ -361,11 +384,7 @@ impl Tree {
                 return;
             };
             let (kind, params, value): (_, &[Param], _) = match &def.form {
-                LetForm::Value(value) => (
-                    DefinitionKind::Value,
-                    &[],
-                    value.as_ref().map(|v| v.raw.clone()),
-                ),
+                LetForm::Value(value) => (DefinitionKind::Value, &[], Some(value.raw.clone())),
                 LetForm::Quoted(value) => (
                     DefinitionKind::Value,
                     &[],
@@ -386,7 +405,9 @@ impl Tree {
                             .join(", "),
                     ),
                 ),
-                LetForm::Function(params) => (DefinitionKind::Function, params.as_slice(), None),
+                LetForm::Function(function) => {
+                    (DefinitionKind::Function, function.params.as_slice(), None)
+                }
             };
             out.push(Definition {
                 name: &def.name,
@@ -420,7 +441,7 @@ pub enum DefinitionKind {
     Value,
     /// An attribute bundle (`@let x [...]`), used as `[$x]`.
     Bundle,
-    /// A function (`@let x $a` with a body), called as `@x`.
+    /// A function (`@let @x [a]` with a body), called as `@x`.
     Function,
 }
 
@@ -743,29 +764,40 @@ fn check_body(node: &mut Node, diagnostics: &mut Vec<Diagnostic>) {
         return;
     };
     let name = directive.spec.name;
-    let mut problem = |(line, source): (usize, String), message: String| {
-        diagnostics.push(Diagnostic::error(code::UNEXPECTED_BODY, line, message).source(source))
+    let mut report = |code, (line, source): (usize, String), message: String| {
+        diagnostics.push(Diagnostic::error(code, line, message).source(source))
     };
+    let mut problem = |at, message| report(code::UNEXPECTED_BODY, at, message);
     match (&mut directive.args, directive.spec.body) {
-        // A `@let` with a body is a function; its words are parameters.
+        // Only a function takes a body, and it needs one
         (DirectiveArgs::Let(def), _) => {
-            let Some(child) = first_child else {
-                return;
-            };
-            match &def.form {
-                LetForm::Value(value) => {
-                    let params = value.as_ref().map_or_else(Vec::new, params);
-                    def.form = LetForm::Function(params);
+            let what = match &def.form {
+                LetForm::Function(_) => {
+                    if first_child.is_none() {
+                        report(
+                            code::INVALID_DEFINITION,
+                            (line, source),
+                            format!(
+                                "`@let @{}` needs an indented body: the lines the function \
+                                 produces",
+                                def.name
+                            ),
+                        );
+                    }
+                    return;
                 }
-                LetForm::Quoted(_) | LetForm::Computed(_) | LetForm::Bundle(_) => problem(
+                LetForm::Bundle(_) => "an attribute bundle",
+                _ => "a value",
+            };
+            if let Some(child) = first_child {
+                problem(
                     child,
                     format!(
-                        "`@let {}` defines a value, which takes no indented block \
-                         (a function is `@let {} $param` with a body)",
-                        def.name, def.name
+                        "`@let {}` defines {}, which takes no indented block \
+                         (a function is `@let @{} [param]` with a body)",
+                        def.name, what, def.name
                     ),
-                ),
-                LetForm::Function(_) => {}
+                );
             }
         }
         (_, BodyKind::None) => {
@@ -790,27 +822,55 @@ fn check_body(node: &mut Node, diagnostics: &mut Vec<Diagnostic>) {
     }
 }
 
-/// The parameters of `@let name $a $b=default`.
-fn params(words: &Arg) -> Vec<Param> {
-    let mut out = Vec::new();
-    let mut offset = 0;
-    for word in words.raw.split_whitespace() {
-        let at = offset + words.raw[offset..].find(word).unwrap_or(0);
-        offset = at + word.len();
-        let bare = word.strip_prefix('$').unwrap_or(word);
-        let (name, default) = match bare.split_once('=') {
-            Some((name, default)) => (name, Some(default.to_string())),
-            None => (bare, None),
+/// The parameters in a function's list, `[title, tone #f9fafb]`: read
+/// like a call's attributes, a bare word is a required parameter and
+/// `name value` one with a default.
+fn params(list: &AttrList, source: &str, problems: &mut Vec<Diagnostic>) -> Vec<Param> {
+    let mut out: Vec<Param> = Vec::new();
+    for attr in &list.attrs {
+        let problem = |message: String| {
+            Diagnostic::error(code::INVALID_DEFINITION, attr.span.line, message)
+                .source(source)
+                .subject(attr.raw.clone())
         };
+        let name = attr.key.strip_prefix('$').unwrap_or(&attr.key);
+        if attr.key.starts_with('$') {
+            problems.push(
+                problem(format!(
+                    "a parameter is named without `$`: `{}`, used as `${}` in the body",
+                    name, name
+                ))
+                .subject(attr.key.clone())
+                .suggest(Some(name)),
+            );
+        } else if attr.html {
+            problems.push(problem(format!(
+                "a parameter's default is written `{} VALUE`, without `=`",
+                name
+            )));
+        } else if crate::interp::name_len(name) != name.len() || name.starts_with("--") {
+            problems.push(problem(format!(
+                "'{}' is not a parameter name: a parameter is a name, or a name and its \
+                 default (`tone #f9fafb`)",
+                attr.raw
+            )));
+            continue;
+        }
+        if out.iter().any(|p| p.name == name) {
+            problems.push(problem(format!("parameter '{}' is declared twice", name)));
+            continue;
+        }
+        let skip = attr.key.len() - name.len();
         out.push(Param {
             name: name.to_string(),
-            default,
-            span: Span {
-                start: words.span.start + at,
-                end: words.span.start + at + word.len(),
-                line: words.span.line,
-                column: words.span.column + at,
+            default: attr.value.clone(),
+            name_span: Span {
+                start: attr.span.start + skip,
+                end: attr.span.start + attr.key.len(),
+                line: attr.span.line,
+                column: attr.span.column + skip,
             },
+            span: attr.span,
         });
     }
     out
@@ -1363,9 +1423,25 @@ impl Reader<'_> {
                     ));
                     return (DirectiveArgs::Invalid, false);
                 };
-                let names: Vec<&str> = names
-                    .split(',')
-                    .map(|v| v.trim().trim_start_matches('$'))
+                let written: Vec<&str> = names.split(',').map(str::trim).collect();
+                // Like `@data $name`, the variables are written with `$`
+                if let Some(bare) = written.iter().find(|n| !n.starts_with('$') || n.len() == 1) {
+                    let problem = self.error(
+                        code::INVALID_LOOP,
+                        format!(
+                            "@each names its variables with `$`: `@each ${} in LIST`",
+                            if bare.is_empty() { "item" } else { bare }
+                        ),
+                    );
+                    let problem = match bare.is_empty() {
+                        true => problem,
+                        false => problem.subject(*bare).suggest(Some(format!("${}", bare))),
+                    };
+                    problems.push(problem);
+                }
+                let names: Vec<&str> = written
+                    .iter()
+                    .map(|v| v.strip_prefix('$').unwrap_or(v))
                     .collect();
                 if names.len() > 2 {
                     problems.push(
@@ -1425,15 +1501,96 @@ impl Reader<'_> {
                 if at >= len {
                     return missing("a name: `@let name value`");
                 }
-                let def_name_end = self.text[at..]
-                    .find(char::is_whitespace)
-                    .map_or(len, |i| at + i);
-                let def_name = self.text[at..def_name_end].to_string();
+                // `@let @name`: a function
+                let function = self.text[at..].starts_with('@');
+                let name_at = at + usize::from(function);
+                let def_name_end = self.name_end(name_at, len);
+                let written = &self.text[name_at..def_name_end];
+                let def_name = written.strip_prefix('$').unwrap_or(written).to_string();
+                let name_span = self.span(name_at + written.len() - def_name.len(), def_name_end);
+                let invalid = |message: String| {
+                    self.error(code::INVALID_DEFINITION, message)
+                        .subject(written.to_string())
+                };
+                if function {
+                    let valid = def_name.chars().next().is_some_and(char::is_alphabetic)
+                        && def_name
+                            .chars()
+                            .all(|c| c.is_alphanumeric() || c == '-' || c == '_');
+                    if def_name.is_empty() {
+                        return missing("a function name: `@let @name [param]`");
+                    }
+                    if !valid || written.starts_with('$') {
+                        problems.push(invalid(format!(
+                            "'{}' is not a function name: a function is named with letters, \
+                             digits and `-`, as in `@let @card`",
+                            written
+                        )));
+                    }
+                } else if written.starts_with('$') {
+                    problems.push(
+                        invalid(format!(
+                            "`@let` names are written without `$`: `@let {}`, used as `${}`",
+                            def_name, def_name
+                        ))
+                        .suggest(Some(def_name.clone())),
+                    );
+                } else if !is_definition_name(&def_name) {
+                    problems.push(invalid(format!(
+                        "'{}' is not a name: a @let name is letters, digits, `-` and `_`, \
+                         starting with a letter (`@let gap 8`)",
+                        written
+                    )));
+                }
                 let value_at = self.skip_ws(def_name_end, len);
                 let value = &self.text[value_at..];
                 let mut open = false;
-                let form = if value.is_empty() {
-                    LetForm::Value(None)
+                // Text after a closed list's `]`
+                let mut after_list = |end: usize, what: &str| {
+                    let rest = self.text[end..].trim();
+                    if !rest.is_empty() {
+                        problems.push(self.error(
+                            code::UNEXPECTED_ARGUMENT,
+                            format!("unexpected '{}' after the {}", rest, what),
+                        ));
+                    }
+                };
+                let form = if function {
+                    let list = if value.starts_with('[') {
+                        let (list, end) = self.attr_list(value_at, len);
+                        open = !list.closed;
+                        if list.closed {
+                            after_list(end, "parameter list");
+                        }
+                        Some(list)
+                    } else {
+                        if !value.is_empty() {
+                            problems.push(self.error(
+                                code::INVALID_DEFINITION,
+                                format!(
+                                    "a function's parameters go in brackets: \
+                                     `@let @{} [param, param default]`",
+                                    def_name
+                                ),
+                            ));
+                        }
+                        None
+                    };
+                    let params = match &list {
+                        Some(list) => params(list, self.text, problems),
+                        None => Vec::new(),
+                    };
+                    LetForm::Function(Function { list, params })
+                } else if value.is_empty() {
+                    problems.push(self.error(
+                        code::MISSING_ARGUMENT,
+                        format!(
+                            "`@let {}` needs a value: `@let {} VALUE` \
+                             (a function is `@let @{}` with an indented body)",
+                            def_name, def_name, def_name
+                        ),
+                    ));
+                    return (DirectiveArgs::Invalid, false);
                 } else if let Some(expr) = value.strip_prefix('=') {
                     let expr_at = len - expr.trim_start().len();
                     LetForm::Computed(Arg {
@@ -1441,8 +1598,11 @@ impl Reader<'_> {
                         span: self.span(expr_at, len),
                     })
                 } else if value.starts_with('[') {
-                    let (list, _) = self.attr_list(value_at, len);
+                    let (list, end) = self.attr_list(value_at, len);
                     open = !list.closed;
+                    if list.closed {
+                        after_list(end, "attribute bundle");
+                    }
                     LetForm::Bundle(list)
                 } else if let Some(inner) = quoted_string(value) {
                     LetForm::Quoted(Arg {
@@ -1450,17 +1610,39 @@ impl Reader<'_> {
                         span: self.span(value_at + 1, len - 1),
                     })
                 } else {
-                    LetForm::Value(self.arg(value_at, len))
+                    match self.arg(value_at, len) {
+                        Some(arg) => LetForm::Value(arg),
+                        None => return (DirectiveArgs::Invalid, false),
+                    }
                 };
                 let def = LetDef {
                     name: def_name,
-                    name_span: self.span(at, def_name_end),
+                    name_span,
                     form,
                 };
                 (DirectiveArgs::Let(def), open)
             }
         }
     }
+}
+
+/// Whether `name` can be a value's or bundle's name, as `@let name`: a
+/// name `$name` reaches (`t.greeting` too, for a record's field), or a
+/// custom property `--name`.
+fn is_definition_name(name: &str) -> bool {
+    let n = crate::interp::name_len(name);
+    if n == 0 || matches!(&name[..n], "true" | "false" | "not" | "and" | "or") {
+        return false;
+    }
+    if name.starts_with("--") {
+        return n == name.len();
+    }
+    name[n..].split('.').skip(1).all(|field| {
+        !field.is_empty()
+            && field
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+    }) && (n == name.len() || name[n..].starts_with('.'))
 }
 
 /// An attribute's key, value, and whether it is written `key=value`:
@@ -1634,7 +1816,7 @@ mod tests {
             })
             .collect();
         assert!(matches!(forms[0], LetForm::Quoted(arg) if arg.raw == r#"x \" y"#));
-        assert!(matches!(forms[1], LetForm::Value(Some(arg)) if arg.raw == r#""h h" "s m""#));
+        assert!(matches!(forms[1], LetForm::Value(arg) if arg.raw == r#""h h" "s m""#));
     }
 
     #[test]
@@ -1661,7 +1843,7 @@ mod tests {
     #[test]
     fn directives_follow_the_table() {
         let tree = parse(
-            "@let card $title $icon=x\n  @el\n    @children\n@if $a\n  A\n@else if $b\n  B\n@else\n  C\n@each $x in 1..3\n  $x\n@else\n  none\n",
+            "@let @card [title, icon x]\n  @el\n    @children\n@if $a\n  A\n@else if $b\n  B\n@else\n  C\n@each $x in 1..3\n  $x\n@else\n  none\n",
         );
         assert_eq!(
             kinds(&tree.nodes),
@@ -1671,6 +1853,42 @@ mod tests {
         assert_eq!(defs[0].kind, DefinitionKind::Function);
         assert_eq!(defs[0].params[1].default.as_deref(), Some("x"));
         assert!(tree.diagnostics.is_empty(), "{:?}", tree.diagnostics);
+    }
+
+    #[test]
+    fn a_let_says_its_kind_on_its_line() {
+        let tree = parse(
+            "@let a 1\n@let b [padding 4]\n@let @c [p, q two words]\n  @el\n@let @d\n  @el\n@let @e [\n  x,\n  y 1\n]\n  @el\n",
+        );
+        assert!(tree.diagnostics.is_empty(), "{:?}", tree.diagnostics);
+        let defs = tree.definitions();
+        let kinds: Vec<_> = defs.iter().map(|d| (d.name, d.kind)).collect();
+        assert_eq!(
+            kinds,
+            [
+                ("a", DefinitionKind::Value),
+                ("b", DefinitionKind::Bundle),
+                ("c", DefinitionKind::Function),
+                ("d", DefinitionKind::Function),
+                ("e", DefinitionKind::Function),
+            ]
+        );
+        // A bare word is required; `name value` has a default, spaces and all
+        let c = &defs[2];
+        assert_eq!(
+            (c.params[0].name.as_str(), c.params[0].default.as_deref()),
+            ("p", None)
+        );
+        assert_eq!(c.params[1].default.as_deref(), Some("two words"));
+        // The name's span leaves out the `@`
+        assert_eq!((c.name_span.column, c.params[1].name_span.column), (6, 12));
+        assert!(defs[3].params.is_empty());
+        let e: Vec<_> = defs[4]
+            .params
+            .iter()
+            .map(|p| (p.name.as_str(), p.name_span.line))
+            .collect();
+        assert_eq!(e, [("x", 8), ("y", 9)]);
     }
 
     #[test]

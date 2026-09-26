@@ -1,10 +1,10 @@
 @page Functions
-@let card $title
+@let @card [title]
   @el [padding 20, border-radius 8]
     @text [font-weight bold] $title
     @children
 
-@let wrapper
+@let @wrapper
   @el [spacing 10]
     @children
 

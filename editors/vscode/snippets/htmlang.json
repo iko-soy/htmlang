@@ -43,7 +43,7 @@
   "Function": {
     "prefix": "@let-fn",
     "body": [
-      "@let ${1:card} \\$${2:title}",
+      "@let @${1:card} [${2:title}]",
       "  @el [${3:padding 20, spacing 8, border 1 solid #e5e7eb, border-radius 8}]",
       "    @text [font-weight bold] \\$$2",
       "    @children",
@@ -56,7 +56,7 @@
   "Function with slots": {
     "prefix": "@let-slots",
     "body": [
-      "@let ${1:panel} \\$${2:title}",
+      "@let @${1:panel} [${2:title}]",
       "  @article [${3:padding 20, spacing 12}]",
       "    @row [align-items center]",
       "      @h2 \\$$2",
@@ -76,7 +76,7 @@
   "Scoped style": {
     "prefix": "@let-style",
     "body": [
-      "@let ${1:note}",
+      "@let @${1:note}",
       "  @style",
       "    & { ${2:border-left: 4px solid #3b82f6;} }",
       "  @el [${3:padding 12 16}]",

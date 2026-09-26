@@ -141,6 +141,17 @@ fn assign(vars: &mut HashMap<String, String>, name: &str, value: String, quoted:
 struct Evaluator;
 
 impl ParseContext {
+    /// Forget what `name` means (a value, a bundle or a function), before a
+    /// `@let` gives it a new meaning.
+    fn forget(&mut self, name: &str) {
+        for key in [name.to_string(), quoted_key(name), format!("{}#", name)] {
+            self.variables.remove(&key);
+        }
+        self.defines.remove(name);
+        self.functions.remove(name);
+        self.scoped_functions.remove(name);
+    }
+
     /// Evaluate an expression (see `expr.rs`) written at `line` and
     /// `column` (when known), reporting its errors there.
     fn eval(
@@ -748,11 +759,10 @@ impl Evaluator {
             NodeKind::Directive(directive) => {
                 let mut nodes = self.eval_directive(node, directive, ctx)?;
                 // A directive that takes no body: the lines indented under
-                // it (a syntax error) are evaluated as its siblings
-                let takes_body = match &directive.args {
-                    DirectiveArgs::Let(def) => matches!(def.form, LetForm::Function(_)),
-                    _ => directive.spec.body != BodyKind::None,
-                };
+                // it (a syntax error) are evaluated as its siblings. A
+                // @let's body belongs to it even under a value (also an
+                // error), so it is never evaluated in place.
+                let takes_body = directive.spec.body != BodyKind::None;
                 if !takes_body {
                     let siblings = self.eval_block(&node.children, ctx);
                     nodes.get_or_insert_with(Vec::new).extend(siblings);
@@ -818,9 +828,12 @@ impl Evaluator {
 
             ("let", DirectiveArgs::Let(def)) => {
                 let name = def.name.as_str();
+                // Values, bundles and functions share one namespace: a
+                // definition replaces whatever the name meant before
+                ctx.forget(name);
                 match &def.form {
-                    LetForm::Function(params) => {
-                        self.define_function(name, params, &node.children, line_num, ctx);
+                    LetForm::Function(function) => {
+                        self.define_function(name, &function.params, &node.children, line_num, ctx);
                     }
                     // `@let name = EXPR` computes its value (see expr.rs)
                     LetForm::Computed(expression) => {
@@ -838,7 +851,7 @@ impl Evaluator {
                     }
                     // Text with `$var` interpolation: `@let size 16px`. It is
                     // quoted text when it is one variable holding some.
-                    LetForm::Value(Some(value)) => {
+                    LetForm::Value(value) => {
                         let (text, quoted, _) = ctx.fill_value(
                             &value.raw,
                             value.span.line,
@@ -855,7 +868,6 @@ impl Evaluator {
                             ctx.fill_value(&raw, value.span.line, Some(column), Sink::Text);
                         set_variable(name, text, quoted.as_ref(), line_num, ctx);
                     }
-                    LetForm::Value(None) => {}
                 }
                 Ok(None)
             }
@@ -1758,6 +1770,18 @@ fn parse_element_kind(
             "unknown element @{}: a function is called on its own line (or in a chain), \
              not inside text",
             name
+        ))
+    } else if ctx.defines.contains_key(name) {
+        Some(format!(
+            "unknown element @{}: '{}' is an attribute bundle, used as `[${}]` \
+             (a function is defined with `@let @{}`)",
+            name, name, name, name
+        ))
+    } else if ctx.variables.contains_key(name) {
+        Some(format!(
+            "unknown element @{}: '{}' is a value, used as `${}` \
+             (a function is defined with `@let @{}`)",
+            name, name, name, name
         ))
     } else if ctx.namespace.contains(name) {
         ctx.used_functions.insert(name.to_string());

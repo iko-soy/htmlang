@@ -26,13 +26,13 @@
 ]
 
 -- Code samples: @raw keeps the lines exactly as written, @ and all
-@let code-block
+@let @code-block
   @pre [padding 16, background var(--code-bg), border-radius 8, font-size 14, line-height 1.5, overflow-x auto]
     @children
 
 -- A callout with its own stylesheet. The @style rules are scoped to the
 -- function's root element; & is the root itself.
-@let callout $kind=Note
+@let @callout [kind Note]
   @style
     & { border-inline-start: 4px solid var(--accent); }
     .label { font-weight: 700; color: var(--accent); }
@@ -132,7 +132,7 @@
 
         - Read about **layout**: `@row`, `@el`, `spacing` and `width fill`.
         - Style anything with CSS properties: `[padding 20, color navy]`.
-        - Turn repeated markup into functions with `@let`.
+        - Turn repeated markup into functions with `@let @name`.
 
       @row [spacing 12, padding-block-start 24, border-top 1 solid var(--line), font-weight 600]
         @link [color var(--accent)] /docs/overview ← Overview

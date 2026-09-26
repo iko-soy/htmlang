@@ -112,7 +112,11 @@ fn is_open(node: &Node) -> bool {
         NodeKind::Element(line) => line.chain.iter().any(|h| open(&h.attrs)),
         NodeKind::Directive(d) => match &d.args {
             DirectiveArgs::Page { attrs, .. } => open(attrs),
-            DirectiveArgs::Let(def) => matches!(&def.form, LetForm::Bundle(l) if !l.closed),
+            DirectiveArgs::Let(def) => match &def.form {
+                LetForm::Bundle(list) => !list.closed,
+                LetForm::Function(function) => open(&function.list),
+                _ => false,
+            },
             _ => false,
         },
         _ => false,
@@ -183,7 +187,10 @@ fn header(node: &Node) -> Option<Header> {
                     h.push(&title.raw);
                 }
             }
-            DirectiveArgs::Let(def) if matches!(def.form, LetForm::Bundle(_)) => {
+            // A list with text after its `]` (an error) is kept as written
+            DirectiveArgs::Let(def)
+                if matches!(def.form, LetForm::Bundle(_)) && ends_with_list(node) =>
+            {
                 let LetForm::Bundle(list) = &def.form else {
                     return None;
                 };
@@ -192,12 +199,39 @@ fn header(node: &Node) -> Option<Header> {
                 h.push(" ");
                 h.push_list(list);
             }
+            DirectiveArgs::Let(def)
+                if matches!(def.form, LetForm::Function(_)) && ends_with_list(node) =>
+            {
+                let LetForm::Function(function) = &def.form else {
+                    return None;
+                };
+                h.push("@let @");
+                h.push(&def.name);
+                if let Some(list) = &function.list {
+                    h.push(" ");
+                    h.push_list(list);
+                }
+            }
             _ if node.line_count > 1 => return None,
             _ => h.push(&node.source),
         },
         _ => return None,
     }
     Some(h)
+}
+
+/// Whether a line ends with its attribute list, or has none: nothing
+/// after the `]` that printing the list would drop.
+fn ends_with_list(node: &Node) -> bool {
+    let list = match node.directive().map(|d| &d.args) {
+        Some(DirectiveArgs::Let(def)) => match &def.form {
+            LetForm::Bundle(list) => Some(list),
+            LetForm::Function(function) => function.list.as_ref(),
+            _ => None,
+        },
+        _ => None,
+    };
+    list.is_none_or(|list| !list.closed || node.source.trim_end().ends_with(']'))
 }
 
 fn print_header(header: Header, node: &Node, level: usize, out: &mut String) {
@@ -376,6 +410,18 @@ mod tests {
     #[test]
     fn multi_line_json_is_kept() {
         let src = "@data $team [\n  {\"name\": \"Ada\", \"role\": \"Engineering, research\"},\n  {\"name\": \"Grace\"}\n]\n@text x\n";
+        assert_eq!(format(src), src);
+    }
+
+    #[test]
+    fn function_heads_are_normalized() {
+        let src = "@let  @card[title,tone #fff]\n  @el $title\n@let   @spacer\n  @el\n";
+        assert_eq!(
+            format(src),
+            "@let @card [title, tone #fff]\n  @el $title\n@let @spacer\n  @el\n"
+        );
+        // Text after the list is an error; the formatter keeps it
+        let src = "@let @card [title] extra\n  @el $title\n";
         assert_eq!(format(src), src);
     }
 

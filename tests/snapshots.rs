@@ -262,7 +262,7 @@ fn error_unclosed_bracket() {
 
 #[test]
 fn error_recursive_function() {
-    let input = "@let loop\n  @loop\n@loop";
+    let input = "@let @loop\n  @loop\n@loop";
     let diags = parse_diagnostics(input);
     assert!(
         diags
@@ -353,13 +353,13 @@ fn else_if_chain() {
 
 #[test]
 fn fn_default_used() {
-    let output = compile("@let test $x=hello\n  @text $x\n@test");
+    let output = compile("@let @test [x hello]\n  @text $x\n@test");
     assert!(output.contains("hello"));
 }
 
 #[test]
 fn fn_default_overridden() {
-    let output = compile("@let test $x=hello\n  @text $x\n@test [x world]");
+    let output = compile("@let @test [x hello]\n  @text $x\n@test [x world]");
     assert!(output.contains("world"));
     assert!(!output.contains("hello"));
 }
@@ -451,7 +451,7 @@ fn no_warning_used_variable() {
 
 #[test]
 fn warning_unused_function() {
-    let diags = parse_diagnostics("@let card\n  @el [padding 10]\n@el");
+    let diags = parse_diagnostics("@let @card\n  @el [padding 10]\n@el");
     assert!(
         diags
             .iter()
@@ -463,7 +463,7 @@ fn warning_unused_function() {
 
 #[test]
 fn no_warning_used_function() {
-    let diags = parse_diagnostics("@let card\n  @el [padding 10]\n@card");
+    let diags = parse_diagnostics("@let @card\n  @el [padding 10]\n@card");
     assert!(
         !diags.iter().any(|d| d.message.contains("unused function")),
         "should not warn about used function, got: {:?}",
@@ -568,7 +568,7 @@ fn each_range_with_index() {
 #[test]
 fn named_slot_basic() {
     let output = compile(
-        "@let card\n  @el\n    @slot header\n    @children\n@card\n  @slot header\n    @text Title\n  @text Body",
+        "@let @card\n  @el\n    @slot header\n    @children\n@card\n  @slot header\n    @text Title\n  @text Body",
     );
     assert!(output.contains("Title"));
     assert!(output.contains("Body"));
@@ -577,7 +577,7 @@ fn named_slot_basic() {
 #[test]
 fn named_slot_default_content() {
     let output = compile(
-        "@let card\n  @el\n    @slot header\n      @text Default\n    @children\n@card\n  @text Body",
+        "@let @card\n  @el\n    @slot header\n      @text Default\n    @children\n@card\n  @text Body",
     );
     assert!(output.contains("Default"));
     assert!(output.contains("Body"));
@@ -2888,7 +2888,7 @@ fn test_autofocus_attribute() {
 fn test_repl_components_feed_subcommands_recognized() {
     // Just verify that the parser and codegen work for content that these commands would process
     let result = htmlang::parser::parse(
-        "@page Test Site\n@meta description A test\n@let card $title\n  @text $title",
+        "@page Test Site\n@meta description A test\n@let @card [title]\n  @text $title",
     );
     assert!(
         !result
@@ -3035,7 +3035,7 @@ fn output_contains_layer_wrapping() {
 #[test]
 fn fn_named_slots() {
     let output = compile(
-        "@let layout\n  @el\n    @slot header\n      Default Header\n    @slot content\n@layout\n  @slot header\n    Custom Header\n  @slot content\n    Page body",
+        "@let @layout\n  @el\n    @slot header\n      Default Header\n    @slot content\n@layout\n  @slot header\n    Custom Header\n  @slot content\n    Page body",
     );
     assert!(
         output.contains("Custom Header"),
@@ -3057,7 +3057,7 @@ fn fn_named_slots() {
 #[test]
 fn fn_named_slot_default() {
     let output = compile(
-        "@let layout\n  @el\n    @slot header\n      Default Header\n    @slot content\n@layout\n  @slot content\n    Only content",
+        "@let @layout\n  @el\n    @slot header\n      Default Header\n    @slot content\n@layout\n  @slot content\n    Only content",
     );
     assert!(
         output.contains("Default Header"),
@@ -3465,7 +3465,7 @@ fn conditional_attribute_can_pick_a_bundle() {
 fn function_with_style_is_scoped() {
     // The scope class goes on the root element: no wrapper
     let html = compile(
-        "@let card $title\n  @style\n    & { padding: 4px; }\n    .t { color: red; }\n  @el [class=box]\n    @text [class=t] $title\n@card [title Hello]\n",
+        "@let @card [title]\n  @style\n    & { padding: 4px; }\n    .t { color: red; }\n  @el [class=box]\n    @text [class=t] $title\n@card [title Hello]\n",
     );
     assert!(
         html.contains("<div class=\"a box hl-card\"><span class=\"t\">Hello"),
@@ -3478,7 +3478,7 @@ fn function_with_style_is_scoped() {
         html
     );
     let diags = parse_diagnostics(
-        "@let pair\n  @style\n    p { color: red; }\n  @text A\n  @text B\n@pair\n",
+        "@let @pair\n  @style\n    p { color: red; }\n  @text A\n  @text B\n@pair\n",
     );
     assert!(
         diags
@@ -3491,7 +3491,7 @@ fn function_with_style_is_scoped() {
 
 #[test]
 fn function_without_style_has_no_wrapper() {
-    let html = compile("@let box\n  @el [padding 10]\n    @children\n\n@box\n  @text Inside\n");
+    let html = compile("@let @box\n  @el [padding 10]\n    @children\n\n@box\n  @text Inside\n");
     assert!(!html.contains("hl-box"), "{}", html);
     assert!(html.contains("Inside"));
 }
@@ -3745,7 +3745,7 @@ fn test_error_for_missing_range() {
 fn test_error_circular_include() {
     // A file including itself would be circular, but we test via in-memory parse
     // by testing that the parser detects self-referential definitions
-    let diags = parse_diagnostics("@let recursive $x\n  @recursive [$x]\n\n@recursive [hello]");
+    let diags = parse_diagnostics("@let @recursive [x]\n  @recursive [$x]\n\n@recursive [hello]");
     assert!(
         diags.iter().any(|d| d.message.contains("recursive")),
         "should report recursive function call"
@@ -3775,7 +3775,7 @@ fn test_warning_unused_variable() {
 
 #[test]
 fn test_warning_unused_function() {
-    let diags = parse_diagnostics("@let unused_fn\n  @text Hello\n\n@text World");
+    let diags = parse_diagnostics("@let @unused_fn\n  @text Hello\n\n@text World");
     assert!(
         diags.iter().any(|d| d.message.contains("unused function")
             && d.severity == htmlang::parser::Severity::Warning),
@@ -3798,7 +3798,7 @@ fn test_each_index_variable() {
 #[test]
 fn test_children_fallback_content() {
     let html = compile(
-        "@let wrapper\n  @el [padding 10]\n    @children\n      @text Default content\n\n@wrapper",
+        "@let @wrapper\n  @el [padding 10]\n    @children\n      @text Default content\n\n@wrapper",
     );
     assert!(
         html.contains("Default content"),
@@ -4516,7 +4516,7 @@ fn markdown_file_missing_reports_error() {
 #[test]
 fn function_call_text_becomes_children() {
     let output =
-        compile("@let box\n  @el [padding 4]\n    @children\n@box Hello {@text [bold] world}");
+        compile("@let @box\n  @el [padding 4]\n    @children\n@box Hello {@text [bold] world}");
     assert!(output.contains("Hello"), "{}", output);
     assert!(output.contains(">world</span>"), "{}", output);
 }
@@ -4524,7 +4524,7 @@ fn function_call_text_becomes_children() {
 #[test]
 fn function_call_extra_attributes_style_the_root() {
     let output = compile(
-        "@let box $label\n  @el [padding 4] $label\n@box [label Hi, background red, hover:color blue]",
+        "@let @box [label]\n  @el [padding 4] $label\n@box [label Hi, background red, hover:color blue]",
     );
     assert!(output.contains("background:red"), "{}", output);
     assert!(output.contains(":hover{color:blue"), "{}", output);
@@ -4533,7 +4533,7 @@ fn function_call_extra_attributes_style_the_root() {
 
 #[test]
 fn function_call_extra_attributes_need_a_single_root() {
-    let diags = parse_diagnostics("@let two\n  @text A\n  @text B\n@two [background red]");
+    let diags = parse_diagnostics("@let @two\n  @text A\n  @text B\n@two [background red]");
     assert!(
         diags
             .iter()
@@ -4565,7 +4565,197 @@ fn standard_library_components_compile_cleanly() {
 
 #[test]
 fn own_definition_overrides_standard_library() {
-    let output = compile("@let badge $label\n  @text [color green] $label\n@badge [label Mine]");
+    let output = compile("@let @badge [label]\n  @text [color green] $label\n@badge [label Mine]");
     assert!(output.contains("color:green"), "{}", output);
     assert!(!output.contains("border-radius:9999px"), "{}", output);
+}
+
+#[test]
+fn snapshot_function_definitions() {
+    snapshot_test("function_definitions");
+}
+
+// --- Definitions: a function is marked with `@`, one namespace ---
+
+/// The diagnostics with `code`, as (line, message).
+fn with_code(input: &str, code: &str) -> Vec<(usize, String)> {
+    parse_diagnostics(input)
+        .into_iter()
+        .filter(|d| d.code == code)
+        .map(|d| (d.line, d.message))
+        .collect()
+}
+
+#[test]
+fn only_a_function_takes_a_body() {
+    // A bundle, a value (the old function head among them), a computed
+    // value and quoted text: the body is an error and is not rendered
+    for head in [
+        "@let card [padding 20]",
+        "@let card $title",
+        "@let card = 1 + 1",
+        "@let card \"x\"",
+    ] {
+        let input = format!("@let title x\n{}\n  @el Body\n", head);
+        let found = with_code(&input, "unexpected-body");
+        assert_eq!(found.len(), 1, "{}: {:?}", head, parse_diagnostics(&input));
+        assert_eq!(found[0].0, 3);
+        assert!(found[0].1.contains("`@let @card"), "{}", found[0].1);
+        let result = htmlang::parser::parse(&input);
+        let html = htmlang::codegen::generate(&result.document);
+        assert!(!html.contains("Body"), "{}: {}", head, html);
+    }
+}
+
+#[test]
+fn a_let_needs_a_bare_name_and_a_value() {
+    let found = parse_diagnostics("@let $gap 16\n@el [padding $gap]\n");
+    let d = found
+        .iter()
+        .find(|d| d.code == "invalid-definition")
+        .expect("invalid-definition");
+    assert!(d.message.contains("`@let gap`"), "{}", d.message);
+    assert_eq!(d.suggestion.as_deref(), Some("gap"));
+    // The name is read as `gap`, so its uses don't cascade
+    assert!(
+        !found.iter().any(|d| d.code == "undefined-variable"),
+        "{:?}",
+        found
+    );
+
+    for input in ["@let gap\n", "@let gap   \n", "@let card\n  @el\n"] {
+        let found = with_code(input, "missing-argument");
+        assert_eq!(
+            found.len(),
+            1,
+            "{:?}: {:?}",
+            input,
+            parse_diagnostics(input)
+        );
+        assert!(found[0].1.contains("needs a value"), "{}", found[0].1);
+    }
+    // The body of a `@let` without a value isn't rendered either
+    let result = htmlang::parser::parse("@let card\n  @el Body\n");
+    assert!(!htmlang::codegen::generate(&result.document).contains("Body"));
+
+    for name in ["1x", "a!b", "true"] {
+        let input = format!("@let {} = 1\n", name);
+        let found = parse_diagnostics(&input);
+        assert!(
+            found.iter().any(|d| d.code == "invalid-definition"),
+            "{}: {:?}",
+            name,
+            found
+        );
+    }
+    // A record's field and a custom property are names
+    compile("@let t.greeting Hello\n@text $t.greeting\n@let --brand #333\n");
+}
+
+#[test]
+fn a_function_is_marked_and_lists_its_parameters_in_brackets() {
+    let found = with_code("@let @card\n", "invalid-definition");
+    assert_eq!(found.len(), 1, "{:?}", found);
+    assert!(found[0].1.contains("indented body"), "{}", found[0].1);
+
+    let cases = [
+        ("@let @card $title\n  @el $title\n", "go in brackets"),
+        ("@let @card [$title]\n  @el $title\n", "without `$`"),
+        ("@let @card [title=Hi]\n  @el $title\n", "without `=`"),
+        (
+            "@let @card [title, title]\n  @el $title\n",
+            "declared twice",
+        ),
+        ("@let @card [a.b]\n  @el x\n", "not a parameter name"),
+        ("@let @1card\n  @el x\n", "not a function name"),
+    ];
+    for (input, expected) in cases {
+        let found = with_code(input, "invalid-definition");
+        assert!(
+            found.iter().any(|(_, m)| m.contains(expected)),
+            "{:?}: {:?}",
+            input,
+            parse_diagnostics(input)
+        );
+    }
+    let found = parse_diagnostics("@let @card [$title]\n  @el $title\n");
+    let d = found
+        .iter()
+        .find(|d| d.code == "invalid-definition")
+        .unwrap();
+    assert_eq!(d.suggestion.as_deref(), Some("title"));
+
+    // Text after the closing bracket
+    for input in [
+        "@let @card [title] extra\n  @el $title\n",
+        "@let card [padding 4] junk\n",
+    ] {
+        let found = with_code(input, "unexpected-argument");
+        assert_eq!(
+            found.len(),
+            1,
+            "{:?}: {:?}",
+            input,
+            parse_diagnostics(input)
+        );
+    }
+}
+
+#[test]
+fn values_bundles_and_functions_share_one_namespace() {
+    // A value replaces a bundle of the same name
+    let found = parse_diagnostics("@let card [padding 4]\n@let card red\n@el [$card] x\n");
+    assert!(
+        found.iter().any(|d| d.code == "attribute-from-variable"),
+        "{:?}",
+        found
+    );
+    // A value replaces a function, and the call says what the name is
+    let found = parse_diagnostics("@let @card\n  @el x\n@let card 5\n@card\n@text $card\n");
+    let d = found
+        .iter()
+        .find(|d| d.code == "unknown-element")
+        .expect("unknown element");
+    assert!(
+        d.message.contains("is a value, used as `$card`"),
+        "{}",
+        d.message
+    );
+    // A function replaces a value
+    let found = parse_diagnostics("@let card 5\n@let @card\n  @el x\n@card\n@text $card\n");
+    assert!(
+        found.iter().any(|d| d.code == "undefined-variable"),
+        "{:?}",
+        found
+    );
+    // A bundle replaces a standard-library function
+    let found = parse_diagnostics("@let spacer [flex 1]\n@row\n  @spacer\n  @el [$spacer]\n");
+    let d = found
+        .iter()
+        .find(|d| d.code == "unknown-element")
+        .expect("unknown element");
+    assert!(d.message.contains("attribute bundle"), "{}", d.message);
+}
+
+#[test]
+fn each_writes_its_variables_with_a_dollar() {
+    for input in [
+        "@each x in a, b\n  @text $x\n",
+        "@each $x, i in a, b\n  @text $x $i\n",
+    ] {
+        let found = parse_diagnostics(input);
+        let d = found
+            .iter()
+            .find(|d| d.code == "invalid-loop")
+            .unwrap_or_else(|| panic!("{:?}: {:?}", input, found));
+        assert!(d.message.contains("with `$`"), "{}", d.message);
+        // The loop still runs, so its variables aren't reported as undefined
+        assert!(
+            !found.iter().any(|d| d.code == "undefined-variable"),
+            "{:?}",
+            found
+        );
+    }
+    let out = compile("@each $x, $i in a, b\n  @text $i:$x\n");
+    assert!(out.contains("0:a") && out.contains("1:b"), "{}", out);
 }

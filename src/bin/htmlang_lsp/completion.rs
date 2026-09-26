@@ -216,7 +216,7 @@ fn snippet_completions(range: Range) -> Vec<CompletionItem> {
         (
             "function",
             "Define a reusable function",
-            "@let ${1:name} \\$${2:param}\n  @el [${3:padding 16}]\n    @children",
+            "@let @${1:name} [${2:title}]\n  @el [${3:padding 16}]\n    @h3 \\$${2}\n    @children",
         ),
         (
             "responsive layout",
@@ -944,21 +944,13 @@ fn function_completions(text: &str, range: Range) -> Vec<CompletionItem> {
             continue;
         }
         let name = &def.name;
-        let params: Vec<String> = def
-            .params
-            .iter()
-            .map(|p| match &p.default {
-                Some(default) => format!("{}={}", p.name, default),
-                None => p.name.clone(),
-            })
-            .collect();
-        let detail = if params.is_empty() {
+        let detail = if def.params.is_empty() {
             "Function".to_string()
         } else {
-            format!("Function({})", params.join(", "))
+            format!("Function {}", crate::analysis::param_list(&def.params))
         };
         // A snippet with a tab stop for each parameter
-        let insert_text = if params.is_empty() {
+        let insert_text = if def.params.is_empty() {
             format!("@{}", name)
         } else {
             let param_snippets: Vec<String> = def
@@ -982,7 +974,7 @@ fn function_completions(text: &str, range: Range) -> Vec<CompletionItem> {
             })),
             ..Default::default()
         };
-        if !params.is_empty() {
+        if !def.params.is_empty() {
             ci.insert_text_format = Some(tower_lsp::lsp_types::InsertTextFormat::SNIPPET);
         }
         items.push(ci);

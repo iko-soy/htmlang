@@ -2,7 +2,7 @@
 -- htmlang: a file's own @let with the same name takes precedence.
 
 -- Takes up the remaining space in a row or column.
-@let spacer
+@let @spacer
   @el [flex 1]
 
 -- Cut text off at one line with an ellipsis: [$truncate]

@@ -3,7 +3,7 @@
 @let arrow "→ "
 @let areas "head head" "side main"
 @let price \$5
-@let card $lede $mark="*"
+@let @card [lede, mark "*"]
   @el [before:content $mark, after:content " — $lede", padding 8]
     $lede
 

@@ -10,7 +10,7 @@ element uses its HTML name.
 @page My Site
 @let --brand #3b82f6
 
-@let card $title
+@let @card [title]
   @article [padding 20, spacing 8, border 1 solid #e5e7eb, border-radius 8, hover:border-color var(--brand)]
     @h3 $title
     @children
@@ -107,16 +107,17 @@ media condition:
   @text [color white] Click me
 ```
 
-`@let` defines values, bundles and functions. A function is called like an
-element: its parameters are attributes, and any other attributes style its
-root element.
+`@let` defines values, bundles and functions, in one namespace. A function
+has `@` before its name and its parameters in brackets (`label`, or
+`href #` with a default). It is called like an element: its parameters are
+attributes, and any other attributes style its root element.
 
 ```
 @let --primary #3b82f6
 @let gap = 8 * 2
 @let rounded [border-radius 8, overflow hidden]
 
-@let button $label $href=#
+@let @button [label, href #]
   @link [$rounded, padding 10 16, background var(--primary), color white] $href
     $label
 

@@ -459,7 +459,7 @@ mod tests {
 
     #[test]
     fn rename_edits_definitions_and_references_once() {
-        let text = "@let card $title $tone=info\n  @el [color $tone] $title\n@style\n  .x { content: \"$title\" }\n@card [title Hi]\n";
+        let text = "@let @card [title, tone info]\n  @el [color $tone] $title\n@style\n  .x { content: \"$title\" }\n@card [title Hi]\n";
         let uri = Url::parse("file:///tmp/none/page.hl").unwrap();
         let edit = rename_at(text, Position::new(1, 22), "heading", &uri).expect("rename");
         let edits = edit.changes.unwrap().remove(&uri).unwrap();
@@ -475,12 +475,14 @@ mod tests {
             .collect();
         at.sort_unstable();
         // The parameter (name only) and the reference; not the CSS body
-        assert_eq!(at, [(0, 11, "heading"), (1, 20, "$heading")]);
+        assert_eq!(at, [(0, 12, "heading"), (1, 20, "$heading")]);
 
+        // The function's name without its `@`
         let found = find_fn_definition(text, "card").expect("definition");
-        assert_eq!(found.start, Position::new(0, 5));
+        assert_eq!(found.start, Position::new(0, 6));
+        assert_eq!(found.end, Position::new(0, 10));
         let found = find_definition(text, "tone").expect("parameter");
-        assert_eq!(found.start, Position::new(0, 18));
+        assert_eq!(found.start, Position::new(0, 19));
     }
 
     #[test]

@@ -54,18 +54,10 @@ pub(crate) fn definitions(text: &str) -> Vec<Def> {
             params: def
                 .params
                 .iter()
-                .map(|p| {
-                    let written = range(p.span);
-                    let skip = u32::from(text[p.span.start..p.span.end].starts_with('$'));
-                    let start = Position::new(written.start.line, written.start.character + skip);
-                    Param {
-                        name: p.name.clone(),
-                        default: p.default.clone(),
-                        name_range: Range::new(
-                            start,
-                            Position::new(start.line, start.character + p.name.len() as u32),
-                        ),
-                    }
+                .map(|p| Param {
+                    name: p.name.clone(),
+                    default: p.default.clone(),
+                    name_range: range(p.name_span),
                 })
                 .collect(),
             value: def.value,
@@ -124,7 +116,7 @@ mod tests {
 
     #[test]
     fn definitions_come_from_the_tree() {
-        let text = "@let a 1\n@let card $title $tone=x\n  @el $title\n@let b [padding 4]\n@let c = 1 + 1\n@el\n  @let d 1\n";
+        let text = "@let a 1\n@let @card [title, tone x]\n  @el $title\n@let b [padding 4]\n@let c = 1 + 1\n@el\n  @let d 1\n";
         let defs = definitions(text);
         let names: Vec<_> = defs.iter().map(|d| (d.name.as_str(), d.kind)).collect();
         assert_eq!(
@@ -139,7 +131,9 @@ mod tests {
         );
         let card = &defs[1];
         assert_eq!((card.line, card.end_line), (1, 2));
-        assert_eq!(card.params[1].name_range.start, Position::new(1, 18));
-        assert_eq!(card.name_range.start, Position::new(1, 5));
+        assert_eq!(card.params[1].name_range.start, Position::new(1, 19));
+        assert_eq!(card.params[1].default.as_deref(), Some("x"));
+        // The name without the function's `@`
+        assert_eq!(card.name_range.start, Position::new(1, 6));
     }
 }

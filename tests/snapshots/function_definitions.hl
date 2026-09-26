@@ -1,0 +1,35 @@
+-- A value, a bundle and a function: only the function is marked
+@let gap = 8 * 2
+@let card [padding 20]
+@let @panel [title]
+  @el [$card, spacing $gap]
+    @h3 $title
+    @children
+
+-- A default is everything after the parameter's name
+@let @greeting [name, words Hello there, mark "!"]
+  @text $words, $name$mark
+
+-- A long parameter list continues onto the next lines
+@let @badge [
+  label,
+  tone #eff6ff,
+  size 12
+]
+  @el [background $tone, font-size $size] $label
+
+-- No brackets: no parameters
+@let @rule
+  @hr
+
+-- One namespace: a @let gives the name a new meaning
+@let accent [color red]
+@let accent navy
+
+@panel [title Hello]
+  @greeting [name World]
+  @greeting [name you, words Goodbye]
+  @rule
+  @badge [label New]
+  @badge [label Old, tone #fef2f2, size 14]
+  @text [color $accent] Accent

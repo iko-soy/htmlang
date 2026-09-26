@@ -303,7 +303,7 @@ mod tests {
     fn relative_includes_resolve_from_the_documents_folder() {
         let dir = std::env::temp_dir().join(format!("htmlang-lsp-base-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("part.hl"), "@let helper\n  @el\n    @children\n").unwrap();
+        std::fs::write(dir.join("part.hl"), "@let @helper\n  @el\n    @children\n").unwrap();
         std::fs::write(dir.join("site.json"), "{\"name\": \"Demo\"}").unwrap();
         let uri = Url::from_file_path(dir.join("page.hl")).unwrap();
         let text = "@include part.hl\n@data $site site.json\n@helper $site.name\n".to_string();
