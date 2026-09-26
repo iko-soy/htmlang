@@ -36,6 +36,9 @@ struct FnDef {
     source: Option<String>,
     node: usize,
     body: Vec<syntax::Node>,
+    /// The file it is defined in, when that isn't the file being compiled
+    /// (see `ParseContext::current_file`).
+    file: Option<String>,
 }
 
 impl FnDef {
@@ -109,7 +112,18 @@ struct ParseContext {
     reported: HashSet<(usize, usize, Option<usize>, String)>,
     /// The id of the syntax node being evaluated.
     current_node: usize,
+    /// The file whose lines are being evaluated, when it isn't the file
+    /// being compiled: the standard library, or an included file (by its
+    /// include chain).
+    current_file: Option<String>,
+    /// A call went deeper than [`MAX_CALL_DEPTH`]: the calls it is nested
+    /// in expand to nothing, until the outermost one returns.
+    too_deep: bool,
 }
+
+/// How deeply function calls may nest, so that a function that calls
+/// itself without an `@if` that stops it is an error instead of a hang.
+const MAX_CALL_DEPTH: usize = 64;
 
 /// The variables in scope, for interpolation and expressions.
 struct Vars<'a>(&'a HashMap<String, String>);
@@ -336,20 +350,11 @@ impl ParseContext {
             return (out, Some(quoted), ok);
         }
         let (out, ok) = self.fill(raw, line, column, sink);
-        let quoted = raw
-            .trim()
-            .strip_prefix('$')
-            .and_then(
-                |after| match interp::reference(after, &Vars(&self.variables))? {
-                    (interp::Reference::Var(path), len) if len == after.len() => Some(path),
-                    _ => None,
-                },
-            )
-            .and_then(|path| {
-                let css = interp::Scope::quoted(&Vars(&self.variables), &path)?;
-                let text = self.variables.get(&path)?.clone();
-                Some(Quoted { text, css })
-            });
+        let quoted = whole_reference(raw, &self.variables).and_then(|path| {
+            let css = interp::Scope::quoted(&Vars(&self.variables), &path)?;
+            let text = self.variables.get(&path)?.clone();
+            Some(Quoted { text, css })
+        });
         (out, quoted, ok)
     }
 
@@ -476,7 +481,9 @@ const PRELUDE: &str = include_str!("std.hl");
 fn load_prelude(ctx: &mut ParseContext) {
     let tree = ctx.parse_tree(PRELUDE);
     collect_namespace(&tree.nodes, None, &mut HashSet::new(), ctx);
+    ctx.current_file = Some("std.hl".to_string());
     let _ = Evaluator.eval_block(&tree.nodes, ctx);
+    ctx.current_file = None;
     // Library definitions aren't the file's own: never report them unused.
     ctx.fn_lines.clear();
     ctx.define_lines.clear();
@@ -521,6 +528,8 @@ pub fn parse_with_base(input: &str, base_path: Option<&Path>) -> ParseResult {
         current_source: (0, None),
         reported: HashSet::new(),
         current_node: 0,
+        current_file: None,
+        too_deep: false,
     };
     load_prelude(&mut ctx);
     let tree = ctx.parse_tree(input);
@@ -536,6 +545,7 @@ pub fn parse_with_base(input: &str, base_path: Option<&Path>) -> ParseResult {
     check_unevaluated(&mut ctx);
     validate_tree(&nodes, None, &mut ctx.diagnostics);
     check_unused(&mut ctx);
+    dedupe(&mut ctx.diagnostics);
     ParseResult {
         document: Document {
             page_title: ctx.page_title,
@@ -662,11 +672,11 @@ fn check_unevaluated_node(node: &syntax::Node, ctx: &mut ParseContext) {
     }
 }
 
-/// Check a head that was never evaluated: its name, and for a built-in
-/// element, its attributes.
+/// Check a head that was never evaluated: its name, and its attributes
+/// (for a call, see [`check_call`]).
 fn check_head(head: &syntax::Head, line: usize, inline: bool, ctx: &mut ParseContext) {
     let is_function = ctx.namespace.contains(&head.name) || ctx.functions.contains_key(&head.name);
-    if is_function && !inline {
+    if is_function {
         ctx.used_functions.insert(head.name.clone());
         if let Some(function) = ctx.functions.get(&head.name).cloned() {
             check_call(head, &function, line, ctx);
@@ -681,36 +691,44 @@ fn check_head(head: &syntax::Head, line: usize, inline: bool, ctx: &mut ParseCon
         return;
     }
     if let Some(list) = &head.attrs {
-        // Names are checked; a value with a variable in it depends on
-        // what the variable holds, so only a literal value is
-        let literal: Vec<syntax::Attr> = list
-            .attrs
-            .iter()
-            .filter(|a| {
-                let bundle = a.key.starts_with('$') && a.value.is_none() && !a.html;
-                !a.raw.starts_with("if(") && !bundle
-            })
-            .map(|a| {
-                let mut a = a.clone();
-                let variable = |v: &String| v.contains('$') || v.contains("if(");
-                if !a.key.contains('$') && a.value.as_ref().is_some_and(variable) {
-                    a.value = None;
-                    a.raw = a.key.clone();
-                }
-                a
-            })
-            .collect();
-        parse_attr_list(&literal, line, ctx, true, &[]);
+        parse_attr_list(&literal_attrs(list), line, ctx, true, &[]);
     }
 }
 
-/// Check how a call that was never evaluated passes its parameters: none
-/// written `name=value`, and every one without a default passed, when no
-/// bundle or `if()` could pass it.
+/// The attributes of a list that was never evaluated, as far as they can
+/// be checked. Names are checked; a value with a variable in it depends on
+/// what the variable holds, so only a literal value is.
+fn literal_attrs(list: &syntax::AttrList) -> Vec<syntax::Attr> {
+    list.attrs
+        .iter()
+        .filter(|a| {
+            let bundle = a.key.starts_with('$') && a.value.is_none() && !a.html;
+            !a.raw.starts_with("if(") && !bundle
+        })
+        .map(|a| {
+            let mut a = a.clone();
+            let variable = |v: &String| v.contains('$') || v.contains("if(");
+            if !a.key.contains('$') && a.value.as_ref().is_some_and(variable) {
+                a.value = None;
+                a.raw = a.key.clone();
+            }
+            a
+        })
+        .collect()
+}
+
+/// Check a call that was never evaluated: how it passes its parameters
+/// (none written `name=value`, and every one without a default passed,
+/// when no bundle or `if()` could pass it), and its other attributes, like
+/// those of an element.
 fn check_call(head: &syntax::Head, function: &FnDef, line: usize, ctx: &mut ParseContext) {
     let name = head.name.as_str();
     let attrs = head.attrs.as_ref().map_or(&[][..], |list| &list.attrs[..]);
     written_parameter_forms(name, function, attrs, line, ctx);
+    if let Some(list) = &head.attrs {
+        let params: Vec<String> = function.params.iter().map(|p| p.name.clone()).collect();
+        parse_attr_list(&literal_attrs(list), line, ctx, true, &params);
+    }
     let unknown = attrs
         .iter()
         .any(|a| a.raw.starts_with("if(") || (a.key.starts_with('$') && a.value.is_none()));
@@ -1160,7 +1178,9 @@ impl Evaluator {
         let tree = ctx.parse_tree(&imported_text);
         ctx.diagnostics.extend(tree.diagnostics.iter().cloned());
         ctx.trees.push((tree.clone(), Some(import_chain.clone())));
+        let saved_file = ctx.current_file.replace(import_chain.clone());
         let included_nodes = self.eval_block(&tree.nodes, ctx);
+        ctx.current_file = saved_file;
 
         // Annotate new diagnostics with import chain
         for d in &mut ctx.diagnostics[diag_count_before..] {
@@ -1379,12 +1399,7 @@ impl Evaluator {
 
         // A source that is one `$name` (or `${name}`) is that variable's
         // value: a list loaded from JSON, by name, or text
-        let whole = list_src.strip_prefix('$').and_then(|after| {
-            match interp::reference(after, &Vars(&ctx.variables))? {
-                (interp::Reference::Var(path), len) if len == after.len() => Some(path),
-                _ => None,
-            }
-        });
+        let whole = whole_reference(list_src, &ctx.variables);
         let data_list = whole.as_ref().and_then(|name| {
             let len = ctx
                 .variables
@@ -1479,6 +1494,7 @@ impl Evaluator {
                 source: ctx.current_source.1.clone(),
                 node: node.id,
                 body: body.into_iter().cloned().collect(),
+                file: ctx.current_file.clone(),
             }),
         );
     }
@@ -1499,21 +1515,11 @@ impl Evaluator {
         {
             return Ok(Vec::new());
         }
-        enum Link {
-            Element(Element),
-            Call {
-                name: String,
-                args: Vec<Attribute>,
-                text: Option<syntax::Text>,
-                /// Parameters written `name=value`, already reported
-                written_form: Vec<String>,
-                /// The column of the call's name and the line it is on,
-                /// for a missing parameter
-                name_at: Option<(usize, String)>,
-            },
-        }
         let line_num = node.span.line;
         let last = element.chain.len() - 1;
+        // Each head is read where it is written, left to right. The
+        // children belong to the last one, so the chain is built right to
+        // left, each link wrapping the next.
         let mut links = Vec::new();
         for (i, head) in element.chain.iter().enumerate() {
             let text = if i == last {
@@ -1521,97 +1527,51 @@ impl Evaluator {
             } else {
                 None
             };
-            if let Some(function) = ctx.functions.get(&head.name).cloned() {
-                let params: Vec<String> = function.params.iter().map(|p| p.name.clone()).collect();
-                ctx.used_functions.insert(head.name.clone());
-                let written = head.attrs.as_ref().map_or(&[][..], |list| &list.attrs[..]);
-                let written_form =
-                    written_parameter_forms(&head.name, &function, written, line_num, ctx);
-                let args = parse_attr_list(written, line_num, ctx, false, &params);
-                links.push(Link::Call {
-                    name: head.name.clone(),
-                    args,
-                    text: text.cloned(),
-                    written_form,
-                    name_at: name_column(head, line_num).zip(match &ctx.current_source {
-                        (current, Some(text)) if *current == line_num => Some(text.clone()),
-                        _ => None,
-                    }),
-                });
-            } else {
-                links.push(Link::Element(parse_single_element(
-                    head, text, line_num, ctx,
-                )?));
-            }
+            links.push(resolve(head, text, line_num, &node.source, ctx)?);
         }
-
-        // Children belong to the innermost element; build the chain
-        // right-to-left, each link wrapping the next.
         let mut current = self.eval_block(&node.children, ctx);
         for link in links.into_iter().rev() {
-            current = match link {
-                Link::Element(mut elem) => {
-                    elem.children.extend(current);
-                    vec![inline_svg(Node::Element(elem), line_num, ctx)]
-                }
-                Link::Call {
-                    name,
-                    args,
-                    text,
-                    written_form,
-                    name_at,
-                } => self.expand_fn_call(
-                    &name,
-                    args,
-                    &written_form,
-                    name_at,
-                    text.as_ref(),
-                    current,
-                    line_num,
-                    &node.source,
-                    ctx,
-                )?,
-            };
+            current = self.complete(link, current, ctx)?;
         }
         Ok(current)
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn expand_fn_call(
+    /// Give a resolved `@name` its children: an element holds them, and a
+    /// function's body puts them where its `@children` is.
+    fn complete(
         &mut self,
-        name: &str,
-        args: Vec<Attribute>,
-        written_form: &[String],
-        name_at: Option<(usize, String)>,
-        trailing_text: Option<&syntax::Text>,
-        all_caller_children: Vec<Node>,
-        line_num: usize,
-        content: &str,
+        resolved: Resolved,
+        children: Vec<Node>,
         ctx: &mut ParseContext,
     ) -> Result<Vec<Node>, ParseError> {
-        // Recursive function cycle detection
-        if ctx.fn_call_stack.contains(&name.to_string()) {
-            return Err(Diagnostic::error(
-                code::RECURSIVE_CALL,
-                line_num,
-                format!(
-                    "recursive function call to @{} (call stack: {})",
-                    name,
-                    ctx.fn_call_stack.join(" -> ")
-                ),
-            )
-            .subject(name));
+        match resolved {
+            Resolved::Element(mut element) => {
+                element.children.extend(children);
+                let line = element.line_num;
+                Ok(vec![inline_svg(Node::Element(element), line, ctx)])
+            }
+            Resolved::Call(call) => self.expand_fn_call(*call, children, ctx),
         }
+    }
 
-        // Clone function definition (releases borrow on ctx)
-        let Some(fn_def) = ctx.functions.get(name).cloned() else {
-            return Err(Diagnostic::error(
-                code::INTERNAL,
-                line_num,
-                format!("undefined function @{}", name),
-            ));
-        };
-        ctx.fn_call_stack.push(name.to_string());
+    fn expand_fn_call(
+        &mut self,
+        call: Call,
+        all_caller_children: Vec<Node>,
+        ctx: &mut ParseContext,
+    ) -> Result<Vec<Node>, ParseError> {
+        let Call {
+            name,
+            function: fn_def,
+            args,
+            records,
+            text: trailing_text,
+            written_form,
+            line: line_num,
+            name_at,
+            source: content,
+        } = call;
+        let (name, content) = (name.as_str(), content.as_str());
 
         // Separate the caller's named slots from its other children
         let mut slot_contents: HashMap<String, Vec<Node>> = HashMap::new();
@@ -1630,10 +1590,28 @@ impl Evaluator {
             caller_children.push(child);
         }
         // Text after the call, as in `@card [color red] New`, is content:
-        // it goes first among the caller's children.
-        if let Some(text) = trailing_text {
+        // it goes first among the caller's children, and like them it is
+        // evaluated where the call is written.
+        if let Some(text) = &trailing_text {
             caller_children.insert(0, Node::Text(text_segments(text, ctx)));
         }
+
+        // Only the body is inside the call, so a function may appear in the
+        // content its caller passes it. A function may call itself, under
+        // a condition that stops it; one that doesn't stop goes too deep.
+        if ctx.too_deep {
+            return Ok(Vec::new());
+        }
+        if ctx.fn_call_stack.len() >= MAX_CALL_DEPTH {
+            ctx.too_deep = true;
+            return Err(too_deep(name, &ctx.fn_call_stack, line_num).source(content));
+        }
+        let caller = (
+            ctx.current_line,
+            ctx.current_source.clone(),
+            ctx.current_node,
+        );
+        ctx.fn_call_stack.push(name.to_string());
 
         // Bind the parameters, by name, in the order they are declared: a
         // default is filled in at the call, where it sees the parameters
@@ -1667,19 +1645,28 @@ impl Evaluator {
                 }
                 passed = Some(arg);
             }
-            let (value, quoted) = match passed {
+            let (value, quoted, record) = match passed {
                 // A parameter's name alone is true: `@post-card [featured]`
-                Some(arg) if arg.value.is_none() => ("true".to_string(), None),
+                Some(arg) if arg.value.is_none() => ("true".to_string(), None, None),
                 Some(arg) => {
                     let quoted = arg.quoted.clone();
                     let value = match &quoted {
                         Some(quoted) => quoted.text.clone(),
                         None => arg.value.clone().unwrap_or_default(),
                     };
-                    (value, quoted)
+                    let record = records
+                        .iter()
+                        .find(|(key, _)| *key == param.name)
+                        .map(|(_, entries)| entries.clone());
+                    (value, quoted, record)
                 }
                 None => match &param.default {
-                    Some(default) => fill_default(&fn_def, param, default, ctx),
+                    Some(default) => {
+                        let record = whole_record(default, &ctx.variables)
+                            .map(|path| record_entries(&ctx.variables, &path));
+                        let (value, quoted) = fill_default(&fn_def, param, default, ctx);
+                        (value, quoted, record)
+                    }
                     None => {
                         let (column, text) = match &name_at {
                             Some((column, text)) => (Some(*column), text.as_str()),
@@ -1688,11 +1675,14 @@ impl Evaluator {
                         ctx.push_once(
                             missing_parameter(name, &param.name, line_num, column).source(text),
                         );
-                        (String::new(), None)
+                        (String::new(), None, None)
                     }
                 },
             };
             assign(&mut ctx.variables, &param.name, value, quoted.as_ref());
+            if let Some(entries) = record {
+                bind_record(&mut ctx.variables, &param.name, &entries);
+            }
         }
         // Arguments that aren't parameters are attributes for the
         // function's root element, so a function can be styled like an
@@ -1704,12 +1694,39 @@ impl Evaluator {
             .map(|(a, _)| a.clone())
             .collect();
 
-        // Evaluate the body with the parameters in scope
-        let body_nodes = self.eval_block(&fn_def.body, ctx);
+        // Evaluate the body with the parameters in scope, as lines of the
+        // file that defines the function
+        let caller_file = std::mem::replace(&mut ctx.current_file, fn_def.file.clone());
+        let before = ctx.diagnostics.len();
+        let mut body_nodes = self.eval_block(&fn_def.body, ctx);
+        ctx.current_file = caller_file;
+        // A line of another file (the standard library, an included file)
+        // means nothing in this one: its problems are reported at the call
+        if fn_def.file != ctx.current_file {
+            let defined_in = fn_def.file.as_deref().unwrap_or("the file being compiled");
+            for d in &mut ctx.diagnostics[before..] {
+                d.message = format!(
+                    "{}\n  in @{} (line {} of {})",
+                    d.message, name, d.line, defined_in
+                );
+                d.line = line_num;
+                d.column = None;
+                d.subject = None;
+                d.suggestion = None;
+                d.source_line = Some(content.into());
+            }
+        }
 
         // Restore variables and call stack
         ctx.restore_scope(saved);
         ctx.fn_call_stack.pop();
+        if ctx.fn_call_stack.is_empty() {
+            ctx.too_deep = false;
+        }
+        (ctx.current_line, ctx.current_source, ctx.current_node) = caller;
+
+        // What the body wrote is the call's
+        belongs_to_call(&mut body_nodes, name, line_num);
 
         // Replace @children with caller's children and @slot with slot content
         let mut result_nodes =
@@ -1783,6 +1800,156 @@ impl Evaluator {
 
         Ok(result_nodes)
     }
+}
+
+/// A `@name` read where it is written: a built-in element, or a call.
+enum Resolved {
+    Element(Element),
+    Call(Box<Call>),
+}
+
+/// A call of a function, with its arguments evaluated where it is written.
+struct Call {
+    name: String,
+    function: Rc<FnDef>,
+    args: Vec<Attribute>,
+    /// Parameters passed one `$name` that holds a record or a list, with
+    /// its entries (see [`record_entries`]): the parameter gets all of it.
+    records: Vec<(String, Vec<(String, String)>)>,
+    /// Text after the attributes, which is content.
+    text: Option<syntax::Text>,
+    /// Parameters written `name=value`, already reported.
+    written_form: Vec<String>,
+    line: usize,
+    /// The column of the call's name and the line it is on, for a missing
+    /// parameter.
+    name_at: Option<(usize, String)>,
+    /// The line as written, for diagnostics.
+    source: String,
+}
+
+/// What `@name` is where it is written: a call of the function `name`
+/// when one is defined, else the built-in element. A whole line, each link
+/// of a chain and an inline element in text all resolve here.
+fn resolve(
+    head: &syntax::Head,
+    text: Option<&syntax::Text>,
+    line: usize,
+    source: &str,
+    ctx: &mut ParseContext,
+) -> Result<Resolved, ParseError> {
+    let Some(function) = ctx.functions.get(&head.name).cloned() else {
+        return parse_single_element(head, text, line, ctx).map(Resolved::Element);
+    };
+    ctx.used_functions.insert(head.name.clone());
+    let params: Vec<String> = function.params.iter().map(|p| p.name.clone()).collect();
+    let written = head.attrs.as_ref().map_or(&[][..], |list| &list.attrs[..]);
+    let written_form = written_parameter_forms(&head.name, &function, written, line, ctx);
+    let records = written
+        .iter()
+        .filter(|a| !a.html && function.is_param(&a.key))
+        .filter_map(|a| {
+            let path = whole_record(a.value.as_deref()?, &ctx.variables)?;
+            Some((a.key.clone(), record_entries(&ctx.variables, &path)))
+        })
+        .collect();
+    // Parameters are bound by name; every other attribute goes to the
+    // root element, and is checked like any attribute
+    let args = parse_attr_list(written, line, ctx, true, &params);
+    let name_at = name_column(head, line).zip(match &ctx.current_source {
+        (current, Some(text)) if *current == line => Some(text.clone()),
+        _ => None,
+    });
+    Ok(Resolved::Call(Box::new(Call {
+        name: head.name.clone(),
+        function,
+        args,
+        records,
+        text: text.cloned(),
+        written_form,
+        line,
+        name_at,
+        source: source.to_string(),
+    })))
+}
+
+/// A call nested deeper than [`MAX_CALL_DEPTH`].
+fn too_deep(name: &str, stack: &[String], line: usize) -> Diagnostic {
+    let message = if stack.iter().any(|n| n == name) {
+        format!(
+            "recursive function call to @{} goes more than {} calls deep: a function that \
+             calls itself needs a condition that stops it (`@if`)",
+            name, MAX_CALL_DEPTH
+        )
+    } else {
+        format!(
+            "function calls nest more than {} deep at @{} (starting with {})",
+            MAX_CALL_DEPTH,
+            name,
+            stack
+                .iter()
+                .take(3)
+                .map(|n| format!("@{}", n))
+                .collect::<Vec<_>>()
+                .join(" → ")
+        )
+    };
+    Diagnostic::error(code::RECURSIVE_CALL, line, message).subject(name)
+}
+
+/// Mark what a function's body wrote as the call's: it gets the call's
+/// line, so what is reported about it points at the call, and the name of
+/// the function, unless a call inside the body already claimed it.
+fn belongs_to_call(nodes: &mut [Node], function: &str, line: usize) {
+    fn claim(element: &mut Element, function: &str, line: usize) {
+        element.line_num = line;
+        element.function.get_or_insert_with(|| function.to_string());
+        belongs_to_call(&mut element.children, function, line);
+    }
+    for node in nodes {
+        match node {
+            Node::Element(element) => claim(element, function, line),
+            Node::Text(segments) => {
+                for segment in segments {
+                    if let TextSegment::Inline(element) = segment {
+                        claim(element, function, line);
+                    }
+                }
+            }
+            Node::Raw(_) => {}
+        }
+    }
+}
+
+/// What an inline `{@name ...}` stands for in its line of text: an
+/// element; the text of a function whose body is text; or, for a body with
+/// several roots, its nodes as a fragment.
+fn inline_segments(mut nodes: Vec<Node>, line: usize) -> Vec<TextSegment> {
+    if let [Node::Element(_)] = nodes.as_slice()
+        && let Some(Node::Element(element)) = nodes.pop()
+    {
+        return vec![TextSegment::Inline(element)];
+    }
+    if nodes.iter().all(|n| matches!(n, Node::Text(_))) {
+        let mut segments = Vec::new();
+        for node in nodes {
+            if let Node::Text(run) = node {
+                if !segments.is_empty() {
+                    segments.push(TextSegment::Plain(" ".to_string()));
+                }
+                segments.extend(run);
+            }
+        }
+        return segments;
+    }
+    vec![TextSegment::Inline(Element {
+        kind: ElementKind::Fragment,
+        attrs: Vec::new(),
+        argument: None,
+        children: nodes,
+        line_num: line,
+        function: None,
+    })]
 }
 
 /// Fill in the default of a parameter that a call leaves out, like the
@@ -1992,6 +2159,7 @@ fn parse_single_element(
         argument,
         children,
         line_num,
+        function: None,
     })
 }
 
@@ -2022,13 +2190,6 @@ fn parse_element_kind(
         Some(format!(
             "unknown element @{}: @{} is a directive, which goes at the start of its own line",
             name, name
-        ))
-    } else if ctx.functions.contains_key(name) {
-        ctx.used_functions.insert(name.to_string());
-        Some(format!(
-            "unknown element @{}: a function is called on its own line (or in a chain), \
-             not inside text",
-            name
         ))
     } else if ctx.defines.contains_key(name) {
         Some(format!(
@@ -2588,8 +2749,9 @@ fn is_valid_hex_color(s: &str) -> bool {
 /// Evaluate the attributes of a list: bundles are spliced in, `if()`
 /// chooses, and variables fill values. A variable fills only the value it
 /// is written in: attributes come from bundles, never from text. With
-/// `validate`, unknown names and invalid values are reported. The values of
-/// `text_keys` (a function's parameters) are text rather than CSS.
+/// `validate`, unknown names and invalid values are reported. `text_keys`
+/// are a called function's parameters: their values are text rather than
+/// CSS, and they aren't checked as attributes.
 fn parse_attr_list(
     tokens: &[syntax::Attr],
     line_num: usize,
@@ -2687,8 +2849,9 @@ fn parse_attr_list(
             html,
             quoted,
         };
-        // A value that couldn't be filled in is already reported
-        let validate = validate && filled;
+        // A value that couldn't be filled in is already reported, and a
+        // parameter's value is text for the function
+        let validate = validate && filled && !text_keys.contains(&attr.key);
 
         // Warn on duplicate attributes (compare full key so pseudo-class
         // variants like `border` and `hover:border` are not conflated)
@@ -2917,15 +3080,20 @@ fn text_segments(text: &syntax::Text, ctx: &mut ParseContext) -> Vec<TextSegment
                 plain.push_str(raw);
             }
             Segment::Inline(inline) => {
-                match parse_single_element(
-                    &inline.head,
-                    inline.text.as_ref(),
-                    ctx.current_line,
-                    ctx,
-                ) {
-                    Ok(elem) => {
+                let line = ctx.current_line;
+                match resolve(&inline.head, inline.text.as_ref(), line, &text.raw, ctx) {
+                    Ok(resolved) => {
                         flush(&mut plain, &mut start, &mut segments, ctx);
-                        segments.push(TextSegment::Inline(elem));
+                        // A function called inline gets no children: its
+                        // content is the text after its attributes
+                        match Evaluator.complete(resolved, Vec::new(), ctx) {
+                            Ok(nodes) => segments.extend(inline_segments(nodes, line)),
+                            Err(mut e) => {
+                                e.source_line
+                                    .get_or_insert_with(|| text.raw.as_str().into());
+                                ctx.diagnostics.push(e);
+                            }
+                        }
                     }
                     Err(mut e) => {
                         // Keep the braces as literal text, but flag what
@@ -2968,19 +3136,50 @@ fn text_list_items(list: &str) -> Vec<String> {
 /// Make `$target` (and `$target.key`, and nested lists) a copy of the list
 /// item stored under `source`.
 fn bind_item(vars: &mut HashMap<String, String>, source: &str, target: &str) {
-    let under = |key: &str, name: &str| {
-        key.strip_prefix(name)
-            .is_some_and(|rest| rest.is_empty() || rest.starts_with(['.', '#', '"']))
-    };
-    vars.retain(|key, _| !under(key, target));
-    let copies: Vec<(String, String)> = vars
-        .iter()
-        .filter(|(key, _)| under(key, source))
-        .map(|(key, value)| (format!("{}{}", target, &key[source.len()..]), value.clone()))
-        .collect();
-    vars.extend(copies);
+    let entries = record_entries(vars, source);
+    bind_record(vars, target, &entries);
+}
+
+/// Whether the variable key `key` is `name` or one of its parts (a field,
+/// an item, a list's length, the quoted form).
+fn is_under(key: &str, name: &str) -> bool {
+    key.strip_prefix(name)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with(['.', '#', '"']))
+}
+
+/// A value with all its parts, as the keys after its name and their
+/// values: a record's fields, a list's items and length.
+fn record_entries(vars: &HashMap<String, String>, name: &str) -> Vec<(String, String)> {
+    vars.iter()
+        .filter(|(key, _)| is_under(key, name))
+        .map(|(key, value)| (key[name.len()..].to_string(), value.clone()))
+        .collect()
+}
+
+/// Make `$target` the value whose parts are `entries` (see
+/// [`record_entries`]), replacing what it was.
+fn bind_record(vars: &mut HashMap<String, String>, target: &str, entries: &[(String, String)]) {
+    vars.retain(|key, _| !is_under(key, target));
+    for (rest, value) in entries {
+        vars.insert(format!("{}{}", target, rest), value.clone());
+    }
     // A record has no text of its own
     vars.entry(target.to_string()).or_default();
+}
+
+/// The variable `raw` is, when it is exactly one `$name` or `${name}`.
+fn whole_reference(raw: &str, vars: &HashMap<String, String>) -> Option<String> {
+    let after = raw.trim().strip_prefix('$')?;
+    match interp::reference(after, &Vars(vars))? {
+        (interp::Reference::Var(path), len) if len == after.len() => Some(path),
+        _ => None,
+    }
+}
+
+/// The record or list `raw` is, when it is one variable holding one: a
+/// parameter passed it gets the whole value, not just its text.
+fn whole_record(raw: &str, vars: &HashMap<String, String>) -> Option<String> {
+    whole_reference(raw, vars).filter(|path| interp::Scope::has_fields(&Vars(vars), path))
 }
 
 /// Inclusive integer range from `start` to `end` (counting down when
@@ -3125,6 +3324,7 @@ pub fn lint(nodes: &[Node]) -> Vec<Diagnostic> {
     fn walk(nodes: &[Node], depth: usize, out: &mut Vec<Diagnostic>) {
         for node in nodes {
             let Node::Element(elem) = node else { continue };
+            let start = out.len();
             let mut warn = |code: &'static str, message: String| {
                 out.push(Diagnostic::warning(code, elem.line_num, message))
             };
@@ -3137,7 +3337,12 @@ pub fn lint(nodes: &[Node]) -> Vec<Diagnostic> {
                     ),
                 );
             }
-            if matches!(elem.kind, ElementKind::Row | ElementKind::El) && elem.children.is_empty() {
+            // A function's body may draw with an empty element (a spacer,
+            // a dot): only one written in the page is flagged
+            if matches!(elem.kind, ElementKind::Row | ElementKind::El)
+                && elem.children.is_empty()
+                && elem.function.is_none()
+            {
                 warn(
                     code::EMPTY_CONTAINER,
                     format!("empty container (@{}) has no children", elem.kind.name()),
@@ -3149,11 +3354,13 @@ pub fn lint(nodes: &[Node]) -> Vec<Diagnostic> {
                     "@button missing 'type' attribute (defaults to submit)".to_string(),
                 );
             }
+            in_function_body(elem, &mut out[start..]);
             walk(&elem.children, depth + 1, out);
         }
     }
     let mut out = Vec::new();
     walk(nodes, 0, &mut out);
+    dedupe(&mut out);
     out
 }
 
@@ -3164,6 +3371,7 @@ fn validate_tree(
 ) {
     for node in nodes {
         if let Node::Element(elem) = node {
+            let start = diagnostics.len();
             for attr in &elem.attrs {
                 let base = crate::vocab::base_attribute(&attr.key);
                 if base == "width"
@@ -3402,10 +3610,36 @@ fn validate_tree(
             {
                 diagnostics.push(Diagnostic::new(code::POSITIVE_TABINDEX, Severity::Warning, elem.line_num, format!("tabindex {} is positive — avoid positive tabindex values as they disrupt natural tab order", n)));
             }
+            in_function_body(elem, &mut diagnostics[start..]);
 
             validate_tree(&elem.children, Some(&elem.kind), diagnostics);
         }
     }
+}
+
+/// Diagnostics about an element a function's body wrote are reported at
+/// the call (see `belongs_to_call`); say which body the element is in.
+fn in_function_body(elem: &Element, diagnostics: &mut [Diagnostic]) {
+    if let Some(function) = &elem.function {
+        for d in diagnostics {
+            d.message = format!("{}\n  in the body of @{}", d.message, function);
+        }
+    }
+}
+
+/// Report each diagnostic once: a line that runs many times (in a loop, in
+/// a function called from one place many times) reports its problems once.
+fn dedupe(diagnostics: &mut Vec<Diagnostic>) {
+    let mut seen = HashSet::new();
+    diagnostics.retain(|d| {
+        seen.insert((
+            d.code,
+            d.line,
+            d.column,
+            d.message.clone(),
+            d.severity as u8,
+        ))
+    });
 }
 
 fn relative_luminance(r: u8, g: u8, b: u8) -> f64 {

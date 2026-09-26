@@ -27,7 +27,7 @@
 //!   is the directive's or element's [`BodyKind`].
 
 use crate::ast::{self, ArgGrammar, BodyKind, DirectiveSpec};
-use crate::diagnostic::{Diagnostic, code};
+use crate::diagnostic::{Diagnostic, Severity, code};
 
 /// A range of the source.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -1569,6 +1569,13 @@ impl Reader<'_> {
                              digits, `-` and `_`, starting with a letter, as in `@let @card`",
                             written
                         )));
+                    } else if let Some(message) = shadowed(&def_name) {
+                        let mut warning = self
+                            .error(code::SHADOWS_BUILT_IN, message)
+                            .subject(def_name.clone())
+                            .column(name_span.column);
+                        warning.severity = Severity::Warning;
+                        problems.push(warning);
                     }
                 } else if written.starts_with('$') {
                     problems.push(
@@ -1672,6 +1679,27 @@ impl Reader<'_> {
 /// Whether `name` can be a value's or bundle's name, as `@let name`: a
 /// name `$name` reaches (`t.greeting` too, for a record's field), or a
 /// custom property `--name`.
+/// Why a function can't be named `name`: it is the name of a built-in
+/// element, which the function would replace everywhere after it, or of a
+/// directive, which it could never replace.
+fn shadowed(name: &str) -> Option<String> {
+    if ast::ElementKind::from_name(name).is_some() {
+        Some(format!(
+            "@let @{0} replaces the built-in element @{0}: every @{0} after this line \
+             calls the function. Give the function another name",
+            name
+        ))
+    } else if ast::directive(name).is_some() {
+        Some(format!(
+            "@{0} is a directive, so a function named @{0} can never be called: give it \
+             another name",
+            name
+        ))
+    } else {
+        None
+    }
+}
+
 fn is_definition_name(name: &str) -> bool {
     let n = crate::interp::name_len(name);
     if n == 0 || matches!(&name[..n], "true" | "false" | "not" | "and" | "or") {

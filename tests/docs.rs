@@ -58,6 +58,7 @@ fn problems(result: &parser::ParseResult) -> Vec<String> {
                     code::UNDEFINED_VARIABLE,
                     code::HTML_ATTRIBUTE_FORM,
                     code::NO_SINGLE_ROOT,
+                    code::SHADOWS_BUILT_IN,
                 ]
                 .contains(&d.code)
         })

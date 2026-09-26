@@ -5040,3 +5040,246 @@ fn a_default_that_uses_a_later_parameter_is_reported_once() {
     assert_eq!(diags.len(), 1, "{:?}", diags);
     assert_eq!(diags[0].code, "invalid-definition");
 }
+
+// ---------------------------------------------------------------------------
+// Functions really are elements (P2)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn snapshot_function_calls() {
+    snapshot_test("function_calls");
+}
+
+#[test]
+fn an_attribute_a_call_forwards_is_checked_like_one_on_the_root() {
+    let src = "@let @box\n  @el [padding 4]\n    @children\n\n@box [paddin 20, colr red]\n  x\n";
+    let diags = parse_diagnostics(src);
+    let unknown = coded(&diags, "unknown-attribute");
+    assert_eq!(unknown.len(), 2, "{:?}", diags);
+    assert!(unknown.iter().all(|d| d.line == 5), "{:?}", unknown);
+    assert_eq!(unknown[0].suggestion.as_deref(), Some("padding"));
+    // A parameter, named alone or with a value, is not an attribute
+    let diags =
+        parse_diagnostics("@let @box [on false, size 1]\n  @el $on $size\n@box [on, size 3]\n");
+    assert!(diags.is_empty(), "{:?}", diags);
+}
+
+#[test]
+fn an_unnamed_word_in_a_call_gets_the_ordinary_diagnostic() {
+    let diags = parse_diagnostics("@let @box [size 1]\n  @el $size\n@box [20]\n");
+    let unknown = coded(&diags, "unknown-attribute");
+    assert_eq!(unknown.len(), 1, "{:?}", diags);
+    assert!(
+        unknown[0].message.contains("'20'"),
+        "{}",
+        unknown[0].message
+    );
+    assert_eq!(unknown[0].line, 3);
+}
+
+#[test]
+fn a_forwarded_attribute_is_checked_against_the_root_element() {
+    let diags = parse_diagnostics("@let @label\n  @text hi\n@label [spacing 4, placeholder=x]\n");
+    let no_effect = coded(&diags, "no-effect");
+    assert_eq!(no_effect.len(), 2, "{:?}", diags);
+    for d in no_effect {
+        assert_eq!(d.line, 3, "{:?}", d);
+        assert!(d.message.contains("in the body of @label"), "{}", d.message);
+    }
+}
+
+#[test]
+fn a_function_is_called_inline_in_text() {
+    let out = compile("@let @key\n  @kbd\n    @children\n@paragraph\n  Press {@key Ctrl+K} now.\n");
+    assert!(out.contains("Press <kbd"), "{}", out);
+    assert!(out.contains(">Ctrl+K</kbd> now."), "{}", out);
+    assert!(!out.contains("{@key"), "{}", out);
+    // With parameters and forwarded attributes
+    let out = compile(
+        "@let @tag [name]\n  @text [padding 2] #$name\n@paragraph\n  See {@tag [name css, id=t]}.\n",
+    );
+    assert!(out.contains("id=\"t\""), "{}", out);
+    assert!(out.contains(">#css</span>."), "{}", out);
+}
+
+#[test]
+fn an_inline_call_to_a_body_with_several_roots_is_a_fragment() {
+    let out = compile("@let @pair\n  @text A\n  @text B\n@paragraph\n  x {@pair} y\n");
+    assert!(out.contains("x <span>A</span><span>B</span> y"), "{}", out);
+    // A text body is text in the sentence
+    let out = compile("@let @intro\n  one\n  two\n@paragraph\n  x {@intro} y\n");
+    assert!(out.contains("x one two y"), "{}", out);
+    // Attributes need one root to go to
+    let diags = parse_diagnostics(
+        "@let @pair\n  @text A\n  @text B\n@paragraph\n  x {@pair [padding 4]}\n",
+    );
+    assert_eq!(coded(&diags, "no-single-root").len(), 1, "{:?}", diags);
+}
+
+#[test]
+fn a_function_is_a_link_of_a_chain() {
+    let out = compile(
+        "@let @card [title]\n  @article\n    @h3 $title\n    @children\n@el > @card [title T]\n  Kid\n",
+    );
+    assert!(out.contains("<div"), "{}", out);
+    assert!(out.contains("<span>Kid</span></article></div>"), "{}", out);
+    let out = compile(
+        "@let @card [title]\n  @article\n    @h3 $title\n    @children\n@card [title T] > @link /x More\n",
+    );
+    assert!(out.contains("<a href=\"/x\">More</a></article>"), "{}", out);
+}
+
+#[test]
+fn a_function_in_its_own_callers_content_is_not_recursion() {
+    let src = "@let @box\n  @el [padding 4]\n    @children\n@box\n  @box\n    Inner\n  {@box x}\n@box {@box y}\n";
+    let result = htmlang::parser::parse(src);
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    let out = htmlang::codegen::generate(&result.document);
+    assert_eq!(out.matches("<div").count(), 5, "{}", out);
+}
+
+#[test]
+fn a_function_may_call_itself_under_a_condition() {
+    let src = "@let @count [n]\n  @text $n\n  @if $n > 0\n    @count [n ${$n - 1}]\n";
+    let out = compile(&format!("{}@count [n 3]\n", src));
+    assert!(
+        out.contains("3</span><span>2</span><span>1</span><span>0"),
+        "{}",
+        out
+    );
+    // Up to the depth limit
+    compile(&format!("{}@count [n 60]\n", src));
+    let diags = parse_diagnostics(&format!("{}@count [n 70]\n", src));
+    let deep = coded(&diags, "recursive-call");
+    assert_eq!(deep.len(), 1, "{:?}", diags);
+    assert!(deep[0].message.contains("64"), "{}", deep[0].message);
+}
+
+#[test]
+fn a_function_that_never_stops_calling_itself_is_one_error() {
+    // Two calls per level would be 2^64 expansions: it stops at the limit
+    let diags = parse_diagnostics("@let @t\n  @el\n    @t\n    @t\n@t\n@t\n");
+    let deep = coded(&diags, "recursive-call");
+    assert_eq!(deep.len(), 1, "{:?}", diags);
+    assert!(
+        deep[0].message.contains("needs a condition"),
+        "{}",
+        deep[0].message
+    );
+    assert_eq!(deep[0].line, 3);
+}
+
+#[test]
+fn a_parameter_passed_a_record_gets_all_of_it() {
+    let out = compile(
+        "@data $post {\"title\": \"Hi\", \"tags\": [\"a\", \"b\"]}\n@let @show [post]\n  @text $post.title\n  @each $t in $post.tags\n    @text #$t\n@show [post $post]\n",
+    );
+    assert!(
+        out.contains("<span>Hi</span><span>#a</span><span>#b</span>"),
+        "{}",
+        out
+    );
+    // A default can be a record too
+    let out = compile(
+        "@data $site {\"name\": \"Acme\"}\n@let @brand [site $site]\n  @text $site.name\n@brand\n",
+    );
+    assert!(out.contains("Acme"), "{}", out);
+}
+
+#[test]
+fn a_function_named_like_a_built_in_warns() {
+    let diags = parse_diagnostics("@let @button [label]\n  @el $label\n@button [label Go]\n");
+    let shadow = coded(&diags, "shadows-built-in");
+    assert_eq!(shadow.len(), 1, "{:?}", diags);
+    assert_eq!(shadow[0].severity, htmlang::parser::Severity::Warning);
+    assert!(
+        shadow[0].message.contains("built-in element @button"),
+        "{}",
+        shadow[0].message
+    );
+    assert_eq!(shadow[0].subject.as_deref(), Some("button"));
+    assert_eq!(shadow[0].column, Some(6));
+    // A directive's name can never be called
+    let diags = parse_diagnostics("@let @each\n  @el x\n");
+    let shadow = coded(&diags, "shadows-built-in");
+    assert_eq!(shadow.len(), 1, "{:?}", diags);
+    assert!(
+        shadow[0].message.contains("never be called"),
+        "{}",
+        shadow[0].message
+    );
+    // Values and bundles are used with `$`, so they shadow nothing
+    let diags = parse_diagnostics("@let button 4\n@let text [padding $button]\n@el [$text]\n");
+    assert!(coded(&diags, "shadows-built-in").is_empty(), "{:?}", diags);
+}
+
+#[test]
+fn a_warning_about_a_body_is_reported_at_the_call_once() {
+    let src = "@let @swatch\n  @el [background #ffffff, color #eeeeee] x\n@each $i in 1..5\n  @swatch\n@swatch\n";
+    let diags = parse_diagnostics(src);
+    let low = coded(&diags, "low-contrast");
+    let lines: Vec<usize> = low.iter().map(|d| d.line).collect();
+    assert_eq!(lines, [4, 5], "{:?}", diags);
+    assert!(
+        low[0].message.contains("in the body of @swatch"),
+        "{}",
+        low[0].message
+    );
+    // A problem in the text of a body stays on its own line, once
+    let diags = parse_diagnostics("@let @b\n  @el [paddin 4]\n@b\n@b\n@b\n");
+    let unknown = coded(&diags, "unknown-attribute");
+    assert_eq!(unknown.len(), 1, "{:?}", diags);
+    assert_eq!(unknown[0].line, 2);
+}
+
+#[test]
+fn the_standard_library_is_reported_at_the_call() {
+    let result = htmlang::parser::parse("@row\n  @text a\n  @spacer [placeholder=x]\n  @text b\n");
+    let no_effect = coded(&result.diagnostics, "no-effect");
+    assert_eq!(no_effect.len(), 1, "{:?}", result.diagnostics);
+    assert_eq!(no_effect[0].line, 3);
+    assert!(no_effect[0].message.contains("in the body of @spacer"));
+    // The spacer is empty by design: lint doesn't flag it
+    let lint = htmlang::parser::lint(&result.document.nodes);
+    assert!(
+        lint.iter().all(|d| d.code != "empty-container"),
+        "{:?}",
+        lint
+    );
+}
+
+#[test]
+fn a_problem_in_an_included_function_is_reported_at_the_call() {
+    let dir = std::env::temp_dir().join("htmlang_p2_included_function");
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("lib.hl"),
+        "-- lib\n@let @box\n  @el [paddin 4] $nope\n",
+    )
+    .unwrap();
+    let result = htmlang::parser::parse_with_base("@include lib.hl\n@el\n  @box\n", Some(&dir));
+    let unknown = coded(&result.diagnostics, "unknown-attribute");
+    assert_eq!(unknown.len(), 1, "{:?}", result.diagnostics);
+    assert_eq!(unknown[0].line, 3);
+    assert!(
+        unknown[0].message.contains("in @box (line 3 of lib.hl)"),
+        "{}",
+        unknown[0].message
+    );
+    // Its subject isn't on the call's line, so no quick fix
+    assert!(unknown[0].suggestion.is_none());
+    let undefined = coded(&result.diagnostics, "undefined-variable");
+    assert_eq!(undefined.len(), 1, "{:?}", result.diagnostics);
+    assert_eq!(undefined[0].line, 3);
+}
+
+#[test]
+fn a_call_that_never_runs_has_its_attributes_checked() {
+    let diags = parse_diagnostics(
+        "@let @box [tone]\n  @el $tone\n@if false\n  @box [tone a, paddin 4]\n  @paragraph\n    x {@box [tone b, colr red]}\n",
+    );
+    let unknown = coded(&diags, "unknown-attribute");
+    let lines: Vec<usize> = unknown.iter().map(|d| d.line).collect();
+    assert_eq!(lines, [4, 6], "{:?}", diags);
+}

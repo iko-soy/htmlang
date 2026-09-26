@@ -16,8 +16,8 @@ Syntax highlighting, snippets, and language server support for
   `@include` and `@data` paths resolve from the file's folder.
 - **Completion** of elements, directives, layout attributes, CSS properties,
   HTML attributes, prefixes, variables, functions and the parameters a
-  function call hasn't passed yet. It triggers on `@`,
-  `$`, `[` and `,`.
+  function call hasn't passed yet, and elements and functions inside
+  `{@...}` in text. It triggers on `@`, `$`, `[` and `,`.
 - **Hover** documentation for elements, directives and attributes (CSS
   properties link to MDN), function signatures, variable values, and color
   swatches.

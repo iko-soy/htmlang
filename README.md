@@ -109,22 +109,29 @@ media condition:
 
 `@let` defines values, bundles and functions, in one namespace. A function
 has `@` before its name and its parameters in brackets (`label`, or
-`href #` with a default). It is called like an element: its parameters are
-attributes, `name value` (a name alone is `true`), a parameter without a
-default must be passed, and any other attributes style its root element.
+`href #` with a default). It is called like an element, on its own line,
+in a chain or inline in text: its parameters are attributes, `name value`
+(a name alone is `true`), a parameter without a default must be passed,
+and any other attributes style its root element and are checked like
+attributes written there.
 
 ```
 @let --primary #3b82f6
 @let gap = 8 * 2
 @let rounded [border-radius 8, overflow hidden]
 
-@let @button [label, href #]
+@let @cta [label, href #]
   @link [$rounded, padding 10 16, background var(--primary), color white] $href
     $label
+@let @key
+  @kbd [padding 1 6, border 1 solid #d1d5db, border-radius 4]
+    @children
 
 @row [spacing $gap]
-  @button [label Sign up]
-  @button [label Learn more, href /about, background #64748b]
+  @cta [label Sign up]
+  @cta [label Learn more, href /about, background #64748b]
+@paragraph
+  Press {@key Ctrl+K} to search.
 ```
 
 Data, loops and conditions run at compile time:

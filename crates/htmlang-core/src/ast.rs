@@ -35,7 +35,11 @@ pub struct Element {
     pub attrs: Vec<Attribute>,
     pub argument: Option<String>,
     pub children: Vec<Node>,
+    /// The line it is written on; for an element a function's body wrote,
+    /// the line of the call, since a function is an element at its call.
     pub line_num: usize,
+    /// The function whose body wrote it, when it comes from a call.
+    pub function: Option<String>,
 }
 
 #[derive(Debug, Clone)]

@@ -112,6 +112,9 @@ pub mod code {
     pub const MISSING_PARAMETER: &str = "missing-parameter";
     /// A parameter passed `name=value`: parameters are written `name value`.
     pub const PARAMETER_FORM: &str = "parameter-form";
+    /// A function named like a built-in element (which it replaces) or a
+    /// directive (which it can't replace).
+    pub const SHADOWS_BUILT_IN: &str = "shadows-built-in";
 
     // Files
     pub const UNREADABLE_FILE: &str = "unreadable-file";
@@ -169,6 +172,7 @@ pub mod code {
         NO_SINGLE_ROOT,
         MISSING_PARAMETER,
         PARAMETER_FORM,
+        SHADOWS_BUILT_IN,
         UNREADABLE_FILE,
         CIRCULAR_INCLUDE,
         UNSET_ENVIRONMENT,

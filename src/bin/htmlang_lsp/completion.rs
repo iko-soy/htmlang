@@ -66,6 +66,14 @@ pub(crate) fn completions(text: &str, position: Position) -> Vec<CompletionItem>
         return variable_completions(text, edit_range);
     }
 
+    // An inline element or call in text, `{@name ...}`: elements and
+    // functions, but no directives
+    if current_word.starts_with('@') && before[..word_start].ends_with('{') {
+        let mut items = element_completions(edit_range);
+        items.extend(function_completions(text, edit_range));
+        return items;
+    }
+
     // @ element/directive or start of line
     let trimmed = before.trim_start();
     if trimmed.is_empty() || trimmed.starts_with('@') {
@@ -1210,6 +1218,18 @@ mod tests {
         let text = "@let @card [title]\n  @el $title\n@card [pad";
         let items = completions(text, pos(2, 10));
         assert!(items.iter().any(|i| i.label == "padding"), "{:?}", items);
+    }
+
+    #[test]
+    fn an_inline_element_offers_elements_and_functions() {
+        let text = "@let @key\n  @kbd\n    @children\n@paragraph\n  Press {@k";
+        let labels: Vec<String> = completions(text, pos(4, 11))
+            .into_iter()
+            .map(|c| c.label)
+            .collect();
+        assert!(labels.iter().any(|l| l == "@key"), "{:?}", labels);
+        assert!(labels.iter().any(|l| l == "@kbd"), "{:?}", labels);
+        assert!(!labels.iter().any(|l| l == "@each"), "{:?}", labels);
     }
 
     #[test]

@@ -144,7 +144,8 @@ because `--` later in a line is ordinary text.
 
 `>` puts elements that have one child each on one line. The last element in
 the chain gets the indented children. A `>` is a chain only between two
-elements (`@name [attributes]`); in text it is just a character.
+elements (`@name [attributes]`); in text it is just a character. A
+function call can be a link of a chain, like any element.
 
 ```
 @el [padding 16, background blue, border-radius 8] > @link https://example.com
@@ -509,15 +510,19 @@ value passed for it: it may hold spaces, quotes, escapes, `if()` and
 (`[title, heading "About $title"]`). A default that uses a parameter
 declared after it is an error.
 
-A function is called like an element:
+A function is called like an element, wherever an element can be: on a
+line of its own, in a [chain](#chains) (`@el > @card [title Hi]`) or
+inline in text (`{@key Ctrl+K}`):
 
 - Its parameters are passed by name, as attributes: `name value`, or the
   name alone for `true`. A parameter with a default can be left out;
   leaving out one without a default is an error that names it. `=` writes
   an HTML attribute, so `title=Hi` for a parameter is an error too.
-- Any other attributes style the function's root element, so
-  `@panel [title Hi, padding 40]` works the same as styling a built-in
-  element.
+- Every other attribute goes to the function's root element: a style, a
+  flag, or a `key=value` HTML attribute such as `id=intro`. It is checked
+  like an attribute written on that element, so `@panel [title Hi,
+  padding 40]` works the same as styling a built-in element, and
+  `[paddin 40]` gets the same warning.
 - Text after the attributes and the indented children replace `@children`.
   A caller's `@slot NAME` block replaces the function's `@slot NAME`, and
   the slot's own children are the default content.
@@ -573,16 +578,55 @@ root itself. This requires the body to have a single root element.
 @note [kind Tip, padding 20] Scoped styles and forwarded attributes.
 ```
 
-A function whose body is text holds multi-line content:
+A call in text or in a chain whose body has several roots, or is text,
+puts them in its place, like `@fragment`. A function whose body is text
+holds multi-line content, and a small function works inside a sentence:
 
 ```
 @let @intro
   htmlang is a layout language.
   It compiles to {@text [font-weight bold] static HTML}.
+@let @key
+  @kbd [padding 1 6, border 1 solid #d1d5db, border-radius 4]
+    @children
 
 @paragraph
   @intro
+@paragraph
+  In short: {@intro} Press {@key Ctrl+K} to search.
 ```
+
+A function may call itself, under a condition that stops it, so it can
+render nested data such as a menu. A parameter passed one `$name` that
+holds a record or a list gets the whole value, fields and items
+included. Calls nest at most 64 deep: a function that calls itself with
+nothing to stop it is an error.
+
+```
+@data $menu [
+  {"label": "Guide", "children": [{"label": "Install"}, {"label": "Usage"}]},
+  {"label": "Reference"}
+]
+@let @tree [items]
+  @ul [padding-left 16]
+    @each $item in $items
+      @li
+        @text $item.label
+        @if $item.children
+          @tree [items $item.children]
+
+@tree [items $menu]
+```
+
+The elements a function's body writes are the call's: a warning about
+one of them, such as low contrast or `spacing` on an element that isn't a
+container, is reported at the call, once, and names the function. A
+problem in the text of a body is reported on its own line, or at the call
+when the function comes from `std.hl` or another file.
+
+A function can't take the name of a built-in element or a directive:
+`@let @button` would replace `@button` in every call after it, and a
+function named `@if` could never be called, so both are warnings.
 
 ### CSS custom properties
 

@@ -750,10 +750,11 @@ fn a_known_name_in_the_wrong_place_is_not_its_own_suggestion() {
         "{:?}",
         result.diagnostics
     );
-    // A directive in a chain, and a function inside text
+    // A directive in a chain, and a function inside text called before
+    // its `@let` has run
     for (src, says) in [
         ("@el > @if true\n  x\n", "is a directive"),
-        ("@let @f\n  @el\nCall {@f}\n", "not inside text"),
+        ("Call {@f}\n@let @f\n  @el\n", "isn't defined yet"),
     ] {
         let d = parser::parse(src)
             .diagnostics
