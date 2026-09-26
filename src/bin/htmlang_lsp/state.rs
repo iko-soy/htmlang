@@ -298,4 +298,18 @@ mod tests {
         apply_change(&mut s, &change((0, 99), (0, 99), "!"), false);
         assert_eq!(s, "ab!\ncd");
     }
+
+    #[test]
+    fn relative_includes_resolve_from_the_documents_folder() {
+        let dir = std::env::temp_dir().join(format!("htmlang-lsp-base-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("part.hl"), "@let helper\n  @el\n    @children\n").unwrap();
+        std::fs::write(dir.join("site.json"), "{\"name\": \"Demo\"}").unwrap();
+        let uri = Url::from_file_path(dir.join("page.hl")).unwrap();
+        let text = "@include part.hl\n@data $site site.json\n@helper $site.name\n".to_string();
+        let entry = DocumentEntry::new(text, 1, base_dir(&uri));
+        let result = entry.parse();
+        std::fs::remove_dir_all(&dir).ok();
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
 }

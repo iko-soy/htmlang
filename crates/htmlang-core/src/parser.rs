@@ -579,12 +579,21 @@ impl Evaluator {
 
             // @meta NAME VALUE; `og:` names become Open Graph property tags
             ("meta", DirectiveArgs::Text(Some(arg))) => {
-                if let Some((name, value)) = arg.raw.split_once(' ') {
-                    let value = substitute_vars(value.trim(), &ctx.variables);
-                    match name.trim().strip_prefix("og:") {
-                        Some(property) => ctx.og_tags.push((property.to_string(), value)),
-                        None => ctx.meta_tags.push((name.trim().to_string(), value)),
-                    }
+                let Some((name, value)) = arg.raw.split_once(char::is_whitespace) else {
+                    ctx.diagnostics.push(
+                        Diagnostic::error(
+                            code::MISSING_ARGUMENT,
+                            line_num,
+                            format!("@meta needs a name and a value: `@meta {} VALUE`", arg.raw),
+                        )
+                        .source(content.clone()),
+                    );
+                    return Ok(None);
+                };
+                let value = substitute_vars(value.trim(), &ctx.variables);
+                match name.trim().strip_prefix("og:") {
+                    Some(property) => ctx.og_tags.push((property.to_string(), value)),
+                    None => ctx.meta_tags.push((name.trim().to_string(), value)),
                 }
                 Ok(None)
             }
@@ -1418,10 +1427,37 @@ fn argument_is_special(kind: &ElementKind) -> bool {
 fn parse_element_kind(
     name: &str,
     line_num: usize,
-    ctx: &ParseContext,
+    ctx: &mut ParseContext,
 ) -> Result<ElementKind, ParseError> {
     if let Some(kind) = ElementKind::from_name(name) {
         return Ok(kind);
+    }
+    // A known name in a place it can't go: say why instead of suggesting
+    // the name itself.
+    let misplaced = if crate::ast::directive(name).is_some() {
+        Some(format!(
+            "unknown element @{}: @{} is a directive, which goes at the start of its own line",
+            name, name
+        ))
+    } else if ctx.functions.contains_key(name) {
+        ctx.used_functions.insert(name.to_string());
+        Some(format!(
+            "unknown element @{}: a function is called on its own line (or in a chain), \
+             not inside text",
+            name
+        ))
+    } else if ctx.namespace.contains(name) {
+        ctx.used_functions.insert(name.to_string());
+        Some(format!(
+            "unknown element @{}: the function @{} isn't defined yet when this line runs, \
+             so define it above this line",
+            name, name
+        ))
+    } else {
+        None
+    };
+    if let Some(message) = misplaced {
+        return Err(Diagnostic::error(code::UNKNOWN_ELEMENT, line_num, message).subject(name));
     }
     let all_known: Vec<&str> = ElementKind::all_names()
         .chain(DIRECTIVES.iter().map(|d| d.name))

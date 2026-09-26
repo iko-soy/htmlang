@@ -458,6 +458,7 @@ pub(crate) fn parse_from(source: &str, first_id: usize) -> Tree {
     let mut pos = 0;
     let mut nodes = build(entries, &mut pos, None, &mut next_id);
     check(&mut nodes, &mut diagnostics);
+    diagnostics.sort_by_key(|d| d.line);
     Tree {
         nodes,
         diagnostics,
@@ -1077,8 +1078,12 @@ impl Reader<'_> {
         let mut from = start;
         let mut depth = 0i32;
         let mut quoted = false;
+        let mut escaped = false;
         for (i, c) in self.text[start..end].char_indices() {
             match c {
+                // Quotes are matched as `attr_list` matches them
+                _ if escaped => escaped = false,
+                '\\' if quoted => escaped = true,
                 '"' => quoted = !quoted,
                 _ if quoted => {}
                 '(' | '[' | '{' => depth += 1,
@@ -1228,7 +1233,15 @@ impl Reader<'_> {
                 }
                 (DirectiveArgs::None, false)
             }
-            ArgGrammar::Text => (DirectiveArgs::Text(self.arg(name_end, len)), false),
+            ArgGrammar::Text => match self.arg(name_end, len) {
+                // Without a body, the line is all the directive has
+                None if spec.body == BodyKind::None => missing(match name {
+                    "include" => "a file: `@include header.hl`",
+                    "meta" => "a name and a value: `@meta description A small site`",
+                    _ => "an argument",
+                }),
+                arg => (DirectiveArgs::Text(arg), false),
+            },
             ArgGrammar::AttrsText => {
                 let bracket = self.skip_ws(name_end, len);
                 let (attrs, after) = if self.text[bracket..].starts_with('[') {

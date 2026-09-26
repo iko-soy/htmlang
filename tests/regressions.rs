@@ -674,3 +674,72 @@ fn every_diagnostic_has_a_known_code() {
         );
     }
 }
+
+#[test]
+fn directives_that_need_their_argument_say_so() {
+    for src in ["@include\n", "@meta\n", "@meta description\n"] {
+        assert!(
+            has_code(src, 1, "missing-argument"),
+            "{}: {:?}",
+            src,
+            codes(src)
+        );
+    }
+    // `@raw` and `@markdown` may take their content from a body instead
+    assert!(codes("@raw\n  <hr>\n").is_empty());
+}
+
+#[test]
+fn a_known_name_in_the_wrong_place_is_not_its_own_suggestion() {
+    // Called before its `@let` has run: no "did you mean @b?", and `@b`
+    // isn't reported unused
+    let result = parser::parse("@let a\n  @el\n    @b\n@a\n@let b\n  @text hi\n");
+    let unknown = result
+        .diagnostics
+        .iter()
+        .find(|d| d.code == "unknown-element")
+        .expect("@b is not defined when @a runs");
+    assert!(
+        unknown.message.contains("isn't defined yet"),
+        "{}",
+        unknown.message
+    );
+    assert!(unknown.suggestion.is_none());
+    assert!(
+        !result
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "unused-function"),
+        "{:?}",
+        result.diagnostics
+    );
+    // A directive in a chain, and a function inside text
+    for (src, says) in [
+        ("@el > @if true\n  x\n", "is a directive"),
+        ("@let f\n  @el\nCall {@f}\n", "not inside text"),
+    ] {
+        let d = parser::parse(src)
+            .diagnostics
+            .into_iter()
+            .find(|d| d.code == "unknown-element")
+            .unwrap_or_else(|| panic!("{}", src));
+        assert!(d.message.contains(says), "{}", d.message);
+        assert!(d.suggestion.is_none(), "{:?}", d.suggestion);
+    }
+}
+
+#[test]
+fn syntax_errors_are_reported_in_line_order() {
+    let lines: Vec<usize> = codes("@else\n  a\n@each $x\n  b\n@if\n  c\n")
+        .into_iter()
+        .map(|(line, _, _)| line)
+        .collect();
+    assert_eq!(lines, [1, 3, 5]);
+}
+
+#[test]
+fn an_escaped_quote_does_not_split_an_attribute() {
+    let out = compile("@el [content \"a\\\", b\", padding 4] x\n");
+    assert!(out.contains("content:\"a\\\", b\""), "{}", out);
+    assert!(out.contains("padding:4px"), "{}", out);
+}

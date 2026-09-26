@@ -167,10 +167,12 @@ it would otherwise silently become a sibling.
 The compiler checks the whole file, including code that doesn't run: the
 branch of an `@if` that isn't taken, the body of a function that is never
 called and the body of a loop over an empty list. Unknown elements,
-functions and attributes are reported there too. A function may be called
-before the line that defines it, and functions from included files count.
-Only a name that depends on data, such as a variable a loop fills in, is
-checked just where the code runs.
+functions and attributes are reported there too. Code that doesn't run may
+name a function defined anywhere in the file or in an included file, so a
+function's body can call a function defined further down; code that runs
+needs the function's `@let` to have run first. Only a name that depends on
+data, such as a variable a loop fills in, is checked just where the code
+runs.
 
 Every diagnostic has a stable code, such as `unknown-element` or
 `unused-variable`. The command line prints it as `error[unknown-element]`,
