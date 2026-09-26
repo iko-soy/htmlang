@@ -223,6 +223,11 @@ fn at_rule(rank: usize, dev: bool) -> String {
 
 struct StyleEntry {
     class_name: String,
+    /// The defaults of the element's kind (its layout, a heading's
+    /// `margin:0`, ...), less what its own attributes set. They are written
+    /// as `:where(.hl-a)`, with no specificity, so a parent's `children:`
+    /// styles win over them, as its attributes win over those.
+    defaults: String,
     /// The element's rules: under each condition, its declarations, in the
     /// order they are written
     rules: Vec<(Condition, String)>,
@@ -266,16 +271,18 @@ impl StyleCollector {
     /// Returns a class name for this style combination, or None if all empty.
     fn get_class(
         &mut self,
+        defaults: String,
         mut rules: Vec<(Condition, String)>,
         distinct: String,
     ) -> Option<String> {
         rules.retain(|(_, body)| !body.is_empty());
-        if rules.is_empty() {
+        if defaults.is_empty() && rules.is_empty() {
             return None;
         }
         rules.sort_by_cached_key(|(condition, _)| condition.order());
         use std::collections::hash_map::DefaultHasher;
         let mut h = DefaultHasher::new();
+        defaults.hash(&mut h);
         rules.hash(&mut h);
         distinct.hash(&mut h);
         let sig = h.finish();
@@ -283,7 +290,7 @@ impl StyleCollector {
         if let Some(indices) = self.index.get(&sig) {
             for &idx in indices {
                 let e = &self.entries[idx];
-                if e.rules == rules && e.distinct == distinct {
+                if e.defaults == defaults && e.rules == rules && e.distinct == distinct {
                     return Some(e.class_name.clone());
                 }
             }
@@ -292,6 +299,7 @@ impl StyleCollector {
         let name = format!("{}{}", CLASS_PREFIX, short_class_name(idx));
         self.entries.push(StyleEntry {
             class_name: name.clone(),
+            defaults,
             rules,
             distinct,
         });
@@ -301,7 +309,8 @@ impl StyleCollector {
 
     /// All generated rules, wrapped in `@layer htmlang`. They are written
     /// in a fixed order, so which rule wins never depends on where in the
-    /// page an element is: the rules without a prefix, then those under
+    /// page an element is: the element kinds' defaults (`:where(.hl-a)`),
+    /// the rules without a prefix, then those under
     /// selector prefixes, then each block of at-rules (see [`at_order`]),
     /// in which the rules keyed on a parent come first, then the element's
     /// own, then its selectors (see [`selector_order`]).
@@ -315,6 +324,24 @@ impl StyleCollector {
         } else {
             "@layer htmlang{"
         });
+
+        // The defaults, with no specificity: `:where(.hl-a,.hl-b){...}`
+        let mut defaults: Vec<(&str, Vec<&str>)> = Vec::new();
+        for e in self.entries.iter().filter(|e| !e.defaults.is_empty()) {
+            match defaults.iter_mut().find(|(body, _)| *body == e.defaults) {
+                Some((_, classes)) => classes.push(&e.class_name),
+                None => defaults.push((&e.defaults, vec![&e.class_name])),
+            }
+        }
+        for (body, classes) in defaults {
+            let classes: Vec<String> = classes.iter().map(|c| format!(".{}", c)).collect();
+            let selector = format!(":where({})", classes.join(","));
+            if dev {
+                css.push_str(&format!("  {} {{{}}}\n", selector, body));
+            } else {
+                css.push_str(&format!("{}{{{}}}", selector, body));
+            }
+        }
 
         // Every block of at-rules, in order
         let mut blocks: Vec<&[usize]> = vec![&[]];
@@ -1334,8 +1361,7 @@ fn compute_class(
     styles: &mut StyleCollector,
     distinct: String,
 ) -> Option<String> {
-    // Every condition an attribute is under, and none (the element's own
-    // defaults)
+    // Every condition an attribute is under, and none
     let mut conditions = vec![Condition::default()];
     for attr in attrs.iter().filter(|a| !a.html) {
         let (condition, _) = Condition::of(&attr.key);
@@ -1344,17 +1370,77 @@ fn compute_class(
         }
     }
     // Dedupe: if a property is declared twice within a single rule, keep only
-    // the last occurrence (element-kind defaults are written before
-    // user attributes, so a user [list-style disc] correctly overrides the
-    // default list-style:none, and we don't need to ship both).
-    let rules = conditions
+    // the last occurrence.
+    let rules: Vec<(Condition, String)> = conditions
         .into_iter()
         .map(|condition| {
             let css = dedupe_declarations(&attrs_to_css(attrs, &condition, site));
             (condition, css)
         })
         .collect();
-    styles.get_class(rules, distinct)
+    // The kind's defaults, less what the element sets itself (a user
+    // `[list-style disc]` wins over the default `list-style:none` anyway,
+    // so there is no need to ship both)
+    let own = rules
+        .iter()
+        .find(|(condition, _)| *condition == Condition::default())
+        .map_or("", |(_, css)| css.as_str());
+    let own: Vec<&str> = declarations(own).map(|(name, _)| name).collect();
+    let defaults: String = declarations(&dedupe_declarations(&default_css(site)))
+        .filter(|(name, _)| !own.contains(name))
+        .map(|(_, declaration)| declaration)
+        .collect();
+    styles.get_class(defaults, rules, distinct)
+}
+
+/// The defaults of an element's kind where it is: an overlay's positioning
+/// context, its layout, and its kind's own CSS (a heading's `margin:0`).
+fn default_css(site: &Site) -> String {
+    let mut css = String::new();
+    // Elements with @in-front / @behind children become positioning
+    // contexts
+    if site.has_overlay_children {
+        css.push_str("position:relative;isolation:isolate;");
+    }
+    if !site.root {
+        css.push_str(layout_css(site.kind.layout(), site.inline));
+    }
+    css.push_str(site.kind.css());
+    css
+}
+
+/// The declarations of a rule body, as (property, `property:value;`), for
+/// bodies htmlang wrote: every declaration ends in `;`, and a `;` inside
+/// quotes or parentheses doesn't end one.
+fn declarations(css: &str) -> impl Iterator<Item = (&str, &str)> {
+    let mut rest = css;
+    std::iter::from_fn(move || {
+        if rest.is_empty() {
+            return None;
+        }
+        let (mut depth, mut quote, mut escaped) = (0i32, None, false);
+        let mut end = rest.len();
+        for (i, c) in rest.char_indices() {
+            match c {
+                _ if escaped => escaped = false,
+                '\\' => escaped = true,
+                c if Some(c) == quote => quote = None,
+                _ if quote.is_some() => {}
+                '"' | '\'' => quote = Some(c),
+                '(' => depth += 1,
+                ')' => depth -= 1,
+                ';' if depth == 0 => {
+                    end = i + 1;
+                    break;
+                }
+                _ => {}
+            }
+        }
+        let (declaration, after) = rest.split_at(end);
+        rest = after;
+        let name = declaration.split(':').next().unwrap_or("").trim();
+        Some((name, declaration))
+    })
 }
 
 /// Dedupe CSS declarations within a single rule body: for any property
@@ -1852,8 +1938,8 @@ fn layout_css(layout: Layout, inline: bool) -> &'static str {
     }
 }
 
-/// The declarations of the attributes under `condition` (with the
-/// element's own defaults when it is none).
+/// The declarations of the attributes under `condition` (the defaults of
+/// the element's kind are [`default_css`]'s).
 fn attrs_to_css(attrs: &[Attribute], condition: &Condition, site: &Site) -> String {
     let mut css = String::new();
     // The auto margins of `center-x`, `align-left`, ..., written at the end
@@ -1866,19 +1952,6 @@ fn attrs_to_css(attrs: &[Attribute], condition: &Condition, site: &Site) -> Stri
     // The direction `fill` and `shrink` compile against
     let axis = site.parent.at(&condition.at);
 
-    // Base element styles only for the default (non-state) pass
-    if *condition == Condition::default() {
-        // Elements with @in-front / @behind children become positioning
-        // contexts. Pushed before user attrs so an explicit `position` wins
-        // via dedupe (only the last declaration of a property is kept).
-        if site.has_overlay_children {
-            css.push_str("position:relative;isolation:isolate;");
-        }
-        if !site.root {
-            css.push_str(layout_css(kind.layout(), site.inline));
-        }
-        css.push_str(kind.css());
-    }
     // htmlang's words for laying out children (`spacing`, `wrap`,
     // `grid-cols`) mean nothing on an element that doesn't lay out its
     // children, which the parser reports; they are left out. Under

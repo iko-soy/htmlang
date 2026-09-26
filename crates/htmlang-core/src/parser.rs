@@ -4004,6 +4004,24 @@ fn check_prefixes(
         .copied()
         .filter(|p| vocab::at_rule_rank(p).is_none())
         .collect();
+    // Only one: an element has one `::before`, which has no `::after`
+    let elements: Vec<&str> = selectors
+        .iter()
+        .copied()
+        .filter(|p| vocab::is_pseudo_element(p))
+        .collect();
+    if elements.len() > 1 {
+        return fail(
+            ctx,
+            format!(
+                "'{}': `{}` and `{}` each select a pseudo-element, and a style applies to one \
+                 of them",
+                attr.key, elements[0], elements[1]
+            ),
+            &attr.key,
+            None,
+        );
+    }
     if let Some(at) = selectors.iter().position(|p| vocab::is_pseudo_element(p))
         && at + 1 < selectors.len()
     {
@@ -4031,10 +4049,27 @@ fn check_prefixes(
     // Under `children:` the styles go on the children, whose parent is this
     // element: a word that places an element in its parent can't say where
     if prefixes.contains(&"children:") && vocab::places_in_parent(base, attr.value.as_deref()) {
+        // The CSS of `fill` and `shrink` depends on the direction: along
+        // it, they are flex properties
         let (word, css) = match (base, attr.value.as_deref().map(str::trim)) {
-            (_, Some("fill")) => (format!("{} fill", base), " (`children:flex 1`)"),
-            (_, Some("shrink")) => (format!("{} shrink", base), " (`children:flex-shrink 0`)"),
-            _ => (base.to_string(), ""),
+            ("width", Some("fill")) => (
+                "width fill",
+                " (`children:flex 1` in a row, `children:width 100%` otherwise)",
+            ),
+            ("height", Some("fill")) => (
+                "height fill",
+                " (`children:flex 1` in a column, `children:height 100%` otherwise)",
+            ),
+            ("width", Some(_)) => (
+                "width shrink",
+                " (`children:flex-shrink 0` in a row, `children:width fit-content` otherwise)",
+            ),
+            ("height", Some(_)) => (
+                "height shrink",
+                " (`children:flex-shrink 0` in a column, `children:height fit-content` \
+                 otherwise)",
+            ),
+            _ => (base, ""),
         };
         return fail(
             ctx,
@@ -4261,7 +4296,10 @@ fn unknown_attribute(
     error: bool,
     ctx: &mut ParseContext,
 ) -> bool {
-    let suggestion = suggest_closest(base, &crate::vocab::all_attributes());
+    // `hover:title x`: an HTML attribute's name is not a suggestion for
+    // itself
+    let suggestion =
+        suggest_closest(base, &crate::vocab::all_attributes()).filter(|&closest| closest != base);
     let mut message = match (&suggestion, error) {
         (Some(closest), true) => {
             format!(
@@ -4360,7 +4398,15 @@ fn read_attrs(
     out: &mut ReadAttrs,
 ) {
     let mut chosen = Vec::new();
-    choose_attrs(tokens, line_num, ctx, validate, text_keys, &mut chosen);
+    choose_attrs(
+        tokens,
+        prefix,
+        line_num,
+        ctx,
+        validate,
+        text_keys,
+        &mut chosen,
+    );
 
     for token in &chosen {
         let line = if token.span.line == 0 {
@@ -4381,7 +4427,7 @@ fn read_attrs(
                     line_num,
                     ctx,
                     validate,
-                    &[],
+                    text_keys,
                     out,
                 );
             }
@@ -4399,6 +4445,14 @@ fn read_attrs(
                 ctx.used_defines.insert(name.clone());
                 for attr in define_attrs.iter() {
                     if !prefix.is_empty() {
+                        let prefixed = Attribute {
+                            key: format!("{}{}", prefix, attr.key),
+                            ..attr.clone()
+                        };
+                        if prefixed_parameter(&prefixed, text_keys, line, column(0), validate, ctx)
+                        {
+                            continue;
+                        }
                         if let Some(attr) =
                             prefixed_member(attr, prefix, &name, line, column(0), validate, ctx)
                         {
@@ -4535,6 +4589,9 @@ fn read_attrs(
         if validate && misspelled_parameter(&attr, text_keys, line, column(0), ctx) {
             continue;
         }
+        if prefixed_parameter(&attr, text_keys, line, column(0), validate, ctx) {
+            continue;
+        }
         if validate && attr.html && attr.key == "class" {
             reserved_class(&attr, line, column(0), ctx);
         }
@@ -4549,6 +4606,48 @@ fn read_attrs(
 
         out.attrs.push((attr, typed));
     }
+}
+
+/// At a call, a parameter under prefixes (`md:title x`, `md:[title x]`):
+/// a parameter has one value, with no states, so it is reported (with
+/// `validate`) and left out; returns true then. A parameter named like a
+/// style (`color`) is a style under a prefix, for the root element.
+fn prefixed_parameter(
+    attr: &Attribute,
+    text_keys: &[String],
+    line: usize,
+    column: Option<usize>,
+    validate: bool,
+    ctx: &mut ParseContext,
+) -> bool {
+    let (prefixes, name) = crate::vocab::split_prefixes(&attr.key);
+    if attr.html
+        || prefixes.is_empty()
+        || !text_keys.iter().any(|k| k == name)
+        || crate::vocab::is_style_attribute(name)
+    {
+        return false;
+    }
+    if validate {
+        let what = if ctx.in_page {
+            "@page's own word"
+        } else {
+            "a parameter"
+        };
+        let diagnostic = Diagnostic::error(
+            code::INVALID_PREFIX,
+            line,
+            format!(
+                "'{}': `{}` is {}, which has one value, and a prefix applies to a style, \
+                 which has states",
+                attr.key, name, what
+            ),
+        )
+        .subject(attr.key.as_str());
+        let diagnostic = at_attribute(diagnostic, column, ctx);
+        ctx.diagnostics.push(diagnostic);
+    }
+    true
 }
 
 /// The prefixes of a prefixed group, bundle or `if()` inside `outer` (the
@@ -4860,9 +4959,11 @@ fn whole_reference(raw: &str, env: &Env) -> Option<String> {
 /// The attributes of `tokens` after each whole-attribute `if()` has
 /// chosen (see [`syntax::Choice`]), in order, into `out`. The branch not
 /// taken isn't evaluated; with `validate`, its attribute names are checked
-/// like code that doesn't run.
+/// like code that doesn't run, under the prefixes `prefix` the `if()` is
+/// under (`hover:if(...)`).
 fn choose_attrs(
     tokens: &[syntax::Attr],
+    prefix: &str,
     line_num: usize,
     ctx: &mut ParseContext,
     validate: bool,
@@ -4888,11 +4989,19 @@ fn choose_attrs(
         if let Some(other) = other {
             track_var_refs(&branch_text(other), &mut ctx.used_variables);
             if validate {
-                check_attrs(other.attrs(), line_num, ctx, text_keys);
+                check_branch(token, other, prefix, line_num, ctx, text_keys);
             }
         }
         if let Some(branch) = chosen {
-            choose_attrs(branch.attrs(), line_num, ctx, validate, text_keys, out);
+            choose_attrs(
+                branch.attrs(),
+                prefix,
+                line_num,
+                ctx,
+                validate,
+                text_keys,
+                out,
+            );
         }
     }
 }
@@ -4975,14 +5084,54 @@ fn branch_text(branch: &syntax::Branch) -> String {
 /// the variable holds. Each branch of an `if()` is checked on its own.
 fn check_attrs(tokens: &[syntax::Attr], line: usize, ctx: &mut ParseContext, text_keys: &[String]) {
     parse_attr_list(&literal_attrs(tokens), line, ctx, true, text_keys);
-    check_choices(tokens, line, ctx, text_keys);
+    check_choices(tokens, "", line, ctx, text_keys);
 }
 
-/// [`check_attrs`] for the branches of each `if()` of `tokens`, also inside
-/// a prefixed group or as a prefixed `if()` (whose branches are checked
-/// without the prefixes).
+/// [`check_attrs`] for a branch of the `if()` `token`, under the prefixes
+/// `prefix` it is under: `hover:if($on, color red, [id=x])` checks
+/// `hover:[id=x]`, an error whichever branch is taken.
+fn check_branch(
+    token: &syntax::Attr,
+    branch: &syntax::Branch,
+    prefix: &str,
+    line: usize,
+    ctx: &mut ParseContext,
+    text_keys: &[String],
+) {
+    if prefix.is_empty() {
+        check_attrs(branch.attrs(), line, ctx, text_keys);
+        return;
+    }
+    let list = syntax::AttrList {
+        attrs: branch.attrs().to_vec(),
+        span: token.span,
+        closed: true,
+    };
+    let grouped = syntax::Attr {
+        key: prefix.to_string(),
+        value: None,
+        html: false,
+        raw: token.raw.clone(),
+        span: token.span,
+        choice: None,
+        prefixed: Some(Box::new(syntax::Prefixed {
+            prefix: prefix.to_string(),
+            prefix_span: token.span,
+            target: syntax::Branch::Group {
+                list,
+                trailing: None,
+            },
+        })),
+    };
+    check_attrs(std::slice::from_ref(&grouped), line, ctx, text_keys);
+}
+
+/// [`check_attrs`] for the branches of each `if()` of `tokens`, which are
+/// under the prefixes `prefix`, also inside a prefixed group or as a
+/// prefixed `if()`.
 fn check_choices(
     tokens: &[syntax::Attr],
+    prefix: &str,
     line: usize,
     ctx: &mut ParseContext,
     text_keys: &[String],
@@ -4992,11 +5141,12 @@ fn check_choices(
             && choice_shape(token, choice, line, ctx).is_some()
         {
             for branch in &choice.branches {
-                check_attrs(branch.attrs(), line, ctx, text_keys);
+                check_branch(token, branch, prefix, line, ctx, text_keys);
             }
         }
         if let Some(prefixed) = &token.prefixed {
-            check_choices(prefixed.target.attrs(), line, ctx, &[]);
+            let inner = format!("{}{}", prefix, prefixed.prefix);
+            check_choices(prefixed.target.attrs(), &inner, line, ctx, text_keys);
         }
     }
 }

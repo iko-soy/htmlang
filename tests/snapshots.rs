@@ -6253,8 +6253,8 @@ fn a_list_is_a_column_so_spacing_works() {
     let out = compile("@ol [spacing 4]\n  @li First\n  @li Second\n");
     assert!(
         out.contains(
-            "{display:flex;flex-direction:column;margin:0;padding-left:0;list-style:none;gap:4px;}"
-        ),
+            ":where(.hl-a){display:flex;flex-direction:column;margin:0;padding-left:0;list-style:none;}"
+        ) && out.contains(".hl-a{gap:4px;}"),
         "{}",
         out
     );
@@ -6294,7 +6294,9 @@ fn a_layout_element_in_text_is_an_inline_flex_span() {
         out
     );
     assert!(
-        out.contains(".hl-b{display:inline-flex;flex-direction:column;padding:2px;}"),
+        out.contains(
+            ":where(.hl-b){display:inline-flex;flex-direction:column;}.hl-b{padding:2px;}"
+        ),
         "{}",
         out
     );
@@ -6302,7 +6304,8 @@ fn a_layout_element_in_text_is_an_inline_flex_span() {
     let out = compile("@text\n  @row [spacing 4]\n    @text a\n  @grid > @text b\n");
     assert!(!out.contains("<div"), "{}", out);
     assert!(
-        out.contains("display:inline-flex;flex-direction:row;gap:4px;"),
+        out.contains(":where(.hl-a){display:inline-flex;flex-direction:row;}")
+            && out.contains(".hl-a{gap:4px;}"),
         "{}",
         out
     );
@@ -6326,7 +6329,7 @@ fn a_layout_element_in_text_is_an_inline_flex_span() {
         out
     );
     assert!(
-        out.contains(".hl-c{display:flex;flex-direction:column;}"),
+        out.contains(":where(.hl-c){display:flex;flex-direction:column;}"),
         "{}",
         out
     );
@@ -6663,8 +6666,8 @@ fn new_flow_containers_are_columns() {
     let out = compile("@menu [spacing 4]\n  @li One\n@hgroup\n  @h1 A\n  B\n");
     assert!(
         out.contains(
-            "display:flex;flex-direction:column;margin:0;padding-left:0;list-style:none;gap:4px;"
-        ),
+            ":where(.hl-a){display:flex;flex-direction:column;margin:0;padding-left:0;list-style:none;}"
+        ) && out.contains(".hl-a{gap:4px;}"),
         "{}",
         out
     );
@@ -6891,10 +6894,10 @@ fn a_direction_under_a_state_prefix_leaves_the_children_s_words() {
     // direction without a prefix
     let out = compile("@el [hover:flex-direction row]\n  @el [width fill] a\n");
     assert!(rule(&out, ".hl-b").contains("width:100%;"), "{}", out);
-    assert!(!out.contains(":where(.hl-"), "{}", out);
+    assert!(!out.contains(")>.hl-"), "{}", out);
     // A grid has no direction, whatever flex-direction says
     let out = compile("@grid [md:flex-direction row]\n  @el [width fill] a\n");
-    assert!(!out.contains(":where(.hl-"), "{}", out);
+    assert!(!out.contains(")>.hl-"), "{}", out);
 }
 
 #[test]
@@ -6908,10 +6911,10 @@ fn center_and_align_are_auto_margins_in_any_parent() {
         for margins in [
             "margin-left:auto;margin-right:auto;",
             "margin-top:auto;margin-bottom:auto;",
-            "{display:flex;flex-direction:column;margin-right:auto;}",
-            "{display:flex;flex-direction:column;margin-left:auto;}",
-            "{display:flex;flex-direction:column;margin-bottom:auto;}",
-            "{display:flex;flex-direction:column;margin-top:auto;}",
+            "{margin-right:auto;}",
+            "{margin-left:auto;}",
+            "{margin-bottom:auto;}",
+            "{margin-top:auto;}",
         ] {
             assert!(out.contains(margins), "{}: {} in {}", parent, margins, out);
         }
@@ -7042,7 +7045,8 @@ fn rules_are_written_in_one_order_whatever_the_source_order() {
     assert_eq!(forward, backward);
     // Plain, then selectors, then each block: `md:dark:` after `dark:`
     let order = [
-        ".hl-a{display:flex;flex-direction:column;padding:4px;}",
+        ":where(.hl-a,.hl-b){display:flex;flex-direction:column;}",
+        ".hl-a{padding:4px;}",
         ".hl-a:hover{color:blue;}",
         ".hl-a::before{content:\"x\";}",
         ":where(.hl-a)>*{opacity:1;}",
@@ -7101,6 +7105,55 @@ fn a_prefixed_group_or_bundle_holds_styles_only() {
 }
 
 #[test]
+fn the_branch_a_prefixed_if_doesn_t_take_is_checked_under_its_prefixes() {
+    for src in [
+        "@let on true\n@el [hover:if($on, color red, id=x)]\n  x\n",
+        "@let on false\n@el [hover:if($on, [id=x], color red)]\n  x\n",
+        "@let on true\n@el [md:[if($on, color red, [aria-label=x])]]\n  x\n",
+        "@let on true\n@row [children:if($on, color red, width fill)]\n  x\n",
+        "@let on true\n@el [before:if($on, color red, hover:color blue)]\n  x\n",
+    ] {
+        let d = parse_diagnostics(src);
+        assert_eq!(coded(&d, "invalid-prefix").len(), 1, "{}: {:?}", src, d);
+        assert_eq!(errors(&d).len(), 1, "{}: {:?}", src, d);
+    }
+}
+
+#[test]
+fn a_parameter_takes_no_prefix() {
+    let def =
+        "@let @card [title, pad 8, color blue]\n  @el [padding $pad, color $color]\n    $title\n";
+    for call in [
+        "@card [title A, md:pad 40]",
+        "@card [title A, md:[pad 40]]",
+        "@card [title A, md:title B]",
+        "@let b [pad 40]\n@card [title A, md:$b]",
+    ] {
+        let d = parse_diagnostics(&format!("{}{}\n", def, call));
+        let invalid = coded(&d, "invalid-prefix");
+        assert_eq!(invalid.len(), 1, "{}: {:?}", call, d);
+        assert!(invalid[0].message.contains("is a parameter"), "{:?}", d);
+        assert!(!d.iter().any(|d| d.code == "unknown-attribute"), "{:?}", d);
+    }
+    // A parameter named like a style is a style for the root under a prefix
+    let out = compile(&format!("{}@card [title A, hover:color red]\n", def));
+    assert!(out.contains(":hover{color:red;}"), "{}", out);
+}
+
+#[test]
+fn a_style_takes_one_pseudo_element() {
+    let d = parse_diagnostics("@el [before:after:content \"x\"]\n  x\n");
+    let invalid = coded(&d, "invalid-prefix");
+    assert_eq!(invalid.len(), 1, "{:?}", d);
+    assert!(invalid[0].suggestion.is_none(), "{:?}", d);
+    assert!(
+        invalid[0].message.contains("`before:` and `after:`"),
+        "{:?}",
+        d
+    );
+}
+
+#[test]
 fn a_group_s_prefix_and_what_follows_the_group_are_checked() {
     let d = parse_diagnostics("@el [hovr:[padding 4, color red]]\n  x\n");
     let unknown = coded(&d, "unknown-prefix");
@@ -7125,8 +7178,37 @@ fn a_child_s_own_style_wins_over_its_parent_s_children_style() {
         "{}",
         out
     );
+    assert!(out.contains(".hl-b{opacity:0.5;}"), "{}", out);
+}
+
+#[test]
+fn a_parent_s_children_style_wins_over_a_child_s_defaults() {
+    // The defaults of an element's kind (a list item's column, a
+    // heading's margin) have no specificity and come first, so a parent's
+    // `children:` styles override them, as the child's own attributes
+    // override those
+    let out = compile(
+        "@ul [list-style disc, padding-inline-start 20, children:display list-item]\n  @li [color red] a\n  @li b\n",
+    );
+    let defaults = out.find(":where(.hl-b,.hl-c){display:flex;flex-direction:column;}");
+    let children = out.find(":where(.hl-a)>*{display:list-item;}");
     assert!(
-        out.contains(".hl-b{display:flex;flex-direction:column;opacity:0.5;}"),
+        defaults.is_some() && children.is_some() && defaults < children,
+        "{}",
+        out
+    );
+    assert!(out.contains(".hl-b{color:red;}"), "{}", out);
+    // What the element sets itself is not in its defaults
+    assert!(
+        out.contains(":where(.hl-a){display:flex;flex-direction:column;margin:0;padding-left:0;}"),
+        "{}",
+        out
+    );
+    let out = compile("@el [children:margin-bottom 8]\n  @h2 A\n  @paragraph B\n");
+    let defaults = out.find(":where(.hl-b){margin:0;}");
+    let children = out.find(":where(.hl-a)>*{margin-bottom:8px;}");
+    assert!(
+        defaults.is_some() && children.is_some() && defaults < children,
         "{}",
         out
     );
@@ -7162,7 +7244,7 @@ fn elements_with_the_same_css_but_other_keyed_rules_get_two_classes() {
 fn an_element_inside_text_is_not_a_child_of_the_row_around_it() {
     // The inline @el's parent is the text, not the row
     let out = compile("@el [md:flex-direction row]\n  @paragraph\n    a {@el [width fill] b}\n");
-    assert!(!out.contains(":where(.hl-"), "{}", out);
+    assert!(!out.contains(")>.hl-"), "{}", out);
 }
 
 // ---------------------------------------------------------------------------

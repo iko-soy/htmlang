@@ -40,8 +40,10 @@ Linux, macOS, and Windows. Your change should pass all three.
     Every CSS property goes through one generic path (its name, its value
     as written, with `vocab::with_px`'s pixels); only htmlang's layout
     words and `line-clamp` have code of their own. Generated classes are
-    `hl-` + a short name; an element's defaults (`ElementKind::css`) are
-    part of its class, never a rule on a global element selector, so
+    `hl-` + a short name; an element's defaults (its layout,
+    `ElementKind::css`) are part of its class, written first as
+    `:where(.hl-a)` so its own styles and a parent's `children:` styles
+    override them, never a rule on a global element selector, so
     `@markdown`/`@raw` HTML and a page embedding a fragment are untouched.
     A style's prefixes are a `Condition`: its at-rule prefixes (sorted, so
     `dark:md:` is `md:dark:`, and written as nested `@media`/`@container`

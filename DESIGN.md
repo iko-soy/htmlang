@@ -598,7 +598,10 @@ states, and it is an error there, as it is with a prefix of its own
 
 `children:` styles each direct child, as the parent sees it. They take
 effect only where the child sets nothing itself, since what an element
-says about itself wins over what its parent says about it. The words
+says about itself wins over what its parent says about it. They do win
+over the defaults of the child's kind, so `children:display list-item`
+brings back a list's markers and `children:margin-bottom 8` spaces
+headings. The words
 that place an element in its parent (`width fill`, `width shrink`,
 `center-x`, `align-*`) are errors under `children:`, because there the
 parent they measure against is this element: they go on the children
@@ -623,8 +626,10 @@ The styles of one element follow a fixed order, whatever the order they
 are written in: those without a prefix, then those with selector
 prefixes only, then each width, media and container condition in the
 order of the table (a stack like `md:dark:` after `dark:` on its own),
-with its selector chains inside it. So the later of two that both hold
-is the narrower one, and it wins.
+with its selector chains inside it. So where two styles both hold, the
+one later in the table wins (`dark:` over `md:`, `lg:` over `md:`), and a
+stack wins over each of its prefixes on its own (`md:dark:` over `dark:`
+and `md:`).
 
 ### Conditional attributes
 
@@ -1370,11 +1375,14 @@ name, with its value as written (plus pixels, see
 [CSS properties](#css-properties)); only the layout words, and
 `line-clamp`'s fallback, write more than one declaration.
 
-An element's defaults are part of its own class: the margins browsers give
-headings, paragraphs, lists, figures and blockquotes are 0, lists have no
-markers, `@fieldset` has a thin border and padding, `@code`, `@kbd` and
-`@pre` are monospace, `@link` has no underline and takes its parent's text
-colour, and `@image` is a block. They apply only to htmlang's own elements,
+An element's defaults are part of its own class: its layout (a column is
+`display: flex`), the margins browsers give headings, paragraphs, lists,
+figures and blockquotes are 0, lists have no markers, `@fieldset` has a
+thin border and padding, `@code`, `@kbd` and `@pre` are monospace, `@link`
+has no underline and takes its parent's text colour, and `@image` is a
+block. They are written first, as `:where(.hl-a)`, which has no
+specificity, so the element's own styles and its parent's `children:`
+styles both override them. They apply only to htmlang's own elements,
 so HTML that comes from `@markdown` or `@raw` keeps the browser's defaults:
 a Markdown list keeps its bullets and a Markdown link its underline.
 
