@@ -569,6 +569,7 @@ A prefix applies a style only in some condition:
 | `nth-child(odd):`, `not(.featured):`, `has(> img):`, `is(...):`, ... | When that pseudo-class, with its argument, matches |
 | `before:`, `after:`, `marker:`, `placeholder:`, `backdrop:`, ... | To that pseudo-element (`::before`, `::marker`, ...) |
 | `children:` | To each direct child |
+| `@td:`, `@h2:`, `@link:`, ... | To every such element inside it, at any depth (see [Styling the elements inside](#styling-the-elements-inside)) |
 | `sm:`, `md:`, `lg:`, `xl:`, `2xl:` | From that viewport width up (640, 768, 1024, 1280, 1536px) |
 | `cq-sm:` … `cq-2xl:` | From that container width up (the same widths, for an ancestor with `container-type inline-size`) |
 | `dark:`, `print:`, `motion-safe:`, `motion-reduce:`, `landscape:`, `portrait:` | Under that media condition |
@@ -589,9 +590,10 @@ and `disabled`; with an argument, `nth-child()`, `nth-last-child()`,
 is CSS, written as it is between balanced parentheses, and it may hold
 spaces and colons: the key ends at the first space outside parentheses, so
 `has(> img):padding 0` and `is(:hover, :focus-visible):color red` are one
-key each. `children:` is htmlang's one combinator word. A name that isn't
-one of these (`hvoer:`, or `first:` for `first-child:`) is an unknown
-prefix, an error, not a selector that silently never matches.
+key each. `children:` is htmlang's one combinator word, and an element's
+name with `@` (`@td:`) picks out the elements of that kind inside. A name
+that isn't one of these (`hvoer:`, or `first:` for `first-child:`) is an
+unknown prefix, an error, not a selector that silently never matches.
 
 A prefix goes on a style or a layout flag, and prefixes stack: the key
 is a chain of prefixes, then the property, and the style applies where
@@ -624,6 +626,81 @@ that place an element in its parent (`width fill`, `width shrink`,
 `center-x`, `align-*`) are errors under `children:`, because there the
 parent they measure against is this element: they go on the children
 themselves, or the CSS they stand for does (`children:flex 1`).
+
+#### Styling the elements inside
+
+An element prefix, `@NAME:`, styles every element of that kind inside
+this one, at any depth. `@table [@td:padding 8]` pads every cell of the
+table, and `@article [@h2:font-size 20]` sizes every heading in the
+article. It is how content that has no attributes of its own is styled:
+the HTML `@markdown` writes, and the rows a loop writes.
+
+```
+@let team Ada, Grace, Linus
+@table [border-collapse collapse, width 100%, @th:[padding 8, text-align left], @td:padding 8, @tr:border-bottom 1 solid #e5e7eb]
+  @tr
+    @th Name
+    @th Team
+  @each $name in $team
+    @tr
+      @td $name
+      @td [padding 2] Platform
+@article [spacing 12, @h2:font-size 20, @code:[padding 1 4, background #f1f5f9], @link:hover:color #2563eb]
+  @markdown
+    ## Notes
+
+    Run `htmlang check` before you [publish](/publish).
+```
+
+- **The element has a tag of its own.** `@td:` is every `<td>`,
+  `@paragraph:` every `<p>`, `@link:` every `<a>` and `@image:` every
+  `<img>`, the ones `@markdown` and `@raw` write included. An element that
+  shares its tag can't be picked out, so its prefix is an error: `@el`,
+  `@row`, `@grid`, `@in-front` and `@behind` all write `<div>`, and `@text`
+  writes the `<span>` that every line of text in a row or column is too.
+  So is a function's name (`@card:`), since a function writes whatever its
+  body says and has no tag of its own, and a name that isn't an element
+  (`@a:` suggests `@link:`).
+- **It takes CSS properties.** htmlang's layout words (`spacing`, `wrap`,
+  `grid-cols`, `col-span`, `width fill`, `center-x`, `align-*`) compile
+  against each element's own layout and its parent's, which the prefix
+  doesn't know, so they are errors under it: write them on the elements,
+  or the CSS they stand for (`@li:margin-inline auto`). HTML attributes
+  have no states: `@td:colspan=2` is an error, like `md:colspan=2`.
+- **It composes with the other prefixes, read left to right.** Selector
+  prefixes after it choose among the elements:
+  `@tr:nth-child(even):background #f8fafc` shades every other row, and
+  `@link:hover:color red` colours a hovered link. Those before it are
+  about the element itself: `hover:@link:color red` recolours its links
+  while it is hovered. Width, media and container prefixes go anywhere
+  (`md:@td:padding 12`). A `[group]` or a `$bundle` takes it like any
+  prefix: `@th:[padding 8, text-align left]`. A style has one element
+  prefix, and not `children:` as well: each says which elements the style
+  is for.
+- **What an element says about itself wins.** A cell's own `[padding 2]`
+  wins over the table's `@td:padding 8`, and a parent's `children:` wins
+  over it too. The prefix wins over the defaults of the element's kind, so
+  `@main [@h2:margin-block-start 16]` spaces headings, which start with
+  `margin: 0`. Where two elements around one both style it, the nearest
+  wins, whatever the order they are written in: in an `@article
+  [@td:padding 16]` around a `@table [@td:padding 8]`, the table's cells
+  get 8.
+- **It styles what is inside, not the element itself.** `@ul
+  [@ul:padding-inline-start 16]` indents the lists inside the list, not
+  its own items.
+
+`children:` and an element prefix answer different questions:
+`children:` is for the direct children, whatever they are, as the parent
+sees them; `@td:` is for every cell inside, however deep. An element's
+own attributes are for it alone.
+
+Each style under an element prefix compiles to a rule in CSS's `@scope`,
+on the element's class, in the layer `hl-inside` (see [CSS](#css)):
+`@scope (.hl-a) { :scope td { padding: 8px } }`. `@scope`'s proximity
+rule is what makes the nearest element win. `@scope` is Baseline 2025,
+supported by Chrome and Edge 118, Safari 17.4 and Firefox 146; an older
+browser ignores these rules, so the elements inside keep the styles they
+have without them.
 
 ```
 @let card [padding 16, border 1 solid #e5e7eb, border-radius 8]
@@ -1113,7 +1190,14 @@ default `false`, and name it alone to turn it on.
 
 An `@style` block at the top of a function body is **scoped** to the
 function. Its rules apply inside the function's root element, and `&` is the
-root itself. This requires the body to have a single root element.
+root itself. This requires the body to have a single root element. The
+stylesheet goes into the page once, when the function is first called, so
+a function that is never called adds nothing. It is in the layer
+`hl-inside`, with the styles of element prefixes (see [CSS](#css)): what an
+element says about itself wins over it, so a call's `[padding 20]` wins
+over the function's `& { padding: 12px; }`, as it would over the root's own
+defaults. Where CSS properties are all it needs, an element prefix on the
+root says the same without a stylesheet (`@aside [@h2:font-size 18]`).
 
 ```
 @let @note [kind Note]
@@ -1399,20 +1483,32 @@ name, with its value as written (plus pixels, see
 [CSS properties](#css-properties)); only the layout words, and
 `line-clamp`'s fallback, write more than one declaration.
 
-An element's defaults are part of its own class: its layout (a column is
+An element's defaults go with its own class: its layout (a column is
 `display: flex`), the margins browsers give headings, paragraphs, lists,
 figures and blockquotes are 0, lists have no markers, `@fieldset` has a
 thin border and padding, `@code`, `@kbd` and `@pre` are monospace, `@link`
 has no underline and takes its parent's text colour, and `@image` is a
-block. They are written first, as `:where(.hl-a)`, which has no
-specificity, so the element's own styles and its parent's `children:`
-styles both override them. They apply only to htmlang's own elements,
-so HTML that comes from `@markdown` or `@raw` keeps the browser's defaults:
-a Markdown list keeps its bullets and a Markdown link its underline.
+block. They apply only to htmlang's own elements, so HTML that comes from
+`@markdown` or `@raw` keeps the browser's defaults: a Markdown list keeps
+its bullets and a Markdown link its underline.
 
-The generated rules live in `@layer htmlang`, after a small reset in
-`@layer hl-reset`. A page's reset sets `box-sizing: border-box` everywhere
-and makes `<body>` a column that fills the window. A fragment (a file
+The generated rules live in three cascade layers, after a small reset in
+the layer `hl-reset`, and a later layer wins over an earlier one whatever
+the specificity:
+
+| Layer | Holds |
+|---|---|
+| `hl-reset` | The reset |
+| `hl-kind` | The defaults of each element's kind, as `:where(.hl-a)` |
+| `hl-inside` | The styles an element gets from an element prefix on an element around it (`@td:padding 8`, see [Styling the elements inside](#styling-the-elements-inside)), and functions' scoped `@style` |
+| `htmlang` | Each element's own styles, and its parent's `children:` styles |
+
+So an element's own styles win over everything else htmlang writes for
+it; its parent's `children:` styles and the element prefixes of the
+elements around it win over its defaults.
+
+A page's reset sets `box-sizing: border-box` everywhere and makes
+`<body>` a column that fills the window. A fragment (a file
 without `@page`, or `--partial` output) goes into a page it doesn't own, so
 its reset touches only htmlang's own elements (those with an `hl-` class),
 which get `box-sizing: border-box`; no other element on the page is
@@ -1421,5 +1517,5 @@ htmlang lays out stays hidden while it has `hidden`, while an `@dialog` is
 closed, and while a popover isn't showing, even though its generated
 `display` would otherwise beat the browser's `display: none`. A page with
 links, buttons or form fields also gives htmlang's ones a focus outline.
-CSS outside any layer takes precedence over both layers, so rules in
+CSS outside any layer takes precedence over every layer, so rules in
 `@style` or `@raw` override the generated ones.

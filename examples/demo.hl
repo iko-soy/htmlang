@@ -124,6 +124,7 @@
       A custom property (--name) is one too: set on an element, it holds for everything inside it.
       Prefixes stack, and one prefix before a [group] applies to each style in it.
       A selector prefix is a CSS pseudo-class or pseudo-element under its own name: hover:, first-child:, nth-child(odd):, has(...):, marker:.
+      An element prefix styles every such element inside, at any depth: the table in chapter 6 pads all its cells with {@code @td:padding 8}.
     @row [spacing $unit, wrap]
       @el [$card, box-shadow 0 1 3 rgba(0,0,0,0.1)\, 0 8 24 rgba(0,0,0,0.08), transform rotate(-2deg)] Any CSS property
       @el [$card, hover:background #eff6ff, hover:border-color var(--brand), transition all 0.15s ease, cursor pointer] hover:
@@ -222,20 +223,20 @@
   ]
   @data $nobody []
   @chapter [title Control flow, number 6]
-    @table [border-collapse collapse, width 100%]
+    @table [border-collapse collapse, width 100%, @th:padding 8, @td:padding 8]
       @thead
         @tr [text-align left, color var(--muted), font-size 13]
-          @th [padding 8] #
-          @th [padding 8] Name
-          @th [padding 8] Role
-          @th [padding 8] Status
+          @th #
+          @th Name
+          @th Role
+          @th Status
       @tbody
         @each $person, $i in $team
           @tr [border-top 1 solid var(--line)]
-            @td [padding 8] ${$i + 1}
-            @td [padding 8, font-weight 600] $person.name
-            @td [padding 8] $person.role
-            @td [padding 8, if($person.active, color #10b981, color var(--muted))]
+            @td ${$i + 1}
+            @td [font-weight 600] $person.name
+            @td $person.role
+            @td [if($person.active, color #10b981, color var(--muted))]
               @if $person.active
                 Active
               @else

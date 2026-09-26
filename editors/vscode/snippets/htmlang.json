@@ -310,7 +310,7 @@
   "Table": {
     "prefix": "@table",
     "body": [
-      "@table",
+      "@table [border-collapse collapse, @th:padding ${4:8}, @td:padding ${4:8}]",
       "  @caption ${1:Title}",
       "  @thead",
       "    @tr",
@@ -320,7 +320,16 @@
       "      @td ${3:Value}",
       "$0"
     ],
-    "description": "A table with a caption, a header row and a body"
+    "description": "A table with a caption, a header row and a body, its cells padded by the table"
+  },
+  "Styled Markdown": {
+    "prefix": "@markdown-styled",
+    "body": [
+      "@article [@h2:font-size ${1:20}, @code:background ${2:#f1f5f9}, @link:color ${3:#2563eb}]",
+      "  @markdown",
+      "    $0"
+    ],
+    "description": "Markdown whose headings, code and links are styled by the element around it"
   },
   "List with markers": {
     "prefix": "@ul-markers",

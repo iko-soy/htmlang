@@ -11,6 +11,9 @@ pub struct Document {
     pub defines: HashMap<String, Vec<Attribute>>,
     pub css_vars: Vec<(String, String)>,
     pub custom_css: Vec<String>,
+    /// The scoped `@style` of each function called, nested under its
+    /// `.hl-fn-NAME` class, for `@layer hl-inside`.
+    pub scoped_css: Vec<String>,
     pub og_tags: Vec<(String, String)>,
     pub nodes: Vec<Node>,
 }
@@ -175,6 +178,33 @@ impl ElementKind {
     /// body, shown as text: see [`TagSpec::literal`].)
     pub fn is_verbatim(&self) -> bool {
         self.spec().is_some_and(|spec| spec.verbatim)
+    }
+
+    /// The HTML element it writes (outside text, where htmlang's own
+    /// `<div>`s are `<span>`s): `None` for `@fragment`, `@children` and
+    /// `@slot`, which write none of their own.
+    pub fn tag(&self) -> Option<&'static str> {
+        match self {
+            ElementKind::Row | ElementKind::El => Some("div"),
+            ElementKind::Text => Some("span"),
+            ElementKind::Paragraph => Some("p"),
+            ElementKind::Link => Some("a"),
+            ElementKind::Image => Some("img"),
+            ElementKind::Fragment | ElementKind::Children | ElementKind::Slot(_) => None,
+            ElementKind::Tag(spec) => Some(spec.html),
+        }
+    }
+
+    /// The HTML element only this element writes, which a selector can
+    /// pick out: `@td` is every `<td>`, `@paragraph` every `<p>`. `None`
+    /// for an element that shares its tag: `@el`, `@row`, `@grid`,
+    /// `@in-front` and `@behind` are all `<div>`, and `@text` is a
+    /// `<span>`, as is every line of text in a row or column. `@script`
+    /// isn't shown, so there is nothing to style.
+    pub fn own_tag(&self) -> Option<&'static str> {
+        let tag = self.tag()?;
+        let shared = matches!(tag, "div" | "span") || self.is_verbatim();
+        (!shared).then_some(tag)
     }
 
     /// Is this the table element named `name` (e.g. `"main"`)?
@@ -704,6 +734,30 @@ mod tests {
             if spec.body == super::BodyKind::Verbatim {
                 assert_eq!(spec.args, super::ArgGrammar::Text, "@{}", spec.name);
             }
+        }
+    }
+
+    #[test]
+    fn an_element_has_a_tag_of_its_own_when_no_other_element_writes_it() {
+        let own = |name: &str| ElementKind::from_name(name).unwrap().own_tag();
+        for shared in [
+            "el", "row", "grid", "in-front", "behind", "text", "script", "fragment",
+        ] {
+            assert_eq!(own(shared), None, "@{}", shared);
+        }
+        assert_eq!(own("td"), Some("td"));
+        assert_eq!(own("link"), Some("a"));
+        assert_eq!(own("paragraph"), Some("p"));
+        assert_eq!(own("image"), Some("img"));
+        // Every tag of its own is written by that one element
+        let names: Vec<&str> = ElementKind::all_names().collect();
+        for name in &names {
+            let Some(tag) = own(name) else { continue };
+            let writers: Vec<&&str> = names
+                .iter()
+                .filter(|other| ElementKind::from_name(other).unwrap().tag() == Some(tag))
+                .collect();
+            assert_eq!(writers, vec![name], "<{}>", tag);
         }
     }
 

@@ -39,15 +39,30 @@ pub(crate) fn completions(text: &str, position: Position) -> Vec<CompletionItem>
             return variable_completions(text, edit_range);
         }
 
+        // An element prefix being written (`@t`, `md:@t`): the elements
+        // it can name
+        let group = || {
+            attr_context(before)
+                .and_then(|c| c.group)
+                .unwrap_or_default()
+        };
+        let written_prefix = match current_word.rfind(':') {
+            Some(colon) => &current_word[..=colon],
+            None => "",
+        };
+        if current_word[written_prefix.len()..].starts_with('@')
+            && (written_prefix.is_empty() || vocab::is_prefixed(written_prefix))
+        {
+            return element_prefix_completions(written_prefix, &group(), edit_range);
+        }
+
         // After prefixes (`hover:`, `md:hover:`, `nth-child(2n):`), offer the
         // styles they can apply to, and the prefixes that can follow
         if let Some(colon) = current_word.rfind(':') {
             let prefix = &current_word[..=colon];
             if vocab::is_prefixed(prefix) {
                 let element = owning_element(text, position);
-                let group = attr_context(before)
-                    .and_then(|c| c.group)
-                    .unwrap_or_default();
+                let group = group();
                 let mut items =
                     state_attr_completions(prefix, &group, edit_range, element.as_deref());
                 items.extend(prefix_completions(prefix, &group, edit_range));
@@ -445,6 +460,11 @@ fn snippet_completions(range: Range) -> Vec<CompletionItem> {
             "dark mode",
             "Element with light and dark styles",
             "@el [background ${1:white}, dark:background ${2:#1a1a2e}, color ${3:#333}, dark:color ${4:#eee}]\n  ${5:Content}",
+        ),
+        (
+            "styled markdown",
+            "Markdown whose headings and code are styled by the element around it",
+            "@article [@h2:font-size ${1:20}, @code:background ${2:#f1f5f9}]\n  @markdown\n    ${3:## Notes}",
         ),
     ];
 
@@ -1120,9 +1140,12 @@ fn state_attr_completions(
     let chain = format!("{}{}", group, prefix);
     let (prefixes, _) = vocab::split_prefixes(&chain);
     let on_children = prefixes.contains(&"children:");
+    // Under an element prefix (`@td:`), CSS properties only
+    let inside = prefixes.iter().any(|p| vocab::element_prefix(p).is_some());
     let lays_out_children = on_children || lays_out_children(element);
     let htmlang = vocab::HTMLANG_ATTRIBUTES
         .iter()
+        .filter(|_| !inside)
         .filter(|name| lays_out_children || !vocab::CONTAINER_ATTRIBUTES.contains(name))
         .filter(|name| !(on_children && vocab::places_in_parent(name, None)))
         .filter(|name| **name != "inline")
@@ -1150,14 +1173,42 @@ fn prefix_completions(prefix: &str, group: &str, range: Range) -> Vec<Completion
     let chain = format!("{}{}", group, prefix);
     let (written, _) = vocab::split_prefixes(&chain);
     let after_element = written.iter().any(|p| vocab::is_pseudo_element(p));
+    // `children:` and an element prefix don't go together
+    let inside = written.iter().any(|p| vocab::element_prefix(p).is_some());
     prefix_labels(after_element)
         .into_iter()
         .filter(|p| !written.contains(&p.as_str()))
+        .filter(|p| !(inside && p == vocab::CHILDREN))
         .map(|p| {
             let label = format!("{}{}", prefix, p);
             let detail = docs::prefix_selector(&p).unwrap_or_default();
             let mut completion =
                 prefix_item(prefix, &p, CompletionItemKind::KEYWORD, &detail, range);
+            completion.sort_text = Some(format!("6_{}", label));
+            completion
+        })
+        .collect()
+}
+
+/// The element prefixes that can follow `prefix` (under the group
+/// prefixes `group`), for a word that starts `@` there: `@td:`, `@link:`,
+/// every element with an HTML tag of its own. None after another element
+/// prefix or `children:`, which a style can't have with one.
+fn element_prefix_completions(prefix: &str, group: &str, range: Range) -> Vec<CompletionItem> {
+    let chain = format!("{}{}", group, prefix);
+    let (written, _) = vocab::split_prefixes(&chain);
+    if written
+        .iter()
+        .any(|p| *p == vocab::CHILDREN || vocab::element_prefix(p).is_some())
+    {
+        return Vec::new();
+    }
+    ElementKind::all_names()
+        .filter_map(|name| Some((name, ElementKind::from_name(name)?.own_tag()?)))
+        .map(|(name, tag)| {
+            let label = format!("{}@{}:", prefix, name);
+            let detail = format!("Every <{}> inside this element", tag);
+            let mut completion = item(&label, CompletionItemKind::KEYWORD, &detail, &label, range);
             completion.sort_text = Some(format!("6_{}", label));
             completion
         })
@@ -1760,6 +1811,29 @@ mod tests {
             attr_context("@el [grid-template-columns [a").and_then(|c| c.group),
             None
         );
+    }
+
+    #[test]
+    fn element_prefix_completions() {
+        let has = |items: &[CompletionItem], label: &str| items.iter().any(|i| i.label == label);
+        // `@` in a list starts an element prefix: the elements with a tag
+        // of their own
+        let items = completions("@table [@t", Position::new(0, 10));
+        assert!(has(&items, "@td:") && has(&items, "@th:") && has(&items, "@link:"));
+        assert!(!has(&items, "@el:") && !has(&items, "@text:") && !has(&items, "@row:"));
+        assert!(!has(&items, "padding"));
+        // After another prefix
+        let items = completions("@table [md:@", Position::new(0, 12));
+        assert!(has(&items, "md:@td:"));
+        // One element prefix, and not with `children:`
+        assert!(completions("@table [@tr:@", Position::new(0, 13)).is_empty());
+        assert!(completions("@table [children:@", Position::new(0, 18)).is_empty());
+        // After it: CSS properties and prefixes, no layout word, no
+        // `children:`
+        let items = completions("@table [@td:", Position::new(0, 12));
+        assert!(has(&items, "@td:padding") && has(&items, "@td:hover:"));
+        assert!(!has(&items, "@td:spacing") && !has(&items, "@td:center-x"));
+        assert!(!has(&items, "@td:children:"));
     }
 
     #[test]

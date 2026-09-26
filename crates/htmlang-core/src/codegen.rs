@@ -87,6 +87,14 @@ impl Condition {
         self.selector.iter().any(|p| p == crate::vocab::CHILDREN)
     }
 
+    /// The styles go on the elements of one kind inside the element
+    /// (`@td:`): where the element prefix is in the selector chain.
+    fn inside(&self) -> Option<usize> {
+        self.selector
+            .iter()
+            .position(|p| crate::vocab::element_prefix(p).is_some())
+    }
+
     /// Whether this condition holds wherever `other` does: its at-rules
     /// are implied by `other`'s, and it has no selector or `other`'s.
     fn holds_at(&self, other: &Condition) -> bool {
@@ -153,6 +161,23 @@ fn selector_order(selector: &[String]) -> SelectorOrder {
     }
 }
 
+/// The order of the chains through an element prefix (`@td:`, see
+/// [`scoped_selector`]): by the prefixes before it, which select the root
+/// of the scope and add nothing to the specificity, so `hover:@td:` comes
+/// after `@td:` and wins on hover; then by the element; then by the
+/// prefixes after it.
+fn inside_order(chain: &[String]) -> (SelectorOrder, String, SelectorOrder) {
+    let at = chain
+        .iter()
+        .position(|p| crate::vocab::element_prefix(p).is_some())
+        .unwrap_or(chain.len());
+    (
+        selector_order(&chain[..at]),
+        chain.get(at).cloned().unwrap_or_default(),
+        selector_order(chain.get(at + 1..).unwrap_or_default()),
+    )
+}
+
 /// The selector for `class` under a chain of selector prefixes, read left
 /// to right. Everything before the last `children:` goes in `:where()`, so
 /// a parent's `children:` styles have no specificity, and a child's own
@@ -173,6 +198,26 @@ fn selector(class: &str, chain: &[String]) -> String {
         }
     }
     out
+}
+
+/// The rule for the elements an element prefix picks out inside the
+/// element with the class `class` (see [`Condition::inside`]): the scope's
+/// root, from the selector prefixes before it (`hover:@td:` is inside a
+/// hovered element), and the selector for the elements, from those after
+/// it (`@td:hover:` is a hovered cell). `:scope td` leaves out the root
+/// itself, so `@ul [@ul:...]` styles the lists inside, not its own. `None`
+/// when the name has no tag of its own (the parser reports it).
+fn scoped_selector(class: &str, chain: &[String], at: usize) -> Option<(String, String)> {
+    let name = crate::vocab::element_prefix(&chain[at])?;
+    let tag = ElementKind::from_name(name)?.own_tag()?;
+    let root = selector(class, &chain[..at]);
+    let mut target = format!(":scope {}", tag);
+    for prefix in &chain[at + 1..] {
+        if let Some(pseudo) = crate::vocab::pseudo_selector(prefix) {
+            target.push_str(&pseudo);
+        }
+    }
+    Some((root, target))
 }
 
 /// The `@media` or `@container` rule an at-rule prefix stands for, as
@@ -295,25 +340,19 @@ impl StyleCollector {
         Some(name)
     }
 
-    /// All generated rules, wrapped in `@layer htmlang`. They are written
-    /// in a fixed order, so which rule wins never depends on where in the
-    /// page an element is: the element kinds' defaults (`:where(.hl-a)`),
-    /// the rules without a prefix, then those under
-    /// selector prefixes, then each block of at-rules (see [`at_order`]),
-    /// in which the rules keyed on a parent come first, then the element's
-    /// own, then its selectors (see [`selector_order`]).
-    fn to_css_formatted(&self, dev: bool) -> String {
-        let mut css = String::new();
-        if self.entries.is_empty() {
-            return css;
-        }
-        css.push_str(if dev {
-            "@layer htmlang {\n"
-        } else {
-            "@layer htmlang{"
-        });
-
-        // The defaults, with no specificity: `:where(.hl-a,.hl-b){...}`
+    /// All generated rules, in three layers (see [`LAYERS`]): the element
+    /// kinds' defaults in `hl-kind` (`:where(.hl-a)`), the rules for the
+    /// elements an element prefix picks out inside an element (`@td:`), and
+    /// a function's scoped `@style`, in `hl-inside`, and the elements' own
+    /// rules in `htmlang`. They are written in a fixed order, so which rule
+    /// wins never depends on where in the page an element is: the rules
+    /// without a prefix, then those under selector prefixes, then each block
+    /// of at-rules (see [`at_order`]), in which the rules keyed on a parent
+    /// come first, then the element's own, then its selectors (see
+    /// [`selector_order`]).
+    fn to_css_formatted(&self, dev: bool, scoped: &[String]) -> String {
+        // The defaults: `:where(.hl-a,.hl-b){...}`
+        let mut kind = String::new();
         let mut defaults: Vec<(&str, Vec<&str>)> = Vec::new();
         for e in self.entries.iter().filter(|e| !e.defaults.is_empty()) {
             match defaults.iter_mut().find(|(body, _)| *body == e.defaults) {
@@ -325,19 +364,60 @@ impl StyleCollector {
             let classes: Vec<String> = classes.iter().map(|c| format!(".{}", c)).collect();
             let selector = format!(":where({})", classes.join(","));
             if dev {
-                css.push_str(&format!("  {} {{{}}}\n", selector, body));
+                kind.push_str(&format!("  {} {{{}}}\n", selector, body));
             } else {
-                css.push_str(&format!("{}{{{}}}", selector, body));
+                kind.push_str(&format!("{}{{{}}}", selector, body));
             }
         }
 
-        // Every block of at-rules, in order
+        let mut inside = self.blocks(true, dev);
+        // A function's scoped `@style`, nested under its class
+        for block in scoped {
+            if dev {
+                inside.push_str(block);
+                inside.push('\n');
+            } else {
+                let minified: String = block.lines().map(str::trim).collect();
+                inside.push_str(&minified);
+            }
+        }
+
+        let mut css = String::new();
+        for (name, rules) in [
+            ("hl-kind", kind),
+            ("hl-inside", inside),
+            ("htmlang", self.blocks(false, dev)),
+        ] {
+            if rules.is_empty() {
+                continue;
+            }
+            if dev {
+                css.push_str(&format!("@layer {} {{\n{}}}\n", name, rules));
+            } else {
+                css.push_str(&format!("@layer {}{{{}}}", name, rules));
+            }
+        }
+        css
+    }
+
+    /// The rules of every block of at-rules, in order: those for the
+    /// elements inside (`inside`: rules under an element prefix, each in
+    /// an `@scope` on its element's class), or the elements' own.
+    fn blocks(&self, inside: bool, dev: bool) -> String {
+        let mut css = String::new();
+        let rules = || {
+            self.entries.iter().flat_map(move |e| {
+                e.rules
+                    .iter()
+                    .filter(move |(c, _)| c.inside().is_some() == inside)
+                    .map(move |(c, body)| (e, c, body))
+            })
+        };
         let mut blocks: Vec<&[usize]> = vec![&[]];
-        let every = self
-            .entries
-            .iter()
-            .flat_map(|e| e.rules.iter().map(|(c, _)| c.at.as_slice()))
-            .chain(self.keyed.iter().map(|(at, _, _)| at.as_slice()));
+        let keyed = self.keyed.iter().filter(|_| !inside);
+        let every = rules()
+            .map(|(_, c, _)| c.at.as_slice())
+            .chain(keyed.map(|(at, _, _)| at.as_slice()));
         for at in every {
             if !blocks.contains(&at) {
                 blocks.push(at);
@@ -358,35 +438,73 @@ impl StyleCollector {
             // Rules keyed on a parent's class come first: they have the
             // specificity of one class, like a class rule, so the child's
             // own rules in the block still win
-            let keyed: Vec<(&str, &str)> = self
-                .keyed
-                .iter()
-                .filter(|(a, _, _)| a.as_slice() == at)
-                .map(|(_, selector, body)| (selector.as_str(), body.as_str()))
-                .collect();
-            emit_selector_rules(&mut inner, &keyed, &indent, dev);
+            if !inside {
+                let keyed: Vec<(&str, &str)> = self
+                    .keyed
+                    .iter()
+                    .filter(|(a, _, _)| a.as_slice() == at)
+                    .map(|(_, selector, body)| (selector.as_str(), body.as_str()))
+                    .collect();
+                emit_selector_rules(&mut inner, &keyed, &indent, dev);
+            }
             // The selector chains of this block, in order
             let mut chains: Vec<&[String]> = Vec::new();
-            for e in &self.entries {
-                for (condition, _) in &e.rules {
-                    if condition.at == at && !chains.contains(&condition.selector.as_slice()) {
-                        chains.push(&condition.selector);
-                    }
+            for (_, condition, _) in rules() {
+                if condition.at == at && !chains.contains(&condition.selector.as_slice()) {
+                    chains.push(&condition.selector);
                 }
             }
-            chains.sort_by_cached_key(|chain| selector_order(chain));
-            for chain in chains {
-                let pairs: Vec<(String, &str)> = self
-                    .entries
-                    .iter()
-                    .flat_map(|e| {
-                        e.rules
-                            .iter()
-                            .filter(|(c, _)| c.at == at && c.selector == chain)
-                            .map(|(_, body)| (selector(&e.class_name, chain), body.as_str()))
-                    })
-                    .collect();
-                emit_grouped_rules(&mut inner, &pairs, &indent, dev);
+            if inside {
+                chains.sort_by_cached_key(|chain| inside_order(chain));
+                // One `@scope` for each root, its rules in the order of
+                // the chains: rules for one element under two roots (`.a`
+                // and `.a:hover`) tie on specificity and proximity, so the
+                // later one wins
+                let mut scopes: Vec<(String, Vec<(String, &str)>)> = Vec::new();
+                for chain in chains {
+                    let Some(element) = chain
+                        .iter()
+                        .position(|p| crate::vocab::element_prefix(p).is_some())
+                    else {
+                        continue;
+                    };
+                    for (e, _, body) in
+                        rules().filter(|(_, c, _)| c.at == at && c.selector == chain)
+                    {
+                        let Some((root, target)) = scoped_selector(&e.class_name, chain, element)
+                        else {
+                            continue;
+                        };
+                        match scopes.iter_mut().find(|(r, _)| *r == root) {
+                            Some((_, targets)) => targets.push((target, body)),
+                            None => scopes.push((root, vec![(target, body)])),
+                        }
+                    }
+                }
+                let inner_indent = if dev {
+                    format!("{}  ", indent)
+                } else {
+                    String::new()
+                };
+                for (root, targets) in scopes {
+                    let targets: Vec<(&str, &str)> =
+                        targets.iter().map(|(t, b)| (t.as_str(), *b)).collect();
+                    inner.push_str(&indent);
+                    inner.push_str(&format!("@scope ({})", root));
+                    inner.push_str(if dev { " {\n" } else { "{" });
+                    emit_selector_rules(&mut inner, &targets, &inner_indent, dev);
+                    inner.push_str(&indent);
+                    inner.push_str(if dev { "}\n" } else { "}" });
+                }
+            } else {
+                chains.sort_by_cached_key(|chain| selector_order(chain));
+                for chain in chains {
+                    let pairs: Vec<(String, &str)> = rules()
+                        .filter(|(_, c, _)| c.at == at && c.selector == chain)
+                        .map(|(e, _, body)| (selector(&e.class_name, chain), body.as_str()))
+                        .collect();
+                    emit_grouped_rules(&mut inner, &pairs, &indent, dev);
+                }
             }
             if inner.is_empty() {
                 continue;
@@ -406,8 +524,6 @@ impl StyleCollector {
             }
             css.push_str(&inner);
         }
-
-        css.push_str(if dev { "}\n" } else { "}" });
         css
     }
 }
@@ -809,9 +925,9 @@ fn build_element_css(doc: &Document, styles: &StyleCollector, dev: bool) -> Stri
         root_vars.push((name.clone(), value.clone()));
     }
 
-    // Generated rules always go in `@layer htmlang`, so unlayered user CSS
+    // Generated rules always go in htmlang's layers, so unlayered user CSS
     // (`@style`, `@raw`) overrides them regardless of specificity.
-    let styles_css = styles.to_css_formatted(dev);
+    let styles_css = styles.to_css_formatted(dev, &doc.scoped_css);
 
     // Emit the :root block first so the cascade picks up the custom
     // properties before the class rules consume them.
@@ -856,6 +972,16 @@ fn build_element_css(doc: &Document, styles: &StyleCollector, dev: bool) -> Stri
 /// into, keep their own.
 const OWN_ELEMENTS: &str = ":where([class^=\"hl-\"],[class*=\" hl-\"])";
 
+/// htmlang's cascade layers, from the one that loses to the one that wins:
+/// the reset; the defaults of each element's kind (a heading's `margin:0`,
+/// a column's `display:flex`); the styles an element gets from an
+/// element prefix on an element around it (`@td:padding 8`) and from a
+/// function's scoped `@style`; and the element's own styles. So a
+/// scope's styles win over the defaults, and what an element says about
+/// itself wins over both. CSS outside any layer (`@style`, `@raw`) wins
+/// over all of them.
+const LAYERS: [&str; 4] = ["hl-reset", "hl-kind", "hl-inside", "htmlang"];
+
 /// Built-in reset rules, in a layer before `htmlang`: unlayered CSS beats
 /// every layer, so an unlayered rule here would override the generated
 /// ones. A page resets `box-sizing` everywhere and makes `<body>` a column
@@ -899,11 +1025,12 @@ fn reset_css(dev: bool, page: bool, focus_visible_css: &str) -> String {
     rules.push_str(focus_visible_css);
     if dev {
         format!(
-            "@layer hl-reset, htmlang;\n@layer hl-reset {{\n{}}}\n",
+            "@layer {};\n@layer hl-reset {{\n{}}}\n",
+            LAYERS.join(", "),
             rules
         )
     } else {
-        format!("@layer hl-reset,htmlang;@layer hl-reset{{{}}}", rules)
+        format!("@layer {};@layer hl-reset{{{}}}", LAYERS.join(","), rules)
     }
 }
 
@@ -923,8 +1050,9 @@ fn generate_partial_inner(doc: &Document, dev: bool) -> String {
     generate_children(&doc.nodes, None, &mut body, &mut styles, &mut ctx);
 
     let mut element_css = build_element_css(doc, &styles, dev);
-    // htmlang's own elements get the reset's rules for elements
-    if !styles.entries.is_empty() {
+    // htmlang's own elements get the reset's rules for elements (which
+    // also puts htmlang's layers in order)
+    if !styles.entries.is_empty() || !doc.scoped_css.is_empty() {
         element_css.insert_str(0, &reset_css(dev, false, ""));
     }
 
@@ -1937,6 +2065,7 @@ fn attrs_to_css(attrs: &[Attribute], condition: &Condition, site: &Site) -> Stri
     // element: htmlang's words that place an element in its parent are an
     // error there (the parser reports them), and left out
     let on_children = condition.on_children();
+    let inside = condition.inside().is_some();
     // The direction `fill` and `shrink` compile against
     let axis = site.parent.at(&condition.at);
 
@@ -1958,6 +2087,12 @@ fn attrs_to_css(attrs: &[Attribute], condition: &Condition, site: &Site) -> Stri
             continue;
         };
         if on_children && crate::vocab::places_in_parent(effective_key, attr.value.as_deref()) {
+            continue;
+        }
+        // Under an element prefix (`@td:`) the styles go on elements whose
+        // layout and parent aren't known here: htmlang's own words are an
+        // error there (the parser reports them), and left out
+        if inside && crate::vocab::is_htmlang_word(effective_key, attr.value.as_deref()) {
             continue;
         }
 

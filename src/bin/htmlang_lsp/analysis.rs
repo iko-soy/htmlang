@@ -1201,6 +1201,22 @@ mod tests {
     }
 
     #[test]
+    fn a_misspelled_element_prefix_is_replaced() {
+        let found = fixes("@table [@tdd:padding 8, @a:color red] x\n");
+        let (_, edits) = found
+            .iter()
+            .find(|(t, _)| t == "Replace with '@td:'")
+            .unwrap_or_else(|| panic!("{:?}", found));
+        assert_eq!(edits[0].range.start, Position::new(0, 8));
+        assert_eq!(edits[0].range.end, Position::new(0, 13));
+        assert!(
+            found.iter().any(|(t, _)| t == "Replace with '@link:'"),
+            "{:?}",
+            found
+        );
+    }
+
+    #[test]
     fn a_misspelled_prefix_or_property_is_replaced() {
         let found = fixes("@el [padding 4, hovr:color red] x\n");
         let (_, edits) = found

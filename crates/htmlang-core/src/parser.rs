@@ -44,8 +44,10 @@ struct FnDef {
     slots: Vec<String>,
     /// Whether its body has a `@children` for the content of a call.
     has_children: bool,
-    /// Whether its body starts with a scoped `@style`.
-    scoped: bool,
+    /// Its scoped `@style`, nested under its `.hl-fn-NAME` class: written
+    /// into the page once the function is called (see
+    /// `Document::scoped_css`).
+    scoped: Option<String>,
     /// What was visible where it was defined: its body and its defaults
     /// see this, plus its parameters.
     env: Env,
@@ -176,6 +178,8 @@ struct ParseContext {
     defined_functions: HashMap<String, Rc<FnDef>>,
     css_vars: Vec<(String, String)>,
     custom_css: Vec<String>,
+    /// The scoped `@style` of each function called so far
+    scoped_css: Vec<String>,
     og_tags: Vec<(String, String)>,
     diagnostics: Vec<Diagnostic>,
     base_path: Option<PathBuf>,
@@ -665,6 +669,7 @@ pub fn parse_with_base(input: &str, base_path: Option<&Path>) -> ParseResult {
         defined_functions: HashMap::new(),
         css_vars: Vec::new(),
         custom_css: Vec::new(),
+        scoped_css: Vec::new(),
         og_tags: Vec::new(),
         diagnostics: Vec::new(),
         base_path: base_path.map(|p| p.to_path_buf()),
@@ -743,6 +748,7 @@ pub fn parse_with_base(input: &str, base_path: Option<&Path>) -> ParseResult {
             defines,
             css_vars: ctx.css_vars,
             custom_css: ctx.custom_css,
+            scoped_css: ctx.scoped_css,
             og_tags: ctx.og_tags,
             nodes,
         },
@@ -1792,9 +1798,10 @@ impl Evaluator {
         // An @style block at the top of the body is scoped to the
         // function: its rules apply inside a `.hl-fn-NAME` wrapper (a
         // generated class never has a second `-`, so the two can't meet).
+        // It is written into the page when the function is called.
         let (style, body): (Vec<&syntax::Node>, Vec<&syntax::Node>) =
             body.iter().partition(|node| node.is_directive("style"));
-        if !style.is_empty() {
+        let scoped = (!style.is_empty()).then(|| {
             let css: String = style
                 .iter()
                 .map(|node| {
@@ -1804,11 +1811,12 @@ impl Evaluator {
                 .collect();
             // Nested under the scope class, so any CSS works (multi-line
             // rules, at-rules)
-            if !css.trim().is_empty() {
-                ctx.custom_css
-                    .push(format!(".hl-fn-{} {{\n{}}}", name, css));
+            if css.trim().is_empty() {
+                String::new()
+            } else {
+                format!(".hl-fn-{} {{\n{}}}", name, css)
             }
-        }
+        });
 
         // A default is filled in only when a call leaves its parameter
         // out, so the names in it count as used here
@@ -1827,7 +1835,7 @@ impl Evaluator {
             file: ctx.current_file.clone(),
             slots,
             has_children,
-            scoped: !style.is_empty(),
+            scoped,
             env: ctx.env.clone(),
         });
         ctx.defined_functions
@@ -2077,7 +2085,7 @@ impl Evaluator {
 
         // Attributes that aren't parameters style the function's root
         // element, and a scoped @style's class goes on it too.
-        let scope_class = fn_def.scoped.then(|| format!("hl-fn-{}", name));
+        let scope_class = fn_def.scoped.is_some().then(|| format!("hl-fn-{}", name));
         if !forwarded.is_empty() || scope_class.is_some() {
             let mut roots = result_nodes.iter_mut().filter_map(|n| match n {
                 Node::Element(e) => Some(e),
@@ -2091,6 +2099,14 @@ impl Evaluator {
             match root {
                 Some(root) => {
                     root.attrs.extend(forwarded);
+                    // The scoped `@style` goes into the page once, when the
+                    // function is first called
+                    if let Some(css) = &fn_def.scoped
+                        && !css.is_empty()
+                        && !ctx.scoped_css.contains(css)
+                    {
+                        ctx.scoped_css.push(css.clone());
+                    }
                     if let Some(class) = scope_class {
                         match root.attrs.iter_mut().find(|a| a.html && a.key == "class") {
                             Some(attr) => {
@@ -4035,6 +4051,215 @@ fn unknown_prefix(rest: &str) -> Option<PrefixProblem> {
     })
 }
 
+/// Check an attribute's element prefix (`@td:padding 8`), when it has one:
+/// it names a built-in element that has an HTML tag of its own (not a
+/// function, and not `@el`, whose `<div>` other elements write too), there
+/// is one, not with `children:`, and what it styles is a CSS property, not
+/// one of htmlang's words, which compile against each element's layout and
+/// its parent's. Returns false, after reporting, when the attribute can't
+/// be written.
+fn check_element_prefixes(
+    attr: &Attribute,
+    prefixes: &[&str],
+    base: &str,
+    line: usize,
+    column: Option<usize>,
+    ctx: &mut ParseContext,
+) -> bool {
+    use crate::ast::ElementKind;
+    use crate::vocab;
+    let elements: Vec<&str> = prefixes
+        .iter()
+        .copied()
+        .filter(|p| vocab::element_prefix(p).is_some())
+        .collect();
+    let Some(&prefix) = elements.first() else {
+        return true;
+    };
+    let fail = |ctx: &mut ParseContext,
+                code: &'static str,
+                message: String,
+                subject: &str,
+                suggestion: Option<String>| {
+        let diagnostic = Diagnostic::error(code, line, message)
+            .subject(subject)
+            .suggest(suggestion);
+        let diagnostic = at_attribute(diagnostic, column, ctx);
+        ctx.diagnostics.push(diagnostic);
+        false
+    };
+    let name = vocab::element_prefix(prefix).unwrap_or_default();
+    if is_function(name, ctx) {
+        return fail(
+            ctx,
+            code::INVALID_PREFIX,
+            format!(
+                "'{}': @{} is a function, and `{}` would pick elements out by their HTML tag, \
+                 which a function doesn't have: style what @{} writes in its body, or pass it \
+                 attributes",
+                attr.key, name, prefix, name
+            ),
+            prefix,
+            None,
+        );
+    }
+    match ElementKind::from_name(name) {
+        None => {
+            let own: Vec<&str> = ElementKind::all_names()
+                .filter(|n| ElementKind::from_name(n).is_some_and(|k| k.own_tag().is_some()))
+                .collect();
+            // An HTML name htmlang writes under another (`@a:` is `@link:`)
+            let (written_otherwise, shared) = match crate::ast::HTML_NAMES_WRITTEN_OTHERWISE
+                .iter()
+                .find(|(html, _)| *html == name)
+            {
+                Some((_, htmlang)) if own.contains(htmlang) => (Some(*htmlang), false),
+                Some(_) => (None, true),
+                None => (None, false),
+            };
+            // `@div:`, `@span:`: several elements write it
+            if shared {
+                return fail(
+                    ctx,
+                    code::UNKNOWN_PREFIX,
+                    format!(
+                        "unknown element @{} in '{}': htmlang writes <{}> for several \
+                         elements, so no element prefix picks it out",
+                        name, prefix, name
+                    ),
+                    prefix,
+                    None,
+                );
+            }
+            // A name with the same first letter first (`@tdd:` is `@td:`)
+            let same_letter: Vec<&str> = own
+                .iter()
+                .copied()
+                .filter(|n| n.chars().next() == name.chars().next())
+                .collect();
+            let closest = written_otherwise
+                .or_else(|| suggest_closest(name, &same_letter))
+                .or_else(|| suggest_closest(name, &own));
+            let message = match (closest, written_otherwise) {
+                (Some(closest), Some(_)) => format!(
+                    "unknown element @{} in '{}', did you mean '@{}:'? (@{} writes <{}>)",
+                    name, prefix, closest, closest, name
+                ),
+                (Some(closest), None) => format!(
+                    "unknown element @{} in '{}', did you mean '@{}:'?",
+                    name, prefix, closest
+                ),
+                (None, _) => format!("unknown element @{} in '{}'", name, prefix),
+            };
+            let suggestion = closest.map(|c| format!("@{}:", c));
+            fail(ctx, code::UNKNOWN_PREFIX, message, prefix, suggestion)
+        }
+        Some(kind) if kind.own_tag().is_none() => {
+            let reason = match kind.tag() {
+                None => format!(
+                    "@{} writes no element of its own, so there is nothing for `{}` to style",
+                    name, prefix
+                ),
+                Some(_) if kind.is_verbatim() => {
+                    format!("@{} isn't shown, so there is nothing to style", name)
+                }
+                Some("span") => format!(
+                    "@{} writes a <span>, as every line of text in a row or column does, so \
+                     `{}` can't pick it out",
+                    name, prefix
+                ),
+                Some(tag) => {
+                    let others: Vec<String> = ElementKind::all_names()
+                        .filter(|n| {
+                            *n != name
+                                && ElementKind::from_name(n).and_then(|k| k.tag()) == Some(tag)
+                        })
+                        .map(|n| format!("@{}", n))
+                        .collect();
+                    let others = match others.split_last() {
+                        Some((last, [])) => last.clone(),
+                        Some((last, rest)) => format!("{} and {}", rest.join(", "), last),
+                        None => String::new(),
+                    };
+                    format!(
+                        "@{} writes a <{}>, as {} do, so `{}` can't pick it out",
+                        name, tag, others, prefix
+                    )
+                }
+            };
+            fail(
+                ctx,
+                code::INVALID_PREFIX,
+                format!(
+                    "'{}': {}. Give those elements their styles themselves, or a bundle \
+                     (`@let name [...]`, used as `[$name]`)",
+                    attr.key, reason
+                ),
+                prefix,
+                None,
+            )
+        }
+        Some(_) if elements.len() > 1 => fail(
+            ctx,
+            code::INVALID_PREFIX,
+            format!(
+                "'{}': a style takes one element prefix, which styles every such element \
+                 inside this one, at any depth",
+                attr.key
+            ),
+            &attr.key,
+            None,
+        ),
+        Some(_) if prefixes.contains(&vocab::CHILDREN) => fail(
+            ctx,
+            code::INVALID_PREFIX,
+            format!(
+                "'{}': `children:` and `{}` each say which elements the style is for: write \
+                 one of them",
+                attr.key, prefix
+            ),
+            &attr.key,
+            None,
+        ),
+        Some(_) if vocab::is_htmlang_word(base, attr.value.as_deref()) => {
+            let value = attr.value.as_deref().map(str::trim);
+            let css = match (base, value) {
+                ("spacing", _) => " (`gap`)",
+                ("wrap", _) => " (`flex-wrap wrap`)",
+                ("grid-cols", _) => " (`grid-template-columns`)",
+                ("grid-rows", _) => " (`grid-template-rows`)",
+                ("col-span", _) => " (`grid-column span N`)",
+                ("row-span", _) => " (`grid-row span N`)",
+                ("width", Some("fill")) => " (`flex 1` in a row, `width 100%` otherwise)",
+                ("height", Some("fill")) => " (`flex 1` in a column, `height 100%` otherwise)",
+                ("width", _) => " (`flex-shrink 0` in a row, `width fit-content` otherwise)",
+                ("height", _) => " (`flex-shrink 0` in a column, `height fit-content` otherwise)",
+                ("center-x", _) => " (`margin-inline auto`)",
+                ("center-y", _) => " (`margin-block auto`)",
+                _ => "",
+            };
+            let word = match value {
+                Some(v) if matches!(base, "width" | "height") => format!("{} {}", base, v),
+                _ => base.to_string(),
+            };
+            fail(
+                ctx,
+                code::INVALID_PREFIX,
+                format!(
+                    "'{}': `{}` is one of htmlang's layout words, which compile against each \
+                     element's layout and its parent's, and `{}` styles elements whose \
+                     parents it doesn't know: write `{}` on the elements themselves, or the \
+                     CSS you mean{}",
+                    attr.key, word, prefix, word, css
+                ),
+                &attr.key,
+                None,
+            )
+        }
+        Some(_) => true,
+    }
+}
+
 /// Check an attribute's prefixes: each is known, their selector prefixes
 /// read left to right with a pseudo-element (`before:`) last, the argument
 /// of `has(...)` or `nth-child(...)` can be written into the CSS, and a word that
@@ -4066,6 +4291,9 @@ fn check_prefixes(
             .suggest(problem.suggestion);
         let diagnostic = at_attribute(diagnostic, column, ctx);
         ctx.diagnostics.push(diagnostic);
+        return false;
+    }
+    if !check_element_prefixes(attr, &prefixes, base, line, column, ctx) {
         return false;
     }
     // The argument of `has(...)` or `nth-child(...)` goes into the CSS as

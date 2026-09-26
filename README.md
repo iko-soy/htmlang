@@ -72,6 +72,11 @@ unless you write some, and nothing is added that you didn't ask for.
   They stack (`md:dark:background`, `hover:children:opacity`), and one
   prefix covers a group or a bundle (`md:[padding 32, font-size 20]`,
   `md:$card`).
+  An element prefix styles every such element inside, at any depth:
+  `@table [@td:padding 8]` pads every cell, and
+  `@article [@h2:font-size 20, @code:background #f1f5f9]` styles what
+  `@markdown` writes. An element's own attributes still win, and the
+  nearest element that styles it wins over one further out.
   A comma separates attributes, so a comma inside a value is written `\,`
   (`transition opacity 0.3s\, transform 0.3s`), and quoted text keeps its
   quotes only in CSS (`before:content "→ "`).
@@ -158,6 +163,17 @@ each style in it:
 ```
 @el [padding 16, md:[padding 32, font-size 20], background #3b82f6, hover:background #2563eb, dark:[background #1e3a8a, hover:background #1e40af]]
   @text [color white] Click me
+```
+
+An element prefix, `@td:`, styles every such element inside, so rows a
+loop writes and HTML from `@markdown` need no attributes of their own:
+
+```
+@table [border-collapse collapse, @th:[padding 8, text-align left], @td:padding 8, @tr:nth-child(even):background #f8fafc]
+  @tr
+    @th Name
+  @tr
+    @td Ada
 ```
 
 `@let` defines values, bundles and functions, in one namespace. A function

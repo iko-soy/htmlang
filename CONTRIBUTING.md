@@ -41,15 +41,20 @@ Linux, macOS, and Windows. Your change should pass all three.
     as written, with `vocab::with_px`'s pixels); only htmlang's layout
     words and `line-clamp` have code of their own. Generated classes are
     `hl-` + a short name; an element's defaults (its layout,
-    `ElementKind::css`) are part of its class, written first as
-    `:where(.hl-a)` so its own styles and a parent's `children:` styles
-    override them, never a rule on a global element selector, so
-    `@markdown`/`@raw` HTML and a page embedding a fragment are untouched.
+    `ElementKind::css`) go with its class, as `:where(.hl-a)`, never a
+    rule on a global element selector, so `@markdown`/`@raw` HTML and a
+    page embedding a fragment are untouched. The rules are in cascade
+    layers (`LAYERS`): `hl-reset`, `hl-kind` (the defaults), `hl-inside`
+    (element prefixes, `@td:`, each an `@scope` on the class, and
+    functions' scoped `@style`, written when a function is called) and
+    `htmlang` (the elements' own styles and `children:`), so which one
+    wins is the layer's order, not specificity.
     A style's prefixes are a `Condition`: its at-rule prefixes (sorted, so
     `dark:md:` is `md:dark:`, and written as nested `@media`/`@container`
-    blocks) and its selector chain (read left to right). Each class keeps
-    one list of (condition, declarations), and every block and chain is
-    written in one fixed order, never the order of the source.
+    blocks) and its selector chain (read left to right; an element prefix
+    splits it into the scope's root and the elements it styles). Each
+    class keeps one list of (condition, declarations), and every block and
+    chain is written in one fixed order, never the order of the source.
   - `ast.rs` — the element kinds; every plain HTML element is one row in
     `TAGS` with its one `Layout` (column, row, grid, text, native or void,
     which decides its text lines, `spacing` and its children's layout
@@ -70,9 +75,11 @@ Linux, macOS, and Windows. Your change should pass all three.
     are px, and `with_px`, the one function that applies it) and the
     prefixes: `PSEUDOS`, CSS's pseudo-classes and pseudo-elements under
     their CSS names, each marked `:`, `::` or taking an argument, in the
-    order their rules are written; `children:`; and the width, media and
-    container prefixes, with the rank that orders the at-rule blocks. A new
-    pseudo-class is one row in `PSEUDOS` and one word in DESIGN.md's list.
+    order their rules are written; `children:`; element prefixes (`@td:`,
+    any name; the parser checks it is an element with a tag of its own,
+    `ElementKind::own_tag`); and the width, media and container prefixes,
+    with the rank that orders the at-rule blocks. A new pseudo-class is one
+    row in `PSEUDOS` and one word in DESIGN.md's list.
   - `expr.rs` — the expression language for conditions, computed values and
     `${...}`. It evaluates only what decides the result (the branch `if()`
     takes, the side of `and`/`or` that decides) and only reads the rest.

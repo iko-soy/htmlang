@@ -451,6 +451,12 @@ pub fn is_pseudo_element(prefix: &str) -> bool {
         .is_some_and(|name| pseudo(name) == Some(Pseudo::Element))
 }
 
+/// The element an element prefix names: `@td:` → `td`. `None` for every
+/// other prefix.
+pub fn element_prefix(prefix: &str) -> Option<&str> {
+    prefix.strip_prefix('@')?.strip_suffix(':')
+}
+
 /// htmlang's words that place an element in its parent, so they mean
 /// something only against the parent: `width`/`height` `fill` or
 /// `shrink`, `center-x`, `center-y`, `align-*`.
@@ -461,16 +467,31 @@ pub fn places_in_parent(name: &str, value: Option<&str>) -> bool {
     }
 }
 
+/// One of htmlang's own words rather than a CSS property: the layout words
+/// (`spacing`, `wrap`, `grid-cols`, `col-span`, ...), `inline`, and the
+/// words that place an element in its parent (`width fill`, `center-x`).
+pub fn is_htmlang_word(name: &str, value: Option<&str>) -> bool {
+    HTMLANG_ATTRIBUTES.contains(&name) || places_in_parent(name, value)
+}
+
 /// Does `key` carry any state, media, responsive or container prefix?
 pub fn is_prefixed(key: &str) -> bool {
     prefix_len(key).is_some()
 }
 
 /// The length of the prefix `key` starts with (its `:` included), when it
-/// starts with a known one: `hover:`, `md:`, `children:`, or a pseudo-class
+/// starts with a known one: `hover:`, `md:`, `children:`, a pseudo-class
 /// with its argument in balanced parentheses, which may hold spaces and
-/// colons of its own (`nth-child(2n+1):`, `has(> img):`).
+/// colons of its own (`nth-child(2n+1):`, `has(> img):`), or an element
+/// prefix, `@td:` (any name: the parser checks it names an element).
 pub fn prefix_len(key: &str) -> Option<usize> {
+    if let Some(rest) = key.strip_prefix('@') {
+        let name_len = rest
+            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+            .filter(|&len| len > 0)?;
+        let name_starts_well = rest.starts_with(|c: char| c.is_ascii_alphabetic());
+        return (name_starts_well && rest[name_len..].starts_with(':')).then_some(name_len + 2);
+    }
     let name_len = key
         .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
         .filter(|&len| len > 0)?;
@@ -744,6 +765,30 @@ mod tests {
             super::split_prefixes("has(a:hover)"),
             (vec![], "has(a:hover)")
         );
+    }
+
+    #[test]
+    fn an_element_prefix_is_an_at_sign_a_name_and_a_colon() {
+        use super::{element_prefix, split_prefixes};
+        assert_eq!(split_prefixes("@td:padding"), (vec!["@td:"], "padding"));
+        assert_eq!(
+            split_prefixes("md:@link:hover:color"),
+            (vec!["md:", "@link:", "hover:"], "color")
+        );
+        assert_eq!(
+            split_prefixes("@in-front:@h2:color"),
+            (vec!["@in-front:", "@h2:"], "color")
+        );
+        // Not a name: no prefix
+        assert_eq!(split_prefixes("@:color"), (vec![], "@:color"));
+        assert_eq!(split_prefixes("@2x:color"), (vec![], "@2x:color"));
+        assert_eq!(split_prefixes("@td padding"), (vec![], "@td padding"));
+        assert_eq!(element_prefix("@td:"), Some("td"));
+        assert_eq!(element_prefix("hover:"), None);
+        assert!(super::is_htmlang_word("spacing", Some("8")));
+        assert!(super::is_htmlang_word("width", Some("fill")));
+        assert!(!super::is_htmlang_word("width", Some("200")));
+        assert!(!super::is_htmlang_word("padding", Some("8")));
     }
 
     #[test]

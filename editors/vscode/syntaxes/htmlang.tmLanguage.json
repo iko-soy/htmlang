@@ -255,6 +255,9 @@
           "include": "#number"
         },
         {
+          "include": "#element-prefix"
+        },
+        {
           "include": "#state-prefix"
         },
         {
@@ -285,10 +288,15 @@
         }
       ]
     },
+    "element-prefix": {
+      "name": "keyword.other.state.htmlang",
+      "comment": "An element prefix: every such element inside (@td:, @link:). The names are the elements with an HTML tag of their own",
+      "match": "@(?:paragraph|image|link|nav|header|footer|main|section|article|aside|address|search|form|details|summary|dialog|figure|figcaption|blockquote|cite|fieldset|legend|noscript|datalist|ul|ol|li|dl|dt|dd|table|thead|tbody|tr|td|th|select|picture|progress|meter|output|canvas|button|label|option|textarea|time|mark|abbr|code|kbd|pre|h1|h2|h3|h4|h5|h6|input|hr|source|video|audio|iframe|hgroup|menu|b|i|strong|em|small|s|u|sub|sup|q|var|samp|dfn|bdi|bdo|ins|del|br|wbr|caption|colgroup|col|tfoot|optgroup|ruby|rt|rp|track|embed|object|map|area):(?=[a-z\\[$-])"
+    },
     "state-prefix": {
       "name": "keyword.other.state.htmlang",
       "comment": "A prefix: a word (hover:, md:, children:) or a CSS pseudo-class with its argument (nth-child(odd):, has(> img):, not(:nth-child(2)):)",
-      "match": "(?:[a-z0-9-]+(?:\\((?:[^()]|\\([^()]*\\))*\\))?):(?=[a-z\\[$-])(?![a-zA-Z0-9_.:-]*=)"
+      "match": "(?:[a-z0-9-]+(?:\\((?:[^()]|\\([^()]*\\))*\\))?):(?=[a-z\\[$@-])(?![a-zA-Z0-9_.:-]*=)"
     },
     "custom-property": {
       "comment": "A custom property's or a vendor-prefixed property's name where an attribute starts: --gap, md:--gap, -webkit-text-stroke",

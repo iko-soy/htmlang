@@ -49,6 +49,20 @@ fn grammar_elements_are_the_compilers() {
 }
 
 #[test]
+fn grammar_element_prefixes_are_the_compilers() {
+    let grammar = grammar();
+    let listed = alternatives(&pattern(&grammar, "element-prefix"));
+    let compiled: BTreeSet<String> = ElementKind::all_names()
+        .filter(|name| ElementKind::from_name(name).is_some_and(|k| k.own_tag().is_some()))
+        .map(str::to_string)
+        .collect();
+    assert_eq!(
+        listed, compiled,
+        "update the `element-prefix` rule of the TextMate grammar"
+    );
+}
+
+#[test]
 fn grammar_attribute_names_are_style_attributes() {
     let grammar = grammar();
     for name in alternatives(&pattern(&grammar, "attribute-name")) {

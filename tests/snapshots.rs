@@ -6357,7 +6357,7 @@ fn a_layout_element_in_text_is_an_inline_flex_span() {
     );
     assert!(
         out.contains(
-            ":where(.hl-b){display:inline-flex;flex-direction:column;}.hl-b{padding:2px;}"
+            ":where(.hl-b){display:inline-flex;flex-direction:column;}}@layer htmlang{.hl-b{padding:2px;}"
         ),
         "{}",
         out
@@ -8033,7 +8033,7 @@ fn element_defaults_stay_on_htmlang_s_elements() {
         assert_eq!(out.contains("*,*::before,*::after{"), page, "{}", out);
         assert!(
             page || out.starts_with(
-                r#"<style>@layer hl-reset,htmlang;@layer hl-reset{:where([class^="hl-"],[class*=" hl-"]),"#
+                r#"<style>@layer hl-reset,hl-kind,hl-inside,htmlang;@layer hl-reset{:where([class^="hl-"],[class*=" hl-"]),"#
             ),
             "{}",
             out
@@ -8266,4 +8266,276 @@ fn a_style_an_inline_svg_can_t_take_is_an_error() {
     assert!(!html.contains("width=\"fill\""), "{}", html);
     assert!(html.contains("height=\"2em\""), "{}", html);
     let _ = fs::remove_dir_all(&dir);
+}
+
+// -----------------------------------------------------------------------
+// Element prefixes: `@td:padding 8`
+// -----------------------------------------------------------------------
+
+#[test]
+fn snapshot_element_prefixes() {
+    snapshot_test("element_prefixes");
+}
+
+#[test]
+fn an_element_prefix_styles_every_such_element_inside() {
+    let out = compile(
+        "@table [border-collapse collapse, width 100%, @th:padding 8, @td:padding 8, \
+         @tr:border-bottom 1 solid var(--line)]\n  @tr\n    @th Name\n  @tr\n    @td Ada\n\
+         @article [@h2:font-size 20, @code:background var(--subtle)]\n  @markdown\n    \
+         ## Notes\n    Use `htmlang check`.\n",
+    );
+    // An `@scope` on the element's class, in `hl-inside`
+    assert!(
+        out.contains(
+            "@layer hl-inside{@scope (.hl-b){:scope code{background:var(--subtle);}\
+             :scope h2{font-size:20px;}}@scope (.hl-a){:scope td,:scope th{padding:8px;}\
+             :scope tr{border-bottom:1px solid var(--line);}}}"
+        ),
+        "{}",
+        out
+    );
+    // The cells and the Markdown have no classes of their own
+    assert!(
+        out.contains("<th>Name</th>") && out.contains("<td>Ada</td>"),
+        "{}",
+        out
+    );
+    assert!(out.contains("<h2>Notes</h2>"), "{}", out);
+    // The layers: the defaults, then the element prefixes, then the
+    // elements' own styles
+    assert!(
+        out.contains("@layer hl-reset,hl-kind,hl-inside,htmlang;"),
+        "{}",
+        out
+    );
+    assert!(
+        out.contains("@layer htmlang{.hl-a{border-collapse:collapse;width:100%;}}"),
+        "{}",
+        out
+    );
+}
+
+#[test]
+fn the_nearest_element_prefix_and_an_element_s_own_attributes_win() {
+    let out = compile(
+        "@section [@td:padding 16]\n  @table [@td:padding 4]\n    @tr\n      @td [padding 2] x\n",
+    );
+    // Two scopes: `@scope`'s proximity picks the table's for its cells
+    assert!(
+        out.contains("@scope (.hl-a){:scope td{padding:16px;}}")
+            && out.contains("@scope (.hl-b){:scope td{padding:4px;}}"),
+        "{}",
+        out
+    );
+    // The cell's own padding is in the later layer
+    assert!(
+        out.contains("@layer htmlang{.hl-c{padding:2px;}}"),
+        "{}",
+        out
+    );
+    // An element prefix wins over the defaults of the element's kind,
+    // which are in `hl-kind`
+    let out = compile(
+        "@main [@h2:margin-block-start 16, @li:display list-item]\n  @h2 x\n  @ul\n    @li y\n",
+    );
+    assert!(
+        out.contains("@layer hl-kind{:where(.hl-a,.hl-d){display:flex;flex-direction:column;}:where(.hl-b){margin:0;}"),
+        "{}",
+        out
+    );
+    assert!(
+        out.contains(
+            "@scope (.hl-a){:scope h2{margin-block-start:16px;}:scope li{display:list-item;}}"
+        ),
+        "{}",
+        out
+    );
+}
+
+#[test]
+fn element_prefixes_compose_with_the_other_prefixes() {
+    let out = compile(
+        "@nav [hover:@link:color red, @link:hover:color blue, md:@link:padding 4, \
+         @link:before:content \"→ \", @link:[font-weight 600, dark:color white]]\n  @link /a A\n",
+    );
+    // Before it: the scope's root; after it: the elements
+    assert!(
+        out.contains("@scope (.hl-a:hover){:scope a{color:red;}}"),
+        "{}",
+        out
+    );
+    assert!(out.contains(":scope a:hover{color:blue;}"), "{}", out);
+    assert!(out.contains(":scope a::before{content:\"→ \";}"), "{}", out);
+    assert!(out.contains(":scope a{font-weight:600;}"), "{}", out);
+    assert!(
+        out.contains("@media(min-width:768px){@scope (.hl-a){:scope a{padding:4px;}}}"),
+        "{}",
+        out
+    );
+    assert!(
+        out.contains("@media(prefers-color-scheme:dark){@scope (.hl-a){:scope a{color:white;}}}"),
+        "{}",
+        out
+    );
+    // The rules for the element itself come first: on hover, `.a:hover`'s
+    // rule, which ties with `.a`'s, is the later one
+    let plain = out.find("@scope (.hl-a){").unwrap();
+    let hovered = out.find("@scope (.hl-a:hover){").unwrap();
+    assert!(plain < hovered, "{}", out);
+    // Two elements styled the same share one class, and so one scope
+    let out = compile(
+        "@table [@td:padding 8]\n  @tr\n    @td a\n@table [@td:padding 8]\n  @tr\n    @td b\n",
+    );
+    assert_eq!(out.matches("@scope").count(), 1, "{}", out);
+    assert_eq!(out.matches(r#"<table class="hl-a">"#).count(), 2, "{}", out);
+    // On `@page`, the body is the scope's root
+    let out = compile("@page [@td:padding 8] T\n@table\n  @tr\n    @td x\n");
+    assert!(out.contains(r#"<body class="hl-a">"#), "{}", out);
+    assert!(
+        out.contains("@scope (.hl-a){:scope td{padding:8px;}}"),
+        "{}",
+        out
+    );
+}
+
+#[test]
+fn an_element_prefix_names_an_element_with_a_tag_of_its_own() {
+    let check = |src: &str, code: &str, text: &str| {
+        let diagnostics = parse_diagnostics(src);
+        let found = diagnostics.iter().find(|d| {
+            d.severity == htmlang::parser::Severity::Error
+                && d.code == code
+                && d.message.contains(text)
+        });
+        assert!(found.is_some(), "{}: {:?}", src, diagnostics);
+    };
+    // Elements that share their tag
+    check(
+        "@row [@el:padding 4] x",
+        "invalid-prefix",
+        "@el writes a <div>, as @row",
+    );
+    check(
+        "@el [@grid:padding 4] x",
+        "invalid-prefix",
+        "writes a <div>",
+    );
+    check(
+        "@el [@text:color red] x",
+        "invalid-prefix",
+        "every line of text",
+    );
+    check(
+        "@el [@fragment:color red] x",
+        "invalid-prefix",
+        "no element of its own",
+    );
+    check("@el [@script:color red] x", "invalid-prefix", "isn't shown");
+    // A function, even one defined further down
+    check(
+        "@el [@card:padding 4] x\n@let @card\n  @el y\n",
+        "invalid-prefix",
+        "@card is a function",
+    );
+    // A name that isn't an element, with a suggestion
+    let diagnostics = parse_diagnostics("@table [@tdd:padding 4, @a:color red, @div:color red] x");
+    let suggestions: Vec<Option<&str>> = diagnostics
+        .iter()
+        .filter(|d| d.code == "unknown-prefix")
+        .map(|d| d.suggestion.as_deref())
+        .collect();
+    assert_eq!(
+        suggestions,
+        vec![Some("@td:"), Some("@link:"), None],
+        "{:?}",
+        diagnostics
+    );
+    // What follows is a CSS property
+    check("@table [@td:spacing 8] x", "invalid-prefix", "(`gap`)");
+    check(
+        "@table [@td:width fill] x",
+        "invalid-prefix",
+        "`width fill` is one of htmlang's",
+    );
+    check("@table [@td:center-x] x", "invalid-prefix", "`center-x`");
+    check(
+        "@table [@td:[padding 4, wrap]] x",
+        "invalid-prefix",
+        "`wrap`",
+    );
+    check(
+        "@table [@td:colspan=2] x",
+        "invalid-prefix",
+        "HTML attribute",
+    );
+    check(
+        "@table [@td:required] x",
+        "invalid-prefix",
+        "HTML attribute",
+    );
+    // One element prefix, and not with `children:`
+    check(
+        "@table [@tr:@td:padding 4] x",
+        "invalid-prefix",
+        "one element prefix",
+    );
+    check(
+        "@table [children:@td:padding 4] x",
+        "invalid-prefix",
+        "`children:` and `@td:`",
+    );
+    // A pseudo-element comes last, after the element prefix too
+    let diagnostics = parse_diagnostics("@table [before:@td:content \"x\"] y");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.suggestion.as_deref() == Some("@td:before:content")),
+        "{:?}",
+        diagnostics
+    );
+    // Checked in code that doesn't run, too
+    check(
+        "@if false\n  @row [@el:padding 4] x\n",
+        "invalid-prefix",
+        "writes a <div>",
+    );
+    // Each such attribute is left out
+    let (out, _) = compile_anyway("@table [@el:padding 4, @td:spacing 8, @td:padding 2] x");
+    assert!(
+        out.contains("@scope (.hl-a){:scope td{padding:2px;}}"),
+        "{}",
+        out
+    );
+    assert!(!out.contains("gap") && !out.contains("div"), "{}", out);
+}
+
+#[test]
+fn a_scoped_style_is_written_when_its_function_is_called() {
+    let function = "@let @note\n  @style\n    & { padding: 12px; }\n  @el [border 1 solid] Note\n";
+    // Never called: nothing
+    let out = compile(&format!("{}@text x\n", function));
+    assert!(!out.contains("hl-fn-note"), "{}", out);
+    // Called twice: written once, in `hl-inside`, below the elements' own
+    // styles, so the caller's padding wins
+    let out = compile(&format!("{}@note [padding 2]\n@note\n", function));
+    assert_eq!(out.matches(".hl-fn-note {").count(), 1, "{}", out);
+    assert!(
+        out.contains("@layer hl-inside{.hl-fn-note {& { padding: 12px; }}}"),
+        "{}",
+        out
+    );
+    assert!(
+        out.contains("@layer htmlang{.hl-a{border:1px solid;padding:2px;}"),
+        "{}",
+        out
+    );
+    // A fragment whose only class is the function's gets the reset, which
+    // puts the layers in order
+    let out = compile("@let @plain\n  @style\n    & { color: red; }\n  @el\n    x\n@plain\n");
+    assert!(
+        out.starts_with("<style>@layer hl-reset,hl-kind,hl-inside,htmlang;"),
+        "{}",
+        out
+    );
 }

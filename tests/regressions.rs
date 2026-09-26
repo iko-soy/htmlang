@@ -86,7 +86,7 @@ fn range_at_integer_limit_terminates() {
 fn reset_css_is_layered_below_generated_rules() {
     let out = compile("@page T\n@link [color red, text-decoration underline] /x Home");
     assert!(
-        out.contains("@layer hl-reset,htmlang;@layer hl-reset{"),
+        out.contains("@layer hl-reset,hl-kind,hl-inside,htmlang;@layer hl-reset{"),
         "reset must be layered so class rules can override it: {}",
         out
     );
@@ -1831,10 +1831,10 @@ fn a_closed_dialog_and_a_hidden_element_stay_hidden() {
             "{}",
             html
         );
-        // In the reset layer, before htmlang's own
+        // In the reset layer, before the dialog's defaults
         assert!(
             html.find("@layer hl-reset{").unwrap() < at
-                && at < html.find("@layer htmlang{").unwrap(),
+                && at < html.find("@layer hl-kind{").unwrap(),
             "{}",
             html
         );

@@ -7,7 +7,8 @@ Syntax highlighting, snippets, and language server support for
 
 - **Syntax highlighting**: `@` elements and directives, `$variables`,
   `[attribute]` lists (`@page`'s included) with state and media prefixes
-  (stacked, `md:hover:`, and on a group or bundle, `md:[...]`, `dark:$card`),
+  (stacked, `md:hover:`, and on a group or bundle, `md:[...]`, `dark:$card`)
+  and element prefixes (`@td:`, `@link:hover:`),
   `if(...)` and its `[groups]`, `key=value` HTML attributes (`xml:lang=` too), the leading argument of
   `@link`, `@image`, `@script` and the other elements that take one, quoted text, escapes (`\,`, `\$`, `\]`), `{@inline}` elements
   (shown as text in `@code` and `@textarea`), the one-line body of `@raw`,
@@ -32,21 +33,23 @@ Syntax highlighting, snippets, and language server support for
   cursor between its parentheses, as `nth-child(|):`; and
   after one, those that can follow it, as `md:hover:`; after a
   pseudo-element such as `before:`, only media, width and container
-  prefixes), only styles inside a prefixed group (`md:[...]`), `if()` (and attributes inside its branches),
+  prefixes; after `@`, the element prefixes, `@td:`, of the elements with
+  an HTML tag of their own, and after one, CSS properties only), only
+  styles inside a prefixed group (`md:[...]`), `if()` (and attributes inside its branches),
   the variables visible where you type (definitions above in the block and
   the blocks around it, `@each` variables and a function's parameters),
   functions and the parameters a function call hasn't passed yet, the slot names of a call's `@slot`
   blocks, and elements and functions inside `{@...}` in text. It triggers on `@`, `$`, `[` and `,`.
 - **Hover** documentation for elements (with their layout: column, row,
   grid, text, native or void), directives, attributes (CSS
-  properties link to MDN), prefixes and stacks of them (`md:hover:`) and `if()`, function signatures with their slots and
+  properties link to MDN), prefixes and stacks of them (`md:hover:`, `@td:`) and `if()`, function signatures with their slots and
   whether they take content, variable values, and color swatches.
 - **Navigation**: go to definition (the definition a name means at that
   line), find references and rename for
   `$variables`, bundles and `@let @name` functions. `@include`, `@markdown` and
   `@data` file paths are links.
 - **Code actions**: fixes keyed on diagnostic codes (replace a misspelled
-  name, prefix or slot name, put a pseudo-element's prefix last
+  name, prefix (`@tdd:` as `@td:`, `@a:` as `@link:`) or slot name, put a pseudo-element's prefix last
   (`before:hover:` as `hover:before:`), replace `@a` with `@link`, write a slot name as one word, add a missing `alt` or `type`, include the file that defines an
   unknown function, write a quoted font stack as `A\, B`, drop the `$` from
   `@let $x` and add it to `@each x`, pass a parameter as `name value`
@@ -76,7 +79,8 @@ to its absolute path. `htmlang.server.args` passes extra arguments to it.
 ## Snippets
 
 Snippets cover common patterns: `@page`, `@let-fn`, `@let-slots`,
-`@let-tokens`, `@navbar`, `@hero`, `@form`, `@grid`, `@table`, `@each`, `@if`,
+`@let-tokens`, `@navbar`, `@hero`, `@form`, `@grid`, `@table` (its cells
+padded by `@td:`), `@markdown-styled`, `@each`, `@if`,
 `if(` (attributes chosen by a condition), `@code-sample` (`@pre > @code`
 over a block shown as written), `@layout` and more. Type a prefix and press `Tab` to expand it.
 

@@ -290,7 +290,10 @@ pub(crate) fn if_attribute() -> String {
 /// Hover text for a name: `@element`, `@directive`, `@component`, an
 /// attribute (possibly prefixed, like `hover:color`), or a prefix itself.
 pub(crate) fn hover(word: &str) -> Option<String> {
-    if let Some(name) = word.strip_prefix('@') {
+    // `@td:padding` is a style under an element prefix, not the element
+    if let Some(name) = word.strip_prefix('@')
+        && vocab::prefix_len(word).is_none()
+    {
         if let Some(doc) = component(name) {
             return Some(markdown(
                 word,
@@ -417,6 +420,19 @@ pub(crate) fn prefix_selector(prefix: &str) -> Option<String> {
             "Styles each direct child (`:where(.x)>*`); a child's own attributes win over it."
                 .to_string(),
         );
+    }
+    if let Some(name) = vocab::element_prefix(prefix) {
+        let tag = ElementKind::from_name(name).and_then(|kind| kind.own_tag());
+        return Some(match tag {
+            Some(tag) => format!(
+                "Styles every `<{}>` inside this element, at any depth, with CSS properties                  (`@scope`): the nearest element that styles it wins, and its own attributes                  win over both.",
+                tag
+            ),
+            None => format!(
+                "`@{}` has no HTML tag of its own, so an element prefix can't pick it out.",
+                name
+            ),
+        });
     }
     if let Some(selector) = vocab::pseudo_selector(prefix) {
         return Some(match vocab::pseudo(vocab::pseudo_name(prefix)) {
@@ -553,6 +569,13 @@ mod tests {
         assert!(hover("placeholder").unwrap().contains("placeholder=value"));
         assert!(hover("required").unwrap().contains("Boolean"));
         assert!(hover("hover:color").unwrap().contains(":hover"));
+        let inside = hover("@td:padding").unwrap();
+        assert!(
+            inside.contains("padding") && inside.contains("every `<td>` inside"),
+            "{inside}"
+        );
+        assert!(hover("@link:").unwrap().contains("every `<a>`"));
+        assert!(hover("@el:").unwrap().contains("no HTML tag of its own"));
         assert!(hover("md:").unwrap().contains("viewport"));
         let chain = hover("md:hover:").unwrap();
         assert!(
