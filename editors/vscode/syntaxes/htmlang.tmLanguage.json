@@ -7,9 +7,6 @@
       "include": "#comment"
     },
     {
-      "include": "#raw-block"
-    },
-    {
       "include": "#page-directive"
     },
     {
@@ -44,25 +41,6 @@
     "comment": {
       "name": "comment.line.double-dash.htmlang",
       "match": "^\\s*--.*$"
-    },
-    "raw-block": {
-      "name": "meta.raw.htmlang",
-      "begin": "(@raw)\\s+(\"\"\")",
-      "end": "(\"\"\")",
-      "beginCaptures": {
-        "1": {
-          "name": "entity.name.tag.htmlang"
-        },
-        "2": {
-          "name": "punctuation.definition.string.begin.htmlang"
-        }
-      },
-      "endCaptures": {
-        "1": {
-          "name": "punctuation.definition.string.end.htmlang"
-        }
-      },
-      "contentName": "string.unquoted.raw.htmlang"
     },
     "page-directive": {
       "match": "(@page)\\s+(.*)",

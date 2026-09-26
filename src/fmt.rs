@@ -151,8 +151,8 @@ fn split_trailing_comment(line: &str) -> (&str, Option<&str>) {
 }
 
 /// Format an htmlang source file with normalized indentation (2 spaces per level)
-/// and cleaned-up whitespace. Bodies of `"""` strings and raw-content directives
-/// (`@style`, `@script`, ...) are kept verbatim apart from a uniform shift.
+/// and cleaned-up whitespace. Bodies of raw-content directives (`@style`,
+/// `@script`, ...) are kept verbatim apart from a uniform shift.
 pub fn format(input: &str) -> String {
     let mut output = String::new();
     let mut indent_stack: Vec<i32> = vec![-1]; // sentinel
@@ -165,22 +165,11 @@ pub fn format(input: &str) -> String {
     let mut bracket_has_comment = false;
     let mut bracket_delta: i32 = 0;
     let mut pending_comment: Option<String> = None;
-    // Inside a `"""` string: copy lines verbatim until the closing `"""`.
-    let mut in_triple_quote = false;
     // Inside a raw-content body: (header raw indent, indent delta).
     let mut raw_body: Option<(i32, i32)> = None;
 
     for line in input.lines() {
         let trimmed = line.trim();
-
-        if in_triple_quote {
-            output.push_str(line);
-            output.push('\n');
-            if trimmed.contains("\"\"\"") {
-                in_triple_quote = false;
-            }
-            continue;
-        }
 
         if let Some((header_indent, delta)) = raw_body {
             if trimmed.is_empty() {
@@ -289,16 +278,6 @@ pub fn format(input: &str) -> String {
 
         let level = indent_stack.len() - 1;
         let is_code = trimmed.starts_with('@');
-
-        // An opening `"""` without its closing partner starts a verbatim block.
-        if trimmed.matches("\"\"\"").count() % 2 == 1 {
-            output.push_str(&"  ".repeat(level));
-            output.push_str(trimmed);
-            output.push('\n');
-            indent_stack.push(raw_indent);
-            in_triple_quote = true;
-            continue;
-        }
 
         // Split off a trailing `-- comment` before doing bracket math.
         let (code, trailing) = split_trailing_comment(trimmed);

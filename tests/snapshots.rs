@@ -955,12 +955,6 @@ fn ternary_expression_false() {
 }
 
 #[test]
-fn multiline_let_triple_quotes() {
-    let output = compile("@page T\n@let bio \"\"\"Hello World\"\"\"\n@text $bio");
-    assert!(output.contains("Hello World"));
-}
-
-#[test]
 fn comparison_operators_gt() {
     let output = compile("@page T\n@let count 5\n@if $count > 3\n  @text big");
     assert!(output.contains("big"));

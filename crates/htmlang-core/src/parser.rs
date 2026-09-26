@@ -392,11 +392,7 @@ impl Evaluator {
                     return Ok(None);
                 }
 
-                // Triple quotes: @let name """...""" (syntax.rs joins the
-                // lines of a multi-line string)
-                let value = if let Some(after_open) = value.strip_prefix("\"\"\"") {
-                    after_open.strip_suffix("\"\"\"").unwrap_or(after_open)
-                } else if value.starts_with('"') && value.ends_with('"') && value.len() >= 2 {
+                let value = if value.starts_with('"') && value.ends_with('"') && value.len() >= 2 {
                     // Support quoted string interpolation: @let greeting "Hello $name"
                     &value[1..value.len() - 1]
                 } else {
@@ -747,14 +743,6 @@ impl Evaluator {
             return Ok((!text.is_empty()).then(|| vec![Node::Raw(text.to_string())]));
         }
         if let Some(rest) = content.strip_prefix("@raw ") {
-            if rest.starts_with("\"\"\"") {
-                return Err(ParseError {
-                    line: line_num,
-                    message: "`@raw \"\"\"` was removed: put the content in an indented block \
-                              under `@raw` (run `htmlang upgrade`)"
-                        .to_string(),
-                });
-            }
             return Ok(Some(vec![Node::Raw(rest.to_string())]));
         }
 

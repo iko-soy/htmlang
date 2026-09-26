@@ -172,11 +172,10 @@ fn multiline_attributes_still_join() {
 }
 
 #[test]
-fn triple_quoted_let_is_a_string_not_a_function() {
-    let out = compile("@let msg \"\"\"\n  hello\n  world\n  \"\"\"\n@text $msg");
-    assert!(out.contains("hello"), "{}", out);
-    assert!(!out.contains("\"\"\""), "{}", out);
-    assert!(!out.contains("$msg"), "{}", out);
+fn multi_line_content_is_a_function() {
+    let out = compile("@let intro\n  First line\n  Second {@text [font-weight bold] line}\n@paragraph\n  @intro\n");
+    assert!(out.contains("First line"), "{}", out);
+    assert!(out.contains(">line</span>"), "{}", out);
 }
 
 #[test]
@@ -421,12 +420,6 @@ fn style_keeps_css_custom_properties() {
 fn raw_takes_an_indented_body() {
     let out = compile("@raw\n  <div>\n\n    <p>x</p>\n  </div>\n@raw <hr>\n");
     assert!(out.contains("<div>\n\n  <p>x</p>\n</div><hr>"), "{}", out);
-    let result = parser::parse("@raw \"\"\"<br>\"\"\"\n");
-    assert!(
-        result.diagnostics.iter().any(|d| d.message.contains("`@raw \"\"\"` was removed")),
-        "{:?}",
-        result.diagnostics
-    );
 }
 
 #[test]

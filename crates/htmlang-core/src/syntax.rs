@@ -2,7 +2,7 @@
 //!
 //! This step knows the shape of the language: indentation, continuation
 //! lines of attribute lists, verbatim bodies (of `@raw`, `@style`, `@head`,
-//! `@script` and `@markdown`), multi-line strings, and the directives whose
+//! `@script` and `@markdown`), and the directives whose
 //! structure spans several lines (`@if` / `@else` chains, `@each` with an
 //! `@else`, function definitions). It reads no files and substitutes no
 //! variables; `parser.rs` evaluates the tree.
@@ -230,19 +230,6 @@ fn sibling(lines: &[Line], pos: usize, indent: usize) -> Option<(usize, &str)> {
     }
 }
 
-/// For `@let name """…` (or `@let name = """…`) without the closing `"""`
-/// on the same line, the text after the opening quotes.
-fn opens_multiline_string(line: &str) -> Option<&str> {
-    let (_, value) = line.strip_prefix("@let ")?.trim_start().split_once(' ')?;
-    let value = value.trim_start();
-    let value = value.strip_prefix('=').map_or(value, str::trim_start);
-    let open = value.strip_prefix("\"\"\"")?;
-    if open.len() >= 3 && open.ends_with("\"\"\"") {
-        return None;
-    }
-    Some(open)
-}
-
 pub(crate) fn preprocess(input: &str) -> Vec<Line> {
     let raw_lines: Vec<&str> = input.lines().collect();
     let mut lines = Vec::new();
@@ -308,60 +295,6 @@ pub(crate) fn preprocess(input: &str) -> Vec<Line> {
                 });
             }
             i = body_end.max(body_start);
-            continue;
-        }
-
-        // The removed `@raw """…"""` form: its content is kept whole (and
-        // not evaluated) so the evaluator can point at the indented form.
-        if let Some(after_open) = trimmed.strip_prefix("@raw \"\"\"") {
-            let mut content = vec![after_open.trim_end_matches("\"\"\"")];
-            let first_line_num = i + 1;
-            if !(after_open.len() >= 3 && after_open.ends_with("\"\"\"")) {
-                i += 1;
-                while i < raw_lines.len() && raw_lines[i].trim() != "\"\"\"" {
-                    content.push(raw_lines[i]);
-                    i += 1;
-                }
-            }
-            i += 1;
-            lines.push(Line {
-                indent,
-                content: LineContent::Normal("@raw \"\"\"".to_string()),
-                line_num: first_line_num,
-            });
-            lines.push(Line {
-                indent: indent + 1,
-                content: LineContent::Raw(content.join("\n")),
-                line_num: first_line_num,
-            });
-            continue;
-        }
-
-        // `@let name """` opens a multi-line string running to a `"""` line;
-        // it becomes one line holding the whole value.
-        if let Some(open) = opens_multiline_string(trimmed) {
-            let mut value: Vec<&str> = Vec::new();
-            if !open.is_empty() {
-                value.push(open);
-            }
-            let first_line_num = i + 1;
-            i += 1;
-            while i < raw_lines.len() {
-                let next = raw_lines[i].trim();
-                i += 1;
-                if next == "\"\"\"" {
-                    break;
-                }
-                if !next.is_empty() {
-                    value.push(next);
-                }
-            }
-            let head = &trimmed[..trimmed.len() - open.len()];
-            lines.push(Line {
-                indent,
-                content: LineContent::Normal(format!("{}{}\"\"\"", head, value.join("\n"))),
-                line_num: first_line_num,
-            });
             continue;
         }
 
@@ -477,12 +410,5 @@ mod tests {
         let [Syntax::Raw { text, .. }] = children.as_slice() else { panic!("{:?}", children) };
         assert_eq!(text, ":root {\n  --brand: red;\n}");
         assert_eq!(kinds(&tree), ["line", "line"]);
-    }
-
-    #[test]
-    fn multiline_strings_become_one_line() {
-        let tree = parse("@let msg \"\"\"\n  Hello\n  there\n\"\"\"\n@text $msg\n");
-        assert_eq!(kinds(&tree), ["line", "line"]);
-        assert_eq!(tree[0].source(), "@let msg \"\"\"Hello\nthere\"\"\"");
     }
 }

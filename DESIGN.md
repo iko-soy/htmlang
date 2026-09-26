@@ -318,14 +318,15 @@ A function is called like an element:
 @note [kind Tip, padding 20] Scoped styles and forwarded attributes.
 ```
 
-A multi-line string uses triple quotes; its indented lines are the value:
+Multi-line content is a function whose body is text:
 
 ```
-@let intro """
-  First line
-  Second line
-  """
-@text $intro
+@let intro
+  htmlang is a layout language.
+  It compiles to {@text [font-weight bold] static HTML}.
+
+@paragraph
+  @intro
 ```
 
 `@let --name value` also declares the CSS custom property `--name` on
