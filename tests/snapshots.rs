@@ -4886,7 +4886,7 @@ fn error_invalid_json_in_data_directive() {
     let data_path = dir.join("bad.json");
     std::fs::write(&data_path, "{ not: valid json }").unwrap();
 
-    let input = "@data bad.json\n";
+    let input = "@data $bad bad.json\n";
     let result = htmlang::parser::parse_with_base(input, Some(&dir));
     let has_err = result.diagnostics.iter().any(|d| {
         d.severity == htmlang::parser::Severity::Error && d.message.contains("invalid JSON")

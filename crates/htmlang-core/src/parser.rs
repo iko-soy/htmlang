@@ -715,25 +715,24 @@ impl Evaluator {
 
         // --- @data (load JSON file into variables) ---
 
-        // @data file.json               top-level keys become variables
         // @data $name file.json         values as $name.key
         // @data $name dir/*.json        each file as $name.STEM.key; $name
         //                               lists the stems, $name._count counts them
         // @data $name env:NAME [DEFAULT] an environment variable
         if let Some(rest) = content.strip_prefix("@data ") {
             let rest = rest.trim();
-            let (prefix, filename) = match rest.strip_prefix('$') {
-                Some(named) => match named.split_once(char::is_whitespace) {
-                    Some((name, source)) => (name.to_string(), source.trim().to_string()),
-                    None => {
-                        return Err(ParseError {
-                            line: line_num,
-                            message: "@data requires: @data $name SOURCE or @data file.json"
-                                .to_string(),
-                        });
-                    }
-                },
-                None => (String::new(), rest.to_string()),
+            let Some((prefix, filename)) = rest
+                .strip_prefix('$')
+                .and_then(|named| named.split_once(char::is_whitespace))
+                .map(|(name, source)| (name.to_string(), source.trim().to_string()))
+            else {
+                return Err(ParseError {
+                    line: line_num,
+                    message: format!(
+                        "@data needs a name: write `@data $name {}` and use `$name.key`",
+                        rest.trim_start_matches('$')
+                    ),
+                });
             };
 
             if let Some(env) = filename.strip_prefix("env:") {
@@ -741,12 +740,6 @@ impl Evaluator {
                     Some((var, default)) => (var, Some(default.trim())),
                     None => (env, None),
                 };
-                if prefix.is_empty() {
-                    return Err(ParseError {
-                        line: line_num,
-                        message: format!("@data env:{} needs a name: @data $name env:{}", var, var),
-                    });
-                }
                 let value = std::env::var(var)
                     .ok()
                     .or_else(|| default.map(|d| substitute_vars(d, &ctx.variables)));
@@ -768,12 +761,6 @@ impl Evaluator {
 
             let filename = substitute_vars(&filename, &ctx.variables);
             if filename.contains('*') {
-                if prefix.is_empty() {
-                    return Err(ParseError {
-                        line: line_num,
-                        message: format!("@data {} needs a name: @data $name {}", filename, filename),
-                    });
-                }
                 self.load_data_glob(&prefix, &filename, line_num, &content, ctx);
                 return Ok(None);
             }
@@ -800,32 +787,10 @@ impl Evaluator {
 
             match parse_json_with_error(&json_text) {
                 Ok(json) => {
-                    if prefix.is_empty() {
-                        // No prefix: top-level object keys become variables directly
-                        if let JsonValue::Object(pairs) = &json {
-                            for (key, val) in pairs {
-                                let mut sub = HashMap::new();
-                                flatten_json(key, val, &mut sub);
-                                for (k, v) in sub {
-                                    ctx.variables.insert(k, v);
-                                }
-                            }
-                        } else {
-                            ctx.diagnostics.push(Diagnostic {
-                                line: line_num,
-                                column: None,
-                                message: "@data without prefix requires a JSON object at top level"
-                                    .to_string(),
-                                severity: Severity::Error,
-                                source_line: Some(content.clone()),
-                            });
-                        }
-                    } else {
-                        let mut sub = HashMap::new();
-                        flatten_json(&prefix, &json, &mut sub);
-                        for (k, v) in sub {
-                            ctx.variables.insert(k, v);
-                        }
+                    let mut sub = HashMap::new();
+                    flatten_json(&prefix, &json, &mut sub);
+                    for (k, v) in sub {
+                        ctx.variables.insert(k, v);
                     }
                 }
                 Err(detail) => {

@@ -52,9 +52,9 @@ fn non_ascii_hex_color_does_not_panic() {
 fn truncated_json_data_does_not_panic() {
     let dir = scratch_dir("json_trunc");
     std::fs::write(dir.join("d.json"), "{\"a\": 1,").unwrap();
-    compile_in(&dir, "@data d.json\n@text ok");
+    compile_in(&dir, "@data $d d.json\n@text ok");
     std::fs::write(dir.join("d.json"), "{").unwrap();
-    compile_in(&dir, "@data d.json\n@text ok");
+    compile_in(&dir, "@data $d d.json\n@text ok");
 }
 
 #[test]
@@ -65,7 +65,7 @@ fn json_unicode_escapes_are_decoded() {
         r#"{"name": "Caf\u00e9", "emoji": "\ud83d\ude00"}"#,
     )
     .unwrap();
-    let out = compile_in(&dir, "@data d.json\n@text $name $emoji");
+    let out = compile_in(&dir, "@data $d d.json\n@text $d.name $d.emoji");
     assert!(out.contains("Café 😀"), "{}", out);
 }
 

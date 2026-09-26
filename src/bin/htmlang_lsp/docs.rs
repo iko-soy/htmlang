@@ -108,7 +108,7 @@ pub(crate) const DIRECTIVES: &[Doc] = &[
         "Repeats its body for each item of a list or range; `$_index` counts from 0.",
         "@each $item in apple, banana\n  @text $item\n@each $i in 1..10 step 2\n  @text $i",
     ),
-    doc("data", "Loads a JSON file as variables.", "@data site.json"),
+    doc("data", "Loads data as variables: a JSON file, a glob of them, or `env:NAME`.", "@data $site site.json"),
 ];
 
 /// htmlang's own attributes, plus CSS properties htmlang treats specially.

@@ -1,11 +1,11 @@
 @page Data Test
-@data test_data.json
+@data $site test_data.json
 
-@text [bold, size 24] $title
-@text Version: $version
+@text [bold, size 24] $site.title
+@text Version: $site.version
 
-@each $tag in $tags
+@each $tag in $site.tags
   @text [color blue] $tag
 
-@each $label, $url in $links
+@each $label, $url in $site.links
   @link $url $label

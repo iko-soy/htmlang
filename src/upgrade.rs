@@ -785,6 +785,16 @@ fn rewrite_directive_line(
         ));
         return line.to_string();
     }
+    if let Some(rest) = trimmed.strip_prefix("@data ")
+        && !rest.trim_start().starts_with('$')
+    {
+        manual.push((
+            idx + 1,
+            "@data needs a name now: write `@data $name FILE` and use `$name.key` for `$key`"
+                .to_string(),
+        ));
+        return line.to_string();
+    }
     if trimmed.starts_with("@fetch ") {
         manual.push((
             idx + 1,
@@ -1577,6 +1587,13 @@ mod tests {
             up("@svg [width 24, color red, class icon] a.svg"),
             "@image [inline, width 24, color red, class=icon] a.svg"
         );
+    }
+
+    #[test]
+    fn unnamed_data_needs_a_manual_name() {
+        let result = super::upgrade("@data site.json\n@data $ok ok.json\n");
+        assert_eq!(result.manual.len(), 1);
+        assert_eq!(result.manual[0].0, 1);
     }
 
     #[test]

@@ -389,7 +389,7 @@ A range counts down when its start is greater than its end.
 |---|---|
 | `@include file.hl` | Insert another file: its content and definitions (a library of `@let`s emits nothing) |
 | `@include lib.hl as ui` | Take only its definitions, named `ui.name` |
-| `@data file.json` / `@data $name file.json` | Load JSON values as variables (`$name.key`) |
+| `@data $name file.json` | Load JSON values as variables (`$name.key`) |
 | `@data $name dir/*.json` | Load each file as `$name.STEM.key`; `$name` lists the stems |
 | `@data $name env:NAME [default]` | Read an environment variable |
 | `@markdown` / `@markdown file.md` | Markdown, converted to HTML |
@@ -486,6 +486,7 @@ removed form with its replacement.
 | `$a ~ " " ~ $b` | `"$a $b"` |
 | `@each $x in LIST [page N]` | Split the list, or filter it with `@if` |
 | `...$bundle` | `$bundle` |
+| `@data file.json` (keys as `$key`) | `@data $name file.json` (keys as `$name.key`) |
 | `[attrs]` alone on a line | `@el [attrs]` |
 | `animate`, `inset-area` | `animation`, `position-area` |
 | `$x\|uppercase`, `$c\|darken:10` (filters) | `${uppercase($x)}`, `${darken($c, 10)}` |
