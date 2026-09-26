@@ -919,19 +919,6 @@ fn css_scroll_snap_align() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn image_auto_lazy_loading() {
-    // First 3 images get fetchpriority="high" (above-the-fold), subsequent get loading="lazy"
-    let output = compile(
-        "@page T\n@image https://example.com/1.jpg\n@image https://example.com/2.jpg\n@image https://example.com/3.jpg\n@image https://example.com/4.jpg",
-    );
-    // First 3 images: fetchpriority="high", no lazy loading
-    assert!(output.contains("fetchpriority=\"high\""));
-    // 4th image: loading="lazy" + decoding="async"
-    assert!(output.contains("loading=\"lazy\""));
-    assert!(output.contains("decoding=\"async\""));
-}
-
-#[test]
 fn image_explicit_loading_not_doubled() {
     let output = compile("@page T\n@image [loading=eager] https://example.com/photo.jpg");
     assert!(output.contains("loading=\"eager\""));
@@ -1019,24 +1006,9 @@ fn focus_visible_css_without_interactive() {
 }
 
 #[test]
-fn skip_to_content_with_main() {
-    let output = compile("@page T\n@main\n  content");
-    assert!(output.contains("hl-skip"));
-    assert!(output.contains("hl-main"));
-    assert!(output.contains("Skip to content"));
-}
-
-#[test]
 fn no_skip_to_content_without_main() {
     let output = compile("@page T\n@el\n  content");
     assert!(!output.contains("hl-skip"));
-}
-
-#[test]
-fn external_link_noopener() {
-    let output = compile("@page T\n@link https://example.com\n  External");
-    assert!(output.contains("rel=\"noopener noreferrer\""));
-    assert!(output.contains("target=\"_blank\""));
 }
 
 #[test]
@@ -4349,16 +4321,6 @@ fn translations_point_to_data_files() {
 }
 
 #[test]
-fn image_auto_preload() {
-    let output = compile("@page Test\n@image logo.png\n@image hero.jpg");
-    assert!(
-        output.contains("rel=\"preload\""),
-        "should auto-preload images"
-    );
-    assert!(output.contains("logo.png"), "should preload logo.png");
-}
-
-#[test]
 fn source_map_generation() {
     let input = "@page Test\n@text [font-weight bold] Hello";
     let result = htmlang::parser::parse(input);
@@ -4605,78 +4567,6 @@ fn partial_output_dev() {
     );
     assert!(html.contains("<style>"), "partial dev should have style");
     assert!(html.contains("Hello"), "partial dev should have content");
-}
-
-#[test]
-fn responsive_srcset_on_image() {
-    let output = compile("@image [responsive 400 800 1200, alt=Photo] photo.jpg");
-    assert!(
-        output.contains("srcset=\""),
-        "should generate srcset, got: {}",
-        output
-    );
-    assert!(
-        output.contains("photo-400.jpg 400w"),
-        "should have 400w source, got: {}",
-        output
-    );
-    assert!(
-        output.contains("photo-800.jpg 800w"),
-        "should have 800w source, got: {}",
-        output
-    );
-    assert!(
-        output.contains("photo-1200.jpg 1200w"),
-        "should have 1200w source, got: {}",
-        output
-    );
-    assert!(
-        output.contains("sizes="),
-        "should generate sizes attribute, got: {}",
-        output
-    );
-}
-
-#[test]
-fn auto_image_dimensions_png() {
-    // Create a minimal valid PNG (1x1 pixel)
-    let dir = std::env::temp_dir().join("htmlang_test_img_dim");
-    let _ = std::fs::create_dir_all(&dir);
-    let png_path = dir.join("test.png");
-    // Minimal 1x1 PNG file
-    let png_data: Vec<u8> = vec![
-        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // PNG signature
-        0x00, 0x00, 0x00, 0x0D, // IHDR length
-        0x49, 0x48, 0x44, 0x52, // IHDR
-        0x00, 0x00, 0x00, 0x01, // width = 1
-        0x00, 0x00, 0x00, 0x01, // height = 1
-        0x08, 0x02, 0x00, 0x00, 0x00, // bit depth, color type, etc.
-        0x90, 0x77, 0x53, 0xDE, // CRC
-        0x00, 0x00, 0x00, 0x0C, // IDAT length
-        0x49, 0x44, 0x41, 0x54, // IDAT
-        0x08, 0xD7, 0x63, 0xF8, 0xCF, 0xC0, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01, 0xE2, 0x21, 0xBC,
-        0x33, // CRC
-        0x00, 0x00, 0x00, 0x00, // IEND length
-        0x49, 0x45, 0x4E, 0x44, // IEND
-        0xAE, 0x42, 0x60, 0x82, // CRC
-    ];
-    std::fs::write(&png_path, &png_data).unwrap();
-
-    let input = format!("@image [alt=test] {}", png_path.display());
-    let result = htmlang::parser::parse(&input);
-    let html = htmlang::codegen::generate(&result.document);
-    assert!(
-        html.contains("width=\"1\""),
-        "should auto-detect width=1 from PNG, got: {}",
-        html
-    );
-    assert!(
-        html.contains("height=\"1\""),
-        "should auto-detect height=1 from PNG, got: {}",
-        html
-    );
-
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

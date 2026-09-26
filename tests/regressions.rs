@@ -444,3 +444,14 @@ fn backslash_escapes_in_text() {
     assert!(out.contains("$price is 9, {@b} \\<"), "{}", out);
     assert!(out.contains(">$5</span> only"), "{}", out);
 }
+
+#[test]
+fn links_and_images_are_output_as_written() {
+    let out = compile("@main\n  @link https://example.com Out\n  @image [alt=a] a.png\n");
+    assert!(!out.contains("target="), "{}", out);
+    assert!(!out.contains("rel="), "{}", out);
+    assert!(!out.contains("preload"), "{}", out);
+    assert!(!out.contains("fetchpriority"), "{}", out);
+    assert!(!out.contains("Skip to content"), "{}", out);
+    assert!(!out.contains("hl-main"), "{}", out);
+}

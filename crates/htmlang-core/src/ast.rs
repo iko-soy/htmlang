@@ -15,15 +15,7 @@ pub struct Document {
     pub og_tags: Vec<(String, String)>,
     pub canonical: Option<String>,
     pub base_url: Option<String>,
-    pub preload_hints: Vec<PreloadHint>,
     pub nodes: Vec<Node>,
-}
-
-#[derive(Debug, Clone)]
-pub struct PreloadHint {
-    pub href: String,
-    pub as_type: String, // "font", "image", "style", "script"
-    pub crossorigin: bool,
 }
 
 #[derive(Debug, Clone)]

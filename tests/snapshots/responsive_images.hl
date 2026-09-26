@@ -1,3 +1,3 @@
 @page Responsive Images
-@image [responsive 400 800 1200, alt=Hero photo] hero.jpg
+@image [srcset="hero-400.jpg 400w, hero-800.jpg 800w", sizes=100vw, alt=Hero photo] hero.jpg
 @image [alt=Small icon] icon.png

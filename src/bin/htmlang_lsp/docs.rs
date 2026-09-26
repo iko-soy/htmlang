@@ -129,7 +129,6 @@ pub(crate) const ATTRIBUTES: &[Doc] = &[
     doc("row-span", "Rows a grid child spans.", "row-span 2"),
     doc("line-height", "Line height; integers of 2 or more are px.", "line-height 1.5"),
     doc("inline", "On `@image`: embed the file (SVG markup, or other images as base64) in the page.", "inline"),
-    doc("responsive", "On `@image`: widths for a generated `srcset`.", "responsive 400 800 1200"),
 ];
 
 /// Standard-library components (`std.hl`), used like elements.

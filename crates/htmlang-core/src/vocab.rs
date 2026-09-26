@@ -11,7 +11,7 @@
 /// HTML attribute).
 pub const HTMLANG_ATTRIBUTES: &[&str] = &[
     "align-bottom", "align-left", "align-right", "align-top", "center-x", "center-y",
-    "col-span", "grid-cols", "grid-rows", "inline", "responsive", "row-span",
+    "col-span", "grid-cols", "grid-rows", "inline", "row-span",
     "spacing", "wrap",
 ];
 

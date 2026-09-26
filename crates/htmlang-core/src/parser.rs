@@ -191,42 +191,10 @@ pub fn parse_with_base(input: &str, base_path: Option<&Path>) -> ParseResult {
             og_tags: ctx.og_tags,
             canonical: ctx.canonical,
             base_url: ctx.base_url,
-            preload_hints: collect_image_preload_hints(&nodes),
             nodes,
         },
         diagnostics: ctx.diagnostics,
         included_files: ctx.included_files,
-    }
-}
-
-/// Scan nodes for @image elements and generate preload hints for early images.
-fn collect_image_preload_hints(nodes: &[Node]) -> Vec<crate::ast::PreloadHint> {
-    let mut hints = Vec::new();
-    // Only preload the first few images (above-the-fold heuristic)
-    collect_images_recursive(nodes, &mut hints, 3);
-    hints
-}
-
-fn collect_images_recursive(nodes: &[Node], hints: &mut Vec<crate::ast::PreloadHint>, max: usize) {
-    for node in nodes {
-        if hints.len() >= max {
-            return;
-        }
-        if let Node::Element(elem) = node {
-            if elem.kind == ElementKind::Image
-                && let Some(ref src) = elem.argument
-                && !src.is_empty()
-                && !src.starts_with("data:")
-                && !src.starts_with('#')
-            {
-                hints.push(crate::ast::PreloadHint {
-                    href: src.clone(),
-                    as_type: "image".to_string(),
-                    crossorigin: false,
-                });
-            }
-            collect_images_recursive(&elem.children, hints, max);
-        }
     }
 }
 

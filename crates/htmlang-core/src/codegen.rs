@@ -417,7 +417,6 @@ fn emit_media_block(
 struct GenContext {
     dev: bool,
     depth: usize,
-    image_count: usize,
     has_interactive: bool,
 }
 
@@ -587,23 +586,10 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
     let mut ctx = GenContext {
         dev,
         depth: 0,
-        image_count: 0,
         has_interactive: false,
     };
 
-    // Check if document has @main for skip-to-content link
-    let has_main = has_tag(&doc.nodes, "main");
-
     let mut body = String::new();
-
-    // Skip-to-content link for accessibility (only when @main exists)
-    if has_main {
-        if dev {
-            body.push_str("<a href=\"#hl-main\" class=\"hl-skip\">Skip to content</a>\n");
-        } else {
-            body.push_str("<a href=\"#hl-main\" class=\"hl-skip\">Skip to content</a>");
-        }
-    }
 
     for node in &doc.nodes {
         generate_node(node, None, &mut body, &mut styles, &mut ctx);
@@ -735,27 +721,6 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
         None => String::new(),
     };
 
-    // Preload hints
-    let mut preload_html = String::new();
-    // Explicit preload hints from the document
-    for hint in &doc.preload_hints {
-        if dev {
-            preload_html.push_str(&format!(
-                "<link rel=\"preload\" href=\"{}\" as=\"{}\"{}>\n",
-                html_escape(&hint.href),
-                hint.as_type,
-                if hint.crossorigin { " crossorigin" } else { "" }
-            ));
-        } else {
-            preload_html.push_str(&format!(
-                "<link rel=\"preload\" href=\"{}\" as=\"{}\"{}>",
-                html_escape(&hint.href),
-                hint.as_type,
-                if hint.crossorigin { " crossorigin" } else { "" }
-            ));
-        }
-    }
-
     // Focus-visible CSS for interactive elements (accessibility)
     let focus_visible_css = if ctx.has_interactive {
         if dev {
@@ -767,18 +732,7 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
         ""
     };
 
-    // Skip-to-content CSS (visually hidden but accessible)
-    let skip_link_css = if has_main {
-        if dev {
-            ".hl-skip { position: absolute; left: -9999px; top: auto; width: 1px; height: 1px; overflow: hidden; z-index: 9999; padding: 8px 16px; background: #000; color: #fff; text-decoration: none; font-size: 14px; }\n.hl-skip:focus { left: 8px; top: 8px; width: auto; height: auto; overflow: visible; }\n"
-        } else {
-            ".hl-skip{position:absolute;left:-9999px;top:auto;width:1px;height:1px;overflow:hidden;z-index:9999;padding:8px 16px;background:#000;color:#fff;text-decoration:none;font-size:14px}.hl-skip:focus{left:8px;top:8px;width:auto;height:auto;overflow:visible}"
-        }
-    } else {
-        ""
-    };
-
-    let reset_css = reset_css(dev, focus_visible_css, skip_link_css);
+    let reset_css = reset_css(dev, focus_visible_css);
 
     match &doc.page_title {
         Some(title) => {
@@ -791,7 +745,7 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
 <meta charset=\"utf-8\">
 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
 <title>{title}</title>
-{base_html}{canonical_html}{preload_html}{meta_html}{og_html}{favicon_html}{head_html}\
+{base_html}{canonical_html}{meta_html}{og_html}{favicon_html}{head_html}\
 <style>
 {reset_css}{element_css}\
 </style>
@@ -805,7 +759,6 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
                     lang_attr = lang_attr,
                     base_html = base_html,
                     canonical_html = canonical_html,
-                    preload_html = preload_html,
                     meta_html = meta_html,
                     favicon_html = favicon_html,
                     head_html = head_html,
@@ -816,12 +769,11 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
                 )
             } else {
                 format!(
-                    "<!DOCTYPE html><html{lang_attr}><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>{title}</title>{base_html}{canonical_html}{preload_html}{meta_html}{og_html}{favicon_html}{head_html}<style>{reset_css}{element_css}</style></head><body>{body}</body></html>",
+                    "<!DOCTYPE html><html{lang_attr}><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>{title}</title>{base_html}{canonical_html}{meta_html}{og_html}{favicon_html}{head_html}<style>{reset_css}{element_css}</style></head><body>{body}</body></html>",
                     title = html_escape(title),
                     lang_attr = lang_attr,
                     base_html = base_html,
                     canonical_html = canonical_html,
-                    preload_html = preload_html,
                     meta_html = meta_html,
                     og_html = og_html,
                     favicon_html = favicon_html,
@@ -912,13 +864,13 @@ fn build_element_css(doc: &Document, styles: &StyleCollector, dev: bool) -> Stri
 /// Built-in reset rules, in a layer before `htmlang`: unlayered CSS beats
 /// every layer, so an unlayered `a{color:inherit}` would override
 /// `@link [color red]`.
-fn reset_css(dev: bool, focus_visible_css: &str, skip_link_css: &str) -> String {
+fn reset_css(dev: bool, focus_visible_css: &str) -> String {
     let base = if dev {
         "*, *::before, *::after { box-sizing: border-box; }\nbody { margin: 0; font-family: system-ui, -apple-system, sans-serif; }\nimg { display: block; }\na { text-decoration: none; color: inherit; }\n"
     } else {
         "*,*::before,*::after{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,sans-serif}img{display:block}a{text-decoration:none;color:inherit}"
     };
-    let rules = format!("{}{}{}", base, focus_visible_css, skip_link_css);
+    let rules = format!("{}{}", base, focus_visible_css);
     if dev {
         format!("@layer hl-reset, htmlang;\n@layer hl-reset {{\n{}}}\n", rules)
     } else {
@@ -932,7 +884,6 @@ fn generate_partial_inner(doc: &Document, dev: bool) -> String {
     let mut ctx = GenContext {
         dev,
         depth: 0,
-        image_count: 0,
         has_interactive: false,
     };
     let mut body = String::new();
@@ -1178,10 +1129,6 @@ fn generate_element(
     out.push('<');
     out.push_str(tag);
 
-    // @main gets id="hl-main" for skip-to-content link (unless user set an id)
-    if elem.kind.is_tag("main") && id.is_none() {
-        out.push_str(" id=\"hl-main\"");
-    }
 
     if elem.kind == ElementKind::Link
         && let Some(url) = &elem.argument
@@ -1189,18 +1136,6 @@ fn generate_element(
         out.push_str(" href=\"");
         out.push_str(&html_escape(url));
         out.push('"');
-        // Auto rel="noopener noreferrer" and target="_blank" for external links
-        let is_external = url.starts_with("http://") || url.starts_with("https://");
-        if is_external {
-            let has_rel = elem.attrs.iter().any(|a| a.key == "rel");
-            let has_target = elem.attrs.iter().any(|a| a.key == "target");
-            if !has_rel {
-                out.push_str(" rel=\"noopener noreferrer\"");
-            }
-            if !has_target {
-                out.push_str(" target=\"_blank\"");
-            }
-        }
     }
 
     emit_argument_attr(out, elem);
@@ -1333,80 +1268,6 @@ fn generate_self_closing(
             " data-hl-line=\"{}\" data-hl-el=\"{}\"",
             elem.line_num, kind_label
         ));
-    }
-
-    // Image optimization: auto-add loading="lazy" and decoding="async"
-    if elem.kind == ElementKind::Image {
-        // Responsive srcset: @image photo.jpg [responsive 400 800 1200]
-        let responsive_attr = elem.attrs.iter().find(|a| a.key == "responsive");
-        if let Some(resp) = responsive_attr
-            && let Some(ref sizes_str) = resp.value
-        {
-            let widths: Vec<&str> = sizes_str.split_whitespace().collect();
-            if !widths.is_empty() {
-                let src = elem.argument.as_deref().unwrap_or("");
-                if !src.is_empty() {
-                    // Generate srcset with width descriptors
-                    // Convention: file-{width}.ext (e.g., photo-400.jpg)
-                    let dot_pos = src.rfind('.').unwrap_or(src.len());
-                    let base = &src[..dot_pos];
-                    let ext = &src[dot_pos..];
-                    let mut srcset_parts = Vec::new();
-                    for w in &widths {
-                        srcset_parts.push(format!("{}-{}{} {}w", base, w, ext, w));
-                    }
-                    out.push_str(" srcset=\"");
-                    out.push_str(&srcset_parts.join(", "));
-                    out.push('"');
-                    // Generate sizes attribute
-                    let max_width = widths.last().unwrap_or(&"100vw");
-                    out.push_str(&format!(
-                        " sizes=\"(max-width: {}px) 100vw, {}px\"",
-                        max_width, max_width
-                    ));
-                }
-            }
-        }
-
-        // Auto image dimensions: read local image file to inject width/height + aspect-ratio
-        let has_width = elem.attrs.iter().any(|a| a.key == "width");
-        let has_height = elem.attrs.iter().any(|a| a.key == "height");
-        if (!has_width || !has_height)
-            && let Some(ref src) = elem.argument
-            && !src.starts_with("http://")
-            && !src.starts_with("https://")
-            && !src.starts_with("data:")
-            && let Some((w, h)) = read_image_dimensions(src)
-        {
-            // Intrinsic size attributes only when neither dimension is set in
-            // CSS; with one CSS dimension, a leftover intrinsic attribute for
-            // the other would distort the image (200 wide but 1000 tall).
-            if !has_width && !has_height {
-                out.push_str(&format!(" width=\"{}\" height=\"{}\"", w, h));
-            }
-            // Auto aspect-ratio to prevent CLS
-            if !elem.attrs.iter().any(|a| a.key == "aspect-ratio") {
-                out.push_str(&format!(" style=\"aspect-ratio:{}/{}\"", w, h));
-            }
-        }
-
-        // Smart image loading: first 3 images get fetchpriority="high" (above the fold),
-        // subsequent images get loading="lazy" + decoding="async"
-        ctx.image_count += 1;
-        if ctx.image_count <= 3 {
-            // Above-the-fold: eager loading with high priority
-            if !elem.attrs.iter().any(|a| a.key == "fetchpriority") {
-                out.push_str(" fetchpriority=\"high\"");
-            }
-        } else {
-            // Below-the-fold: lazy loading
-            if !elem.attrs.iter().any(|a| a.key == "loading") {
-                out.push_str(" loading=\"lazy\"");
-            }
-            if !elem.attrs.iter().any(|a| a.key == "decoding") {
-                out.push_str(" decoding=\"async\"");
-            }
-        }
     }
 
     out.push('>');
@@ -2251,153 +2112,6 @@ fn extract_id_class(attrs: &[Attribute]) -> (Option<String>, Option<String>) {
     (id, class)
 }
 
-/// Read image dimensions from a local file by parsing the header bytes.
-/// Supports PNG, JPEG, GIF, WebP, AVIF, and SVG.
-fn read_image_dimensions(path: &str) -> Option<(u32, u32)> {
-    // SVG: parse as text for viewBox/width/height attributes
-    if path.ends_with(".svg") || path.ends_with(".SVG") {
-        let text = std::fs::read_to_string(path).ok()?;
-        return read_svg_dimensions(&text);
-    }
-
-    let data = std::fs::read(path).ok()?;
-    if data.len() < 12 {
-        return None;
-    }
-
-    // PNG: 8-byte signature, then IHDR chunk with width/height at bytes 16-23
-    if data.len() >= 24 && data.starts_with(b"\x89PNG\r\n\x1a\n") {
-        let w = u32::from_be_bytes([data[16], data[17], data[18], data[19]]);
-        let h = u32::from_be_bytes([data[20], data[21], data[22], data[23]]);
-        return Some((w, h));
-    }
-
-    // GIF: "GIF87a" or "GIF89a", width/height at bytes 6-9 (little-endian)
-    if data.starts_with(b"GIF87a") || data.starts_with(b"GIF89a") {
-        let w = u16::from_le_bytes([data[6], data[7]]) as u32;
-        let h = u16::from_le_bytes([data[8], data[9]]) as u32;
-        return Some((w, h));
-    }
-
-    // JPEG: scan for SOF0/SOF2 marker (0xFF 0xC0 or 0xFF 0xC2)
-    if data.starts_with(b"\xff\xd8") {
-        let mut i = 2;
-        while i + 9 < data.len() {
-            if data[i] != 0xFF {
-                i += 1;
-                continue;
-            }
-            let marker = data[i + 1];
-            if marker == 0xC0 || marker == 0xC2 {
-                let h = u16::from_be_bytes([data[i + 5], data[i + 6]]) as u32;
-                let w = u16::from_be_bytes([data[i + 7], data[i + 8]]) as u32;
-                return Some((w, h));
-            }
-            if i + 3 < data.len() {
-                let len = u16::from_be_bytes([data[i + 2], data[i + 3]]) as usize;
-                i += 2 + len;
-            } else {
-                break;
-            }
-        }
-    }
-
-    // WebP: "RIFF" ... "WEBP", VP8 header at byte 20
-    if data.len() >= 30 && &data[..4] == b"RIFF" && &data[8..12] == b"WEBP" {
-        if &data[12..16] == b"VP8 " && data.len() >= 30 {
-            let w = u16::from_le_bytes([data[26], data[27]]) as u32 & 0x3FFF;
-            let h = u16::from_le_bytes([data[28], data[29]]) as u32 & 0x3FFF;
-            return Some((w, h));
-        }
-        if &data[12..16] == b"VP8L" && data.len() >= 25 && data[21] == 0x2F {
-            let bits = u32::from_le_bytes([data[22], data[23], data[24], data[25]]);
-            let w = (bits & 0x3FFF) + 1;
-            let h = ((bits >> 14) & 0x3FFF) + 1;
-            return Some((w, h));
-        }
-    }
-
-    // AVIF: ISOBMFF container with "ftyp" box containing "avif"/"avis" brand,
-    // then "ispe" box with width/height
-    if data.len() >= 12 && &data[4..8] == b"ftyp" {
-        let brand = &data[8..12];
-        if brand == b"avif" || brand == b"avis" || brand == b"mif1" {
-            return read_avif_dimensions(&data);
-        }
-    }
-
-    None
-}
-
-/// Parse SVG viewBox or width/height attributes to get dimensions.
-fn read_svg_dimensions(text: &str) -> Option<(u32, u32)> {
-    // Try viewBox first: viewBox="minX minY width height"
-    if let Some(vb_start) = text.find("viewBox=\"") {
-        let rest = &text[vb_start + 9..];
-        if let Some(end) = rest.find('"') {
-            let parts: Vec<&str> = rest[..end].split_whitespace().collect();
-            if parts.len() == 4
-                && let (Ok(w), Ok(h)) = (parts[2].parse::<f64>(), parts[3].parse::<f64>())
-                && w > 0.0
-                && h > 0.0
-            {
-                return Some((w.round() as u32, h.round() as u32));
-            }
-        }
-    }
-    // Fall back to width/height attributes on <svg>
-    let svg_tag = text.find("<svg")?;
-    let tag_end = text[svg_tag..].find('>')? + svg_tag;
-    let tag = &text[svg_tag..tag_end];
-    let w = extract_svg_attr(tag, "width")?;
-    let h = extract_svg_attr(tag, "height")?;
-    Some((w, h))
-}
-
-fn extract_svg_attr(tag: &str, attr: &str) -> Option<u32> {
-    let needle = format!("{}=\"", attr);
-    let start = tag.find(&needle)? + needle.len();
-    let rest = &tag[start..];
-    let end = rest.find('"')?;
-    let val = rest[..end].trim_end_matches("px");
-    val.parse::<f64>().ok().map(|v| v.round() as u32)
-}
-
-/// Parse AVIF (ISOBMFF) container to find ispe box with image dimensions.
-fn read_avif_dimensions(data: &[u8]) -> Option<(u32, u32)> {
-    // Walk ISOBMFF boxes looking for "ispe" (image spatial extents)
-    let mut i = 0;
-    while i + 8 <= data.len() {
-        let box_size =
-            u32::from_be_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]]) as usize;
-        let box_type = &data[i + 4..i + 8];
-        if box_size < 8 {
-            break;
-        }
-        let box_end = (i + box_size).min(data.len());
-        // ispe box: 4 bytes version/flags + 4 bytes width + 4 bytes height
-        if box_type == b"ispe" && box_end >= i + 20 {
-            let w = u32::from_be_bytes([data[i + 12], data[i + 13], data[i + 14], data[i + 15]]);
-            let h = u32::from_be_bytes([data[i + 16], data[i + 17], data[i + 18], data[i + 19]]);
-            return Some((w, h));
-        }
-        // Recurse into container boxes (meta, iprp, ipco)
-        if matches!(
-            box_type,
-            b"meta" | b"iprp" | b"ipco" | b"moov" | b"trak" | b"mdia"
-        ) {
-            let header_size = if box_type == b"meta" { 12 } else { 8 };
-            if i + header_size < box_end
-                && let Some(dims) = read_avif_dimensions(&data[i + header_size..box_end])
-            {
-                return Some(dims);
-            }
-        }
-        i = box_end;
-    }
-    None
-}
-
 fn html_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -2511,15 +2225,6 @@ fn vlq_encode(value: i64, out: &mut String) {
             break;
         }
     }
-}
-
-
-/// Does the tree contain the table element `name` (e.g. `"main"`)?
-fn has_tag(nodes: &[Node], name: &str) -> bool {
-    nodes.iter().any(|node| match node {
-        Node::Element(elem) => elem.kind.is_tag(name) || has_tag(&elem.children, name),
-        _ => false,
-    })
 }
 
 
