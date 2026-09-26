@@ -5,6 +5,7 @@ use std::rc::Rc;
 use crate::ast::*;
 use crate::diagnostic::code;
 pub use crate::diagnostic::{Diagnostic, Severity};
+use crate::interp;
 use crate::syntax::{self, DirectiveArgs, LetForm, NodeKind, Segment, Tree};
 
 // ---------------------------------------------------------------------------
@@ -78,20 +79,51 @@ struct ParseContext {
     /// Every function defined anywhere in the file or the files it
     /// includes, whether or not its definition runs.
     namespace: HashSet<String>,
+    /// The line being evaluated, and its text as written when it is one
+    /// physical line, for diagnostics that point at a column.
+    current_source: (usize, Option<String>),
+    /// Variable diagnostics already reported, so a line evaluated many
+    /// times (in a loop, in a function) reports each problem once.
+    reported: HashSet<(usize, Option<usize>, String)>,
+}
+
+/// The variables in scope, for interpolation and expressions.
+struct Vars<'a>(&'a HashMap<String, String>);
+
+impl interp::Scope for Vars<'_> {
+    fn defined(&self, path: &str) -> bool {
+        self.0.contains_key(path) || self.0.contains_key(&format!("{}#", path))
+    }
+
+    fn value(&self, path: &str) -> Option<crate::expr::Value> {
+        lookup(self.0, path)
+    }
+
+    fn has_fields(&self, path: &str) -> bool {
+        self.0.contains_key(&format!("{}#", path))
+            || self.0.keys().any(|key| {
+                key.strip_prefix(path)
+                    .is_some_and(|rest| rest.starts_with('.'))
+            })
+    }
 }
 
 /// Evaluates a syntax tree (see `syntax.rs`) into the document's nodes.
 struct Evaluator;
 
 impl ParseContext {
-    /// Evaluate an expression (see `expr.rs`), reporting errors at `line`.
-    fn eval(&mut self, src: &str, line: usize) -> Option<crate::expr::Value> {
+    /// Evaluate an expression (see `expr.rs`) written at `line` and
+    /// `column` (when known), reporting its errors there.
+    fn eval(
+        &mut self,
+        src: &str,
+        line: usize,
+        column: Option<usize>,
+    ) -> Option<crate::expr::Value> {
         track_var_refs(src, &mut self.used_variables);
-        let vars = &self.variables;
-        let result = crate::expr::eval(src, &|name: &str| lookup(vars, name));
-        match result {
+        match crate::expr::eval(src, &Vars(&self.variables)) {
             Ok(value) => Some(value),
-            Err(message) => {
+            Err(crate::expr::Error::Invalid(message)) => {
                 self.diagnostics.push(
                     Diagnostic::error(
                         code::INVALID_EXPRESSION,
@@ -102,12 +134,118 @@ impl ParseContext {
                 );
                 None
             }
+            Err(error) => {
+                self.report(error.at(0), line, column);
+                None
+            }
         }
     }
 
     /// Evaluate a condition; an invalid one is reported and counts as false.
-    fn condition(&mut self, src: &str, line: usize) -> bool {
-        self.eval(src, line).is_some_and(|value| value.truthy())
+    fn condition(&mut self, src: &str, line: usize, column: Option<usize>) -> bool {
+        self.eval(src, line, column)
+            .is_some_and(|value| value.truthy())
+    }
+
+    /// Fill in the variables of one slot's text (see `interp.rs`), written
+    /// at `line` and `column` (when known). What can't be filled is left as
+    /// written and reported.
+    fn interpolate(&mut self, text: &str, line: usize, column: Option<usize>) -> String {
+        self.fill(text, line, column).0
+    }
+
+    /// [`interpolate`](Self::interpolate), and whether everything was
+    /// filled in.
+    fn fill(&mut self, text: &str, line: usize, column: Option<usize>) -> (String, bool) {
+        if !text.contains('$') {
+            return (text.to_string(), true);
+        }
+        track_var_refs(text, &mut self.used_variables);
+        let (out, problems) = interp::interpolate(text, &Vars(&self.variables));
+        let filled = problems.is_empty();
+        for problem in problems {
+            self.report(problem, line, column);
+        }
+        (out, filled)
+    }
+
+    /// Report a variable that can't be filled in, or an invalid `${...}`,
+    /// at `offset` from `column`.
+    fn report(&mut self, problem: interp::Problem, line: usize, column: Option<usize>) {
+        let (line_text, column) = match &self.current_source {
+            // The column is only shown with the line it points into
+            (current, Some(text)) if *current == line => (Some(text.clone()), column),
+            _ => (None, None),
+        };
+        let diagnostic = match problem {
+            interp::Problem::Undefined { name, offset } => {
+                let column = column.map(|c| c + offset);
+                let mut diagnostic = self.undefined(&name, line);
+                if let Some(column) = column {
+                    diagnostic = diagnostic.column(column);
+                }
+                diagnostic
+            }
+            interp::Problem::Invalid { message, offset } => {
+                let diagnostic = Diagnostic::error(
+                    code::INVALID_EXPRESSION,
+                    line,
+                    format!("invalid expression: {}", message),
+                );
+                match column {
+                    Some(column) => diagnostic.column(column + offset),
+                    None => diagnostic,
+                }
+            }
+        };
+        let diagnostic = match line_text {
+            Some(text) => diagnostic.source(text),
+            None => diagnostic,
+        };
+        let key = (
+            diagnostic.line,
+            diagnostic.column,
+            diagnostic.message.clone(),
+        );
+        if self.reported.insert(key) {
+            self.diagnostics.push(diagnostic);
+        }
+    }
+
+    /// The error for `$name` with no definition: what the name is if it is
+    /// something else, or the closest defined name.
+    fn undefined(&self, name: &str, line: usize) -> Diagnostic {
+        if self.defines.contains_key(name) {
+            return Diagnostic::error(
+                code::UNDEFINED_VARIABLE,
+                line,
+                format!(
+                    "'${}' is an attribute bundle, not a value: it goes in an attribute list \
+                     as a whole attribute, `[${}]`",
+                    name, name
+                ),
+            )
+            .subject(name);
+        }
+        let suggestion = suggest_var_name(name, &self.variables);
+        let message = match &suggestion {
+            Some(closest) => format!(
+                "undefined variable '${}', did you mean '${}'?",
+                name, closest
+            ),
+            None => format!("undefined variable '${}'", name),
+        };
+        Diagnostic::error(code::UNDEFINED_VARIABLE, line, message)
+            .subject(name)
+            .suggest(suggestion)
+    }
+
+    /// Note the node being evaluated, for diagnostics.
+    fn enter(&mut self, node: &syntax::Node) {
+        self.current_line = node.span.line;
+        let text =
+            (node.line_count <= 1).then(|| format!("{}{}", " ".repeat(node.indent), node.source));
+        self.current_source = (node.span.line, text);
     }
 
     /// Parse a file's text into a tree whose ids don't clash with the
@@ -185,6 +323,8 @@ pub fn parse_with_base(input: &str, base_path: Option<&Path>) -> ParseResult {
         next_id: 0,
         trees: Vec::new(),
         namespace: HashSet::new(),
+        current_source: (0, None),
+        reported: HashSet::new(),
     };
     load_prelude(&mut ctx);
     let tree = ctx.parse_tree(input);
@@ -333,11 +473,24 @@ fn check_head(head: &syntax::Head, line: usize, inline: bool, ctx: &mut ParseCon
         return;
     }
     if let Some(list) = &head.attrs {
+        // Names are checked; a value with a variable in it depends on
+        // what the variable holds, so only a literal value is
         let literal: Vec<syntax::Attr> = list
             .attrs
             .iter()
-            .filter(|a| !a.raw.contains('$') && !a.raw.contains("if("))
-            .cloned()
+            .filter(|a| {
+                let bundle = a.key.starts_with('$') && a.value.is_none() && !a.html;
+                !a.raw.starts_with("if(") && !bundle
+            })
+            .map(|a| {
+                let mut a = a.clone();
+                let variable = |v: &String| v.contains('$') || v.contains("if(");
+                if !a.key.contains('$') && a.value.as_ref().is_some_and(variable) {
+                    a.value = None;
+                    a.raw = a.key.clone();
+                }
+                a
+            })
             .collect();
         parse_attr_list(&literal, line, ctx, true);
     }
@@ -447,12 +600,19 @@ impl Evaluator {
         let mut chosen = None;
         for branch in std::iter::once(node).chain(branches.iter().copied()) {
             ctx.visited.insert(branch.id);
-            ctx.current_line = branch.span.line;
+            ctx.enter(branch);
             let holds = match branch.directive().map(|d| &d.args) {
                 Some(DirectiveArgs::Condition(condition))
                 | Some(DirectiveArgs::Else {
                     condition: Some(condition),
-                }) => !condition.raw.is_empty() && ctx.condition(&condition.raw, branch.span.line),
+                }) => {
+                    !condition.raw.is_empty()
+                        && ctx.condition(
+                            &condition.raw,
+                            branch.span.line,
+                            Some(condition.span.column),
+                        )
+                }
                 Some(DirectiveArgs::Else { condition: None }) => true,
                 // A syntax error, already reported
                 _ => false,
@@ -470,8 +630,7 @@ impl Evaluator {
         ctx: &mut ParseContext,
     ) -> Result<Option<Vec<Node>>, ParseError> {
         ctx.visited.insert(node.id);
-        let line_num = node.span.line;
-        ctx.current_line = line_num;
+        ctx.enter(node);
         match &node.kind {
             NodeKind::Blank | NodeKind::Comment => Ok(None),
             NodeKind::Verbatim(body) => Ok(Some(vec![Node::Raw(body.text.clone())])),
@@ -491,14 +650,6 @@ impl Evaluator {
             }
             NodeKind::Element(element) => self.eval_element(node, element, ctx).map(Some),
             NodeKind::Text(text) => {
-                let var_warnings = check_undefined_vars(
-                    &protect_escapes(&text.raw),
-                    &ctx.variables,
-                    line_num,
-                    node.indent,
-                );
-                ctx.diagnostics.extend(var_warnings);
-                track_var_refs(&text.raw, &mut ctx.used_variables);
                 let mut nodes = vec![Node::Text(text_segments(text, ctx))];
                 // Text takes no body: lines indented under it are its
                 // siblings
@@ -540,8 +691,13 @@ impl Evaluator {
                         }
                     }
                 }
-                let title = title.as_ref().map_or("", |t| t.raw.as_str());
-                ctx.page_title = Some(substitute_vars(title, &ctx.variables));
+                let title = match title {
+                    Some(title) => {
+                        ctx.interpolate(&title.raw, title.span.line, Some(title.span.column))
+                    }
+                    None => String::new(),
+                };
+                ctx.page_title = Some(title);
                 Ok(None)
             }
 
@@ -554,7 +710,7 @@ impl Evaluator {
                     // `@let name = EXPR` computes its value (see expr.rs)
                     LetForm::Computed(expression) => {
                         let value = ctx
-                            .eval(&expression.raw, line_num)
+                            .eval(&expression.raw, line_num, Some(expression.span.column))
                             .map(|v| v.to_string())
                             .unwrap_or_default();
                         set_variable(name, value, line_num, ctx);
@@ -568,8 +724,8 @@ impl Evaluator {
                     // Literal text with `$var` interpolation, quoted or not:
                     // @let greeting "Hello $name"
                     LetForm::Value(Some(value)) | LetForm::Quoted(value) => {
-                        track_var_refs(&value.raw, &mut ctx.used_variables);
-                        let value = substitute_vars(&value.raw, &ctx.variables);
+                        let value =
+                            ctx.interpolate(&value.raw, value.span.line, Some(value.span.column));
                         set_variable(name, value, line_num, ctx);
                     }
                     LetForm::Value(None) => {}
@@ -590,7 +746,8 @@ impl Evaluator {
                     );
                     return Ok(None);
                 };
-                let value = substitute_vars(value.trim(), &ctx.variables);
+                let value_column = arg.span.column + arg.raw.len() - value.trim_start().len();
+                let value = ctx.interpolate(value.trim(), line_num, Some(value_column));
                 match name.trim().strip_prefix("og:") {
                     Some(property) => ctx.og_tags.push((property.to_string(), value)),
                     None => ctx.meta_tags.push((name.trim().to_string(), value)),
@@ -624,7 +781,7 @@ impl Evaluator {
                         .collect();
                     return Ok(Some(vec![Node::Raw(markdown_to_html(&md_lines))]));
                 };
-                let filename = substitute_vars(&file.raw, &ctx.variables);
+                let filename = ctx.interpolate(&file.raw, line_num, Some(file.span.column));
                 let resolved = ctx.resolve(&filename);
                 let md_text = match ctx.read_file(&resolved) {
                     Ok(text) => text,
@@ -646,11 +803,11 @@ impl Evaluator {
             }
 
             ("include", DirectiveArgs::Text(Some(path))) => {
-                self.eval_include(&path.raw, line_num, content, ctx)
+                self.eval_include(path, line_num, content, ctx)
             }
 
             ("data", DirectiveArgs::Data { name, source, .. }) => {
-                self.eval_data(name, &source.raw, line_num, content, ctx);
+                self.eval_data(name, source, line_num, content, ctx);
                 Ok(None)
             }
 
@@ -670,16 +827,17 @@ impl Evaluator {
 
     fn eval_include(
         &mut self,
-        path: &str,
+        path: &syntax::Arg,
         line_num: usize,
         content: &str,
         ctx: &mut ParseContext,
     ) -> Result<Option<Vec<Node>>, ParseError> {
-        let filename = path
-            .strip_prefix('"')
-            .and_then(|f| f.strip_suffix('"'))
-            .unwrap_or(path);
-        let filename = substitute_vars(filename, &ctx.variables);
+        let (filename, column) = match path.raw.strip_prefix('"').and_then(|f| f.strip_suffix('"'))
+        {
+            Some(quoted) => (quoted, path.span.column + 1),
+            None => (path.raw.as_str(), path.span.column),
+        };
+        let filename = ctx.interpolate(filename, line_num, Some(column));
         let resolved = ctx.resolve(&filename);
 
         if ctx.include_stack.contains(&resolved) {
@@ -742,20 +900,22 @@ impl Evaluator {
     fn eval_data(
         &mut self,
         prefix: &str,
-        filename: &str,
+        source: &syntax::Arg,
         line_num: usize,
         content: &str,
         ctx: &mut ParseContext,
     ) {
         let prefix = prefix.to_string();
+        let filename = source.raw.as_str();
         if let Some(env) = filename.strip_prefix("env:") {
             let (var, default) = match env.split_once(char::is_whitespace) {
                 Some((var, default)) => (var, Some(default.trim())),
                 None => (env, None),
             };
+            let default_column = default.map(|d| source.span.column + filename.len() - d.len());
             let value = std::env::var(var)
                 .ok()
-                .or_else(|| default.map(|d| substitute_vars(d, &ctx.variables)));
+                .or_else(|| default.map(|d| ctx.interpolate(d, line_num, default_column)));
             if value.is_none() {
                 ctx.diagnostics.push(
                     Diagnostic::warning(
@@ -777,7 +937,7 @@ impl Evaluator {
         let (json_text, source) = if filename.starts_with(['[', '{']) {
             (filename.to_string(), "the inline data".to_string())
         } else {
-            let filename = substitute_vars(filename, &ctx.variables);
+            let filename = ctx.interpolate(filename, line_num, Some(source.span.column));
             if filename.contains('*') {
                 self.load_data_glob(&prefix, &filename, line_num, content, ctx);
                 return;
@@ -925,8 +1085,7 @@ impl Evaluator {
         if let Some(branch) = empty_branch {
             ctx.visited.insert(branch.id);
         }
-        let line_num = node.span.line;
-        ctx.current_line = line_num;
+        ctx.enter(node);
         // A malformed header is a syntax error, already reported
         let Some(DirectiveArgs::Each(header)) = node.directive().map(|d| &d.args) else {
             return Ok(None);
@@ -934,43 +1093,36 @@ impl Evaluator {
         let body = &node.children;
         let empty: &[syntax::Node] = empty_branch.map_or(&[], |b| &b.children);
         let (item, index) = (header.item.as_str(), header.index.as_deref());
-        let list_src = header.list.raw.as_str();
+        let list = &header.list;
+        let list_src = list.raw.as_str();
         track_var_refs(list_src, &mut ctx.used_variables);
 
-        // A list loaded from JSON, by name
-        let data_list = list_src.strip_prefix('$').and_then(|name| {
+        // A source that is one `$name` (or `${name}`) is that variable's
+        // value: a list loaded from JSON, by name, or text
+        let whole = list_src.strip_prefix('$').and_then(|after| {
+            match interp::reference(after, &Vars(&ctx.variables))? {
+                (interp::Reference::Var(path), len) if len == after.len() => Some(path),
+                _ => None,
+            }
+        });
+        let data_list = whole.as_ref().and_then(|name| {
             let len = ctx
                 .variables
                 .get(&format!("{}#", name))?
                 .parse::<usize>()
                 .ok()?;
-            Some((name.to_string(), len))
+            Some((name.clone(), len))
         });
-        let undefined = list_src.strip_prefix('$').filter(|name| {
-            name.chars()
-                .all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '.'))
-                && !ctx.variables.contains_key(*name)
-        });
-        let text_items: Vec<String> = match (&data_list, undefined) {
-            (Some(_), _) => Vec::new(),
-            // A missing variable is an empty list: quietly for a record's
-            // missing field (`$post.tags`), with a warning otherwise
-            (None, Some(name)) => {
-                let root = name.split('.').next().unwrap_or(name);
-                if !ctx.variables.contains_key(root) {
-                    ctx.diagnostics.push(
-                        Diagnostic::warning(
-                            code::UNDEFINED_VARIABLE,
-                            line_num,
-                            format!("undefined variable '${}'", name),
-                        )
-                        .source(node.source.clone())
-                        .subject(name),
-                    );
-                }
-                Vec::new()
-            }
-            (None, None) => text_list_items(&substitute_vars(list_src, &ctx.variables)),
+        let undefined = whole
+            .as_ref()
+            .is_some_and(|path| interp::resolve(path, &Vars(&ctx.variables)).is_none());
+        // A field a record doesn't have (`$post.tags`) is an empty list
+        let text = ctx.interpolate(list_src, list.span.line, Some(list.span.column));
+        let text_items: Vec<String> = match &data_list {
+            Some(_) => Vec::new(),
+            // Reported; there is nothing to repeat
+            None if undefined => Vec::new(),
+            None => text_list_items(&text),
         };
         let count = data_list.as_ref().map_or(text_items.len(), |(_, len)| *len);
 
@@ -1367,39 +1519,39 @@ fn parse_single_element(
         parse_attr_list(&list.attrs, line_num, ctx, true)
     });
 
-    // For @link, the first word is the URL and the rest is its text
+    // The argument is one slot: a URL, a source, an action, a slot name, or
+    // text shown as written. For @link, the first word is the URL and the
+    // rest is its text. Any other element's argument is text content, as
+    // in `@el [padding 8] Hello` or `@paragraph Read {@link /more more}`.
     let mut children = Vec::new();
-    let argument = text.map(|text| {
-        track_var_refs(&text.raw, &mut ctx.used_variables);
-        let raw = if kind == ElementKind::Link {
-            let (url, rest) = text.split_first_word();
-            if let Some(rest) = rest {
-                children.push(Node::Text(text_segments(&rest, ctx)));
-            }
-            url
+    let mut argument = None;
+    if let Some(text) = text {
+        if argument_is_special(&kind) || renders_argument_as_text(&kind) {
+            let raw = if kind == ElementKind::Link {
+                let (url, rest) = text.split_first_word();
+                if let Some(rest) = rest {
+                    children.push(Node::Text(text_segments(&rest, ctx)));
+                }
+                url
+            } else {
+                text.raw.clone()
+            };
+            let value = ctx.interpolate(
+                &protect_escapes(&raw),
+                text.span.line,
+                Some(text.span.column),
+            );
+            argument = Some(restore_escapes(&value));
         } else {
-            text.raw.clone()
-        };
-        restore_escapes(&substitute_vars(&protect_escapes(&raw), &ctx.variables))
-    });
+            children.push(Node::Text(text_segments(text, ctx)));
+        }
+    }
 
     // For @slot, the argument is the slot name
     let kind = if let ElementKind::Slot(_) = kind {
         ElementKind::Slot(argument.clone().unwrap_or_default())
     } else {
         kind
-    };
-
-    // Every other element treats its argument as leading text content, as
-    // in `@el [padding 8] Hello` or `@paragraph Read {@link /more more}`.
-    let argument = match (argument, text) {
-        (Some(_), Some(text))
-            if !argument_is_special(&kind) && !renders_argument_as_text(&kind) =>
-        {
-            children.insert(0, Node::Text(text_segments(text, ctx)));
-            None
-        }
-        (argument, _) => argument,
     };
 
     Ok(Element {
@@ -1583,69 +1735,6 @@ fn suggest_var_name(input: &str, vars: &HashMap<String, String>) -> Option<Strin
         }
     }
     best
-}
-
-/// Check for undefined `$var` references and return "did you mean?" diagnostics.
-/// `indent` is the line's leading whitespace, which `input` has had trimmed;
-/// reported columns and source lines include it.
-fn check_undefined_vars(
-    input: &str,
-    vars: &HashMap<String, String>,
-    line_num: usize,
-    indent: usize,
-) -> Vec<Diagnostic> {
-    let mut warnings = Vec::new();
-    if !input.contains('$') {
-        return warnings;
-    }
-    let chars: Vec<char> = input.chars().collect();
-    let mut i = 0;
-    while i < chars.len() {
-        if chars[i] == '$'
-            && i + 1 < chars.len()
-            && (chars[i + 1].is_alphanumeric() || chars[i + 1] == '_' || chars[i + 1] == '-')
-        {
-            let col = i;
-            let start = i + 1;
-            let mut end = start;
-            while end < chars.len()
-                && (chars[end].is_alphanumeric()
-                    || chars[end] == '-'
-                    || chars[end] == '_'
-                    || chars[end] == '.')
-            {
-                end += 1;
-            }
-            while end > start && chars[end - 1] == '.' {
-                end -= 1;
-            }
-            let name: String = chars[start..end].iter().collect();
-            if !name.is_empty()
-                && !vars.contains_key(&name)
-                && let Some(closest) = suggest_var_name(&name, vars)
-            {
-                warnings.push(
-                    Diagnostic::new(
-                        code::UNDEFINED_VARIABLE,
-                        Severity::Warning,
-                        line_num,
-                        format!(
-                            "undefined variable '${}', did you mean '${}'?",
-                            name, closest
-                        ),
-                    )
-                    .column(indent + col)
-                    .source(format!("{}{}", " ".repeat(indent), input))
-                    .subject(name.clone())
-                    .suggest(Some(closest)),
-                );
-            }
-            i = end;
-        } else {
-            i += 1;
-        }
-    }
-    warnings
 }
 
 // ---------------------------------------------------------------------------
@@ -2008,8 +2097,9 @@ fn is_valid_hex_color(s: &str) -> bool {
 }
 
 /// Evaluate the attributes of a list: bundles are spliced in, `if()`
-/// chooses, variables are substituted. With `validate`, unknown names and
-/// invalid values are reported.
+/// chooses, and variables fill values. A variable fills only the value it
+/// is written in: attributes come from bundles, never from text. With
+/// `validate`, unknown names and invalid values are reported.
 fn parse_attr_list(
     tokens: &[syntax::Attr],
     line_num: usize,
@@ -2020,58 +2110,75 @@ fn parse_attr_list(
     let mut seen_keys: Vec<String> = Vec::new();
 
     for token in tokens {
-        let part = token.raw.as_str();
-        // A whole attribute `if(cond, a, b)` is the chosen branch's text.
-        let chosen;
-        let part = match choose_if(part, ctx, line_num) {
-            Some(branch) => {
-                chosen = branch;
-                chosen.as_str()
-            }
-            None => part,
-        };
-        if part.is_empty() {
-            continue;
-        }
-
-        // $define reference — expand attribute bundle
-        if let Some(name) = part.strip_prefix('$')
-            && let Some(define_attrs) = ctx.defines.get(name)
-        {
-            ctx.used_defines.insert(name.to_string());
-            attrs.extend(define_attrs.clone());
-            continue;
-        }
-
-        track_var_refs(part, &mut ctx.used_variables);
-
-        // A value `if(cond, a, b)` picks `a` or `b` (free text) by `cond`;
-        // an empty choice leaves the attribute out.
-        let Some(part) = choose_if_value(part, ctx, line_num) else {
-            continue;
-        };
-        let part = substitute_vars(&part, &ctx.variables);
-
-        let attr = if let Some((key, value)) = syntax::split_html_attribute(&part) {
-            Attribute {
-                key: key.to_string(),
-                value: Some(value.to_string()),
-                html: true,
-            }
-        } else if let Some((key, value)) = part.split_once(' ') {
-            let value = value.trim().to_string();
-            Attribute {
-                key: key.trim().to_string(),
-                value: Some(value),
-                html: false,
-            }
+        let line = if token.span.line == 0 {
+            line_num
         } else {
-            Attribute {
-                key: part.to_string(),
-                value: None,
-                html: false,
+            token.span.line
+        };
+        // A whole attribute `if(cond, a, b)` is the chosen branch, as
+        // written; the attribute as written otherwise.
+        let (key, value, html, as_written) = match choose_if(&token.raw, ctx, line) {
+            Some(branch) if branch.is_empty() => continue,
+            Some(branch) => {
+                let (key, value, html) = syntax::split_attribute(&branch);
+                (key, value, html, false)
+            }
+            None => (token.key.clone(), token.value.clone(), token.html, true),
+        };
+        let column = |at: usize| as_written.then_some(token.span.column + at);
+
+        // `$name` alone: an attribute bundle, spliced in
+        if value.is_none()
+            && !html
+            && let Some(name) = key.strip_prefix('$')
+        {
+            if let Some(define_attrs) = ctx.defines.get(name) {
+                ctx.used_defines.insert(name.to_string());
+                attrs.extend(define_attrs.clone());
+            } else {
+                not_a_bundle(name, line, column(0), ctx);
+            }
+            continue;
+        }
+        // A name never comes from a variable
+        if key.contains('$') {
+            track_var_refs(&key, &mut ctx.used_variables);
+            ctx.diagnostics.push(
+                Diagnostic::error(
+                    code::ATTRIBUTE_FROM_VARIABLE,
+                    line,
+                    format!(
+                        "'{}': an attribute's name can't come from a variable. A variable \
+                         fills a value (`padding $size`), and whole attributes come from a \
+                         bundle (`@let name [padding 8]`, used as `[$name]`)",
+                        key
+                    ),
+                )
+                .subject(key.as_str()),
+            );
+            continue;
+        }
+
+        // A value `if(cond, a, b)` is `a` or `b`, by `cond`; an empty
+        // choice leaves the attribute out. Then its variables are filled.
+        let mut filled = true;
+        let value = match value {
+            None => None,
+            Some(value) => {
+                let at = column(token.raw.len() - value.len());
+                let (text, at) = match choose_if(&value, ctx, line) {
+                    Some(branch) if branch.is_empty() => continue,
+                    Some(branch) => (branch, None),
+                    None => (value, at),
+                };
+                let (text, ok) = ctx.fill(&text, line, at);
+                filled = ok;
+                Some(text)
             }
         };
+        let attr = Attribute { key, value, html };
+        // A value that couldn't be filled in is already reported
+        let validate = validate && filled;
 
         // Warn on duplicate attributes (compare full key so pseudo-class
         // variants like `border` and `hover:border` are not conflated)
@@ -2157,6 +2264,46 @@ fn parse_attr_list(
     attrs
 }
 
+/// `[$name]` where `$name` isn't an attribute bundle.
+fn not_a_bundle(name: &str, line: usize, column: Option<usize>, ctx: &mut ParseContext) {
+    track_var_refs(&format!("${}", name), &mut ctx.used_variables);
+    let is_value =
+        interp::name_len(name) > 0 && interp::resolve(name, &Vars(&ctx.variables)).is_some();
+    let diagnostic = if is_value {
+        Diagnostic::error(
+            code::ATTRIBUTE_FROM_VARIABLE,
+            line,
+            format!(
+                "'${}' is a value, not an attribute: attributes come from a bundle \
+                 (`@let name [padding 8]`, used as `[$name]`), and a value fills an \
+                 attribute's value (`padding ${}`)",
+                name, name
+            ),
+        )
+        .subject(name)
+    } else {
+        let bundles: Vec<&str> = ctx.defines.keys().map(String::as_str).collect();
+        let suggestion = suggest_closest(name, &bundles);
+        let message = match suggestion {
+            Some(closest) => format!(
+                "undefined attribute bundle '${}', did you mean '${}'?",
+                name, closest
+            ),
+            None => format!("undefined attribute bundle '${}'", name),
+        };
+        Diagnostic::error(code::UNDEFINED_VARIABLE, line, message)
+            .subject(name)
+            .suggest(suggestion)
+    };
+    let diagnostic = match (&ctx.current_source, column) {
+        ((current, Some(text)), Some(column)) if *current == line => {
+            diagnostic.column(column).source(text.clone())
+        }
+        _ => diagnostic,
+    };
+    ctx.diagnostics.push(diagnostic);
+}
+
 // ---------------------------------------------------------------------------
 // Text segment parsing (inline {...} elements)
 // ---------------------------------------------------------------------------
@@ -2191,21 +2338,31 @@ fn restore_escapes(text: &str) -> String {
     out
 }
 
-/// Evaluate text: substitute variables in its plain runs and build its
-/// inline elements.
+/// Evaluate text: fill in the variables of its plain runs and build its
+/// inline elements. Each run is one slot, so a value can't make markup.
 fn text_segments(text: &syntax::Text, ctx: &mut ParseContext) -> Vec<TextSegment> {
     let mut segments = Vec::new();
+    // The plain text so far, and where it starts
     let mut plain = String::new();
-    let flush = |plain: &mut String, segments: &mut Vec<TextSegment>, ctx: &ParseContext| {
+    let mut start: Option<syntax::Span> = None;
+    let flush = |plain: &mut String,
+                 start: &mut Option<syntax::Span>,
+                 segments: &mut Vec<TextSegment>,
+                 ctx: &mut ParseContext| {
         if !plain.is_empty() {
-            let text = substitute_vars(&protect_escapes(plain), &ctx.variables);
-            segments.push(TextSegment::Plain(restore_escapes(&text)));
+            let at = start.unwrap_or(text.span);
+            let filled = ctx.interpolate(&protect_escapes(plain), at.line, Some(at.column));
+            segments.push(TextSegment::Plain(restore_escapes(&filled)));
             plain.clear();
         }
+        *start = None;
     };
     for segment in &text.segments {
         match segment {
-            Segment::Plain { raw, .. } => plain.push_str(raw),
+            Segment::Plain { raw, span } => {
+                start.get_or_insert(*span);
+                plain.push_str(raw);
+            }
             Segment::Inline(inline) => {
                 match parse_single_element(
                     &inline.head,
@@ -2214,7 +2371,7 @@ fn text_segments(text: &syntax::Text, ctx: &mut ParseContext) -> Vec<TextSegment
                     ctx,
                 ) {
                     Ok(elem) => {
-                        flush(&mut plain, &mut segments, ctx);
+                        flush(&mut plain, &mut start, &mut segments, ctx);
                         segments.push(TextSegment::Inline(elem));
                     }
                     Err(mut e) => {
@@ -2223,6 +2380,7 @@ fn text_segments(text: &syntax::Text, ctx: &mut ParseContext) -> Vec<TextSegment
                         e.severity = Severity::Warning;
                         e.source_line = Some(text.raw.as_str().into());
                         ctx.diagnostics.push(e);
+                        start.get_or_insert(inline.span);
                         plain.push('{');
                         plain.push_str(&inline.raw);
                         if inline.closed {
@@ -2233,7 +2391,7 @@ fn text_segments(text: &syntax::Text, ctx: &mut ParseContext) -> Vec<TextSegment
             }
         }
     }
-    flush(&mut plain, &mut segments, ctx);
+    flush(&mut plain, &mut start, &mut segments, ctx);
     segments
 }
 
@@ -2306,7 +2464,7 @@ fn choose_if(text: &str, ctx: &mut ParseContext, line: usize) -> Option<String> 
     if split_trailing_paren(inner) || !(2..=3).contains(&args.len()) {
         return None;
     }
-    let branch = if ctx.condition(args[0].trim(), line) {
+    let branch = if ctx.condition(args[0].trim(), line, None) {
         args[1]
     } else {
         args.get(2).copied().unwrap_or("")
@@ -2335,21 +2493,6 @@ fn split_trailing_paren(inner: &str) -> bool {
         }
     }
     false
-}
-
-/// Resolve a value written `if(cond, a, b)`: evaluate `cond` and keep the
-/// chosen branch's text, or `None` when the choice is empty. Other
-/// attributes are returned unchanged.
-fn choose_if_value(part: &str, ctx: &mut ParseContext, line: usize) -> Option<String> {
-    let Some(pos) = part.find(['=', ' ']) else {
-        return Some(part.to_string());
-    };
-    let (head, value) = part.split_at(pos + 1);
-    match choose_if(value.trim(), ctx, line) {
-        Some(branch) if branch.is_empty() => None,
-        Some(branch) => Some(format!("{}{}", head, branch)),
-        None => Some(part.to_string()),
-    }
 }
 
 fn split_if_args(input: &str) -> Vec<&str> {
@@ -2713,50 +2856,6 @@ fn contrast_ratio(c1: (u8, u8, u8), c2: (u8, u8, u8)) -> f64 {
 // Variable substitution
 // ---------------------------------------------------------------------------
 
-/// Interpolate `$name` variables and `${expr}` expressions into text.
-/// Undefined variables, and expressions that don't evaluate, are left as
-/// written so they show up in the output.
-fn substitute_vars(input: &str, vars: &HashMap<String, String>) -> String {
-    if !input.contains('$') {
-        return input.to_string();
-    }
-    let is_name_char = |c: char| c.is_alphanumeric() || matches!(c, '_' | '-' | '.');
-    let mut result = String::with_capacity(input.len());
-    let mut rest = input;
-    while let Some(pos) = rest.find('$') {
-        result.push_str(&rest[..pos]);
-        let after = &rest[pos + 1..];
-        if after.starts_with('{')
-            && let Some(close) = matching_brace(after)
-        {
-            let source = &after[1..close];
-            match crate::expr::eval(source, &|name: &str| lookup(vars, name)) {
-                Ok(value) => result.push_str(&value.to_string()),
-                Err(_) => result.push_str(&rest[pos..pos + 1 + close + 1]),
-            }
-            rest = &after[close + 1..];
-            continue;
-        }
-        let mut end = after
-            .find(|c: char| !is_name_char(c))
-            .unwrap_or(after.len());
-        while end > 0 && after[..end].ends_with('.') {
-            end -= 1;
-        }
-        let name = &after[..end];
-        match vars.get(name) {
-            Some(value) if !name.is_empty() => result.push_str(value),
-            _ => {
-                result.push('$');
-                result.push_str(name);
-            }
-        }
-        rest = &after[end..];
-    }
-    result.push_str(rest);
-    result
-}
-
 /// `@image [inline] icon.svg` becomes the SVG's markup, with `width`,
 /// `height`, `color` / `fill`, `class=` and `id=` applied to the `<svg>`
 /// tag. Other nodes are returned unchanged.
@@ -2804,57 +2903,14 @@ fn inline_svg(node: Node, line_num: usize, ctx: &mut ParseContext) -> Node {
     Node::Raw(svg)
 }
 
-/// Index of the `}` matching the `{` that `s` starts with (skipping
-/// braces inside string literals).
-fn matching_brace(s: &str) -> Option<usize> {
-    let mut depth = 0;
-    let mut in_string = false;
-    for (i, c) in s.char_indices() {
-        match c {
-            '"' => in_string = !in_string,
-            _ if in_string => {}
-            '{' => depth += 1,
-            '}' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(i);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
 // ---------------------------------------------------------------------------
 // Variable usage tracking
 // ---------------------------------------------------------------------------
 
-/// Scan a string for $name references and record them in the used set.
+/// Record the names a string refers to (by syntax) as used.
 fn track_var_refs(input: &str, used: &mut HashSet<String>) {
-    if !input.contains('$') {
-        return;
-    }
-    let chars: Vec<char> = input.chars().collect();
-    let mut i = 0;
-    while i < chars.len() {
-        if chars[i] == '$'
-            && i + 1 < chars.len()
-            && (chars[i + 1].is_alphanumeric() || chars[i + 1] == '_' || chars[i + 1] == '-')
-        {
-            let start = i + 1;
-            let mut end = start;
-            while end < chars.len()
-                && (chars[end].is_alphanumeric() || chars[end] == '-' || chars[end] == '_')
-            {
-                end += 1;
-            }
-            let name: String = chars[start..end].iter().collect();
-            used.insert(name);
-            i = end;
-        } else {
-            i += 1;
-        }
+    if input.contains('$') {
+        used.extend(interp::names(input).into_iter().map(String::from));
     }
 }
 

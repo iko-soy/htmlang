@@ -27,8 +27,13 @@
 //! `default(s, fallback)`) and colors (`lighten(c, pct)`, `darken(c, pct)`,
 //! `alpha(c, a)`, `mix(c1, c2, pct)`). In text, `${expr}` interpolates an
 //! expression.
+//!
+//! A `$name` ends as it does in text (see `interp.rs`), so `$post.title`
+//! reads a field and `$a..$b` is two names. An undefined name is an error.
 
 use std::fmt;
+
+use crate::interp::{self, Problem, Reference, Scope};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -71,22 +76,65 @@ impl fmt::Display for Value {
     }
 }
 
-/// Resolves a variable name (the text after `$`). Returns `None` for
-/// undefined variables.
-pub type Resolver<'a> = &'a dyn Fn(&str) -> Option<Value>;
+/// Why an expression has no value.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Error {
+    /// `$name` has no definition; `offset` is where the `$` is.
+    Undefined { name: String, offset: usize },
+    /// Anything else: a syntax error, a type error, division by zero.
+    Invalid(String),
+}
 
-/// Evaluate `src`. Undefined variables are empty strings.
-pub fn eval(src: &str, resolve: Resolver) -> Result<Value, String> {
-    let tokens = tokenize(src)?;
+impl Error {
+    /// This error as a problem of a text in which the expression starts
+    /// at `base`.
+    pub(crate) fn at(self, base: usize) -> Problem {
+        match self {
+            Error::Undefined { name, offset } => Problem::Undefined {
+                name,
+                offset: base + offset,
+            },
+            Error::Invalid(message) => Problem::Invalid {
+                message,
+                offset: base,
+            },
+        }
+    }
+}
+
+impl From<String> for Error {
+    fn from(message: String) -> Self {
+        Error::Invalid(message)
+    }
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Error::Undefined { name, .. } => write!(f, "undefined variable '${}'", name),
+            Error::Invalid(message) => f.write_str(message),
+        }
+    }
+}
+
+/// Evaluate `src` with the variables of `scope`. An undefined variable is
+/// an error; a field that a record doesn't have is empty.
+pub fn eval(src: &str, scope: &dyn Scope) -> Result<Value, Error> {
+    let mut tokens = Vec::new();
+    tokenize(src, scope, 0, &mut tokens)?;
     let mut parser = Parser {
         tokens: &tokens,
         pos: 0,
-        resolve,
+        scope,
     };
     let value = parser.expr()?;
     match parser.tokens.get(parser.pos) {
         None => Ok(value),
-        Some(tok) => Err(format!("unexpected {} in `{}`", tok, src.trim())),
+        Some((tok, _)) => Err(Error::Invalid(format!(
+            "unexpected {} in `{}`",
+            tok,
+            src.trim()
+        ))),
     }
 }
 
@@ -119,82 +167,99 @@ impl fmt::Display for Token {
 
 const OPERATORS: &[&str] = &["==", "!=", "<=", ">=", "<", ">", "+", "-", "*", "/", "%"];
 
-fn tokenize(src: &str) -> Result<Vec<Token>, String> {
-    let chars: Vec<char> = src.chars().collect();
-    let mut tokens = Vec::new();
-    let mut i = 0;
+/// Read `src` into tokens, each with its byte offset (plus `base`).
+/// Variable names end as in text (see `interp.rs`), and `${...}` is a
+/// variable (`${name}`) or a parenthesized expression.
+fn tokenize(
+    src: &str,
+    scope: &dyn Scope,
+    base: usize,
+    tokens: &mut Vec<(Token, usize)>,
+) -> Result<(), Error> {
     let is_word_char = |c: char| c.is_alphanumeric() || matches!(c, '#' | '.' | '_' | '-' | '%');
-    while i < chars.len() {
-        let c = chars[i];
+    let mut i = 0;
+    while let Some(c) = src[i..].chars().next() {
+        let at = base + i;
         if c.is_whitespace() {
-            i += 1;
+            i += c.len_utf8();
         } else if c == '(' {
-            tokens.push(Token::LParen);
+            tokens.push((Token::LParen, at));
             i += 1;
         } else if c == ')' {
-            tokens.push(Token::RParen);
+            tokens.push((Token::RParen, at));
             i += 1;
         } else if c == ',' {
-            tokens.push(Token::Comma);
+            tokens.push((Token::Comma, at));
             i += 1;
         } else if c == '"' {
             let start = i + 1;
-            let end = chars[start..]
-                .iter()
-                .position(|&c| c == '"')
+            let end = src[start..]
+                .find('"')
                 .map(|p| start + p)
                 .ok_or_else(|| format!("unclosed string in `{}`", src.trim()))?;
-            tokens.push(Token::Str(chars[start..end].iter().collect()));
+            tokens.push((Token::Str(src[start..end].to_string()), at));
             i = end + 1;
         } else if c == '$' {
-            let start = i + 1;
-            let mut end = start;
-            while end < chars.len() && is_var_char(chars[end]) {
-                end += 1;
+            match interp::reference(&src[i + 1..], scope) {
+                Some((Reference::Var(path), len)) => {
+                    tokens.push((Token::Var(path), at));
+                    i += 1 + len;
+                }
+                Some((Reference::Expr(inner), len)) => {
+                    tokens.push((Token::LParen, at));
+                    tokenize(inner, scope, at + 2, tokens)?;
+                    tokens.push((Token::RParen, at + len));
+                    i += 1 + len;
+                }
+                None => {
+                    return Err(Error::Invalid(format!(
+                        "`$` without a variable name in `{}`",
+                        src.trim()
+                    )));
+                }
             }
-            while end > start && chars[end - 1] == '.' {
-                end -= 1;
-            }
-            if end == start {
-                return Err(format!("`$` without a variable name in `{}`", src.trim()));
-            }
-            tokens.push(Token::Var(chars[start..end].iter().collect()));
-            i = end;
         } else if let Some(op) = OPERATORS
             .iter()
-            .find(|op| chars[i..].iter().take(op.len()).copied().eq(op.chars()))
+            .find(|op| src[i..].starts_with(**op))
             // A `-` followed by a letter starts a word (`-webkit-box`);
             // inside words (`ease-in`) it is consumed by the word itself.
-            .filter(|op| **op != "-" || !chars.get(i + 1).is_some_and(|c| c.is_alphabetic()))
+            .filter(|op| **op != "-" || !src[i + 1..].starts_with(char::is_alphabetic))
         {
-            tokens.push(Token::Op(op));
+            tokens.push((Token::Op(op), at));
             i += op.len();
         } else if is_word_char(c) {
             let start = i;
-            while i < chars.len() && is_word_char(chars[i]) {
-                i += 1;
+            while let Some(c) = src[i..].chars().next().filter(|&c| is_word_char(c)) {
+                i += c.len_utf8();
             }
-            let word: String = chars[start..i].iter().collect();
-            tokens.push(match word.parse::<f64>() {
-                Ok(n) if !word.ends_with('.') => Token::Num(n),
-                _ => Token::Word(word),
-            });
+            let word = &src[start..i];
+            tokens.push((
+                match word.parse::<f64>() {
+                    Ok(n) if !word.ends_with('.') => Token::Num(n),
+                    _ => Token::Word(word.to_string()),
+                },
+                at,
+            ));
         } else {
-            return Err(format!("unexpected `{}` in `{}`", c, src.trim()));
+            return Err(Error::Invalid(format!(
+                "unexpected `{}` in `{}`",
+                c,
+                src.trim()
+            )));
         }
     }
-    Ok(tokens)
+    Ok(())
 }
 
 struct Parser<'a> {
-    tokens: &'a [Token],
+    tokens: &'a [(Token, usize)],
     pos: usize,
-    resolve: Resolver<'a>,
+    scope: &'a dyn Scope,
 }
 
 impl Parser<'_> {
     fn peek(&self) -> Option<&Token> {
-        self.tokens.get(self.pos)
+        self.tokens.get(self.pos).map(|(token, _)| token)
     }
 
     fn eat_word(&mut self, word: &str) -> bool {
@@ -217,18 +282,18 @@ impl Parser<'_> {
         }
     }
 
-    fn expect(&mut self, token: Token) -> Result<(), String> {
+    fn expect(&mut self, token: Token) -> Result<(), Error> {
         match self.peek() {
             Some(t) if *t == token => {
                 self.pos += 1;
                 Ok(())
             }
-            Some(t) => Err(format!("expected {} but found {}", token, t)),
-            None => Err(format!("expected {} at the end", token)),
+            Some(t) => Err(format!("expected {} but found {}", token, t).into()),
+            None => Err(format!("expected {} at the end", token).into()),
         }
     }
 
-    fn expr(&mut self) -> Result<Value, String> {
+    fn expr(&mut self) -> Result<Value, Error> {
         let mut left = self.and()?;
         while self.eat_word("or") {
             let right = self.and()?;
@@ -237,7 +302,7 @@ impl Parser<'_> {
         Ok(left)
     }
 
-    fn and(&mut self) -> Result<Value, String> {
+    fn and(&mut self) -> Result<Value, Error> {
         let mut left = self.not()?;
         while self.eat_word("and") {
             let right = self.not()?;
@@ -246,14 +311,14 @@ impl Parser<'_> {
         Ok(left)
     }
 
-    fn not(&mut self) -> Result<Value, String> {
+    fn not(&mut self) -> Result<Value, Error> {
         if self.eat_word("not") {
             return Ok(Value::Bool(!self.not()?.truthy()));
         }
         self.compare()
     }
 
-    fn compare(&mut self) -> Result<Value, String> {
+    fn compare(&mut self) -> Result<Value, Error> {
         let left = self.sum()?;
         let Some(op) = self.eat_op(&["==", "!=", "<=", ">=", "<", ">"]) else {
             return Ok(left);
@@ -278,7 +343,7 @@ impl Parser<'_> {
         }))
     }
 
-    fn sum(&mut self) -> Result<Value, String> {
+    fn sum(&mut self) -> Result<Value, Error> {
         let mut left = self.product()?;
         while let Some(op) = self.eat_op(&["+", "-"]) {
             let right = self.product()?;
@@ -287,7 +352,7 @@ impl Parser<'_> {
         Ok(left)
     }
 
-    fn product(&mut self) -> Result<Value, String> {
+    fn product(&mut self) -> Result<Value, Error> {
         let mut left = self.unary()?;
         while let Some(op) = self.eat_op(&["*", "/", "%"]) {
             let right = self.unary()?;
@@ -296,27 +361,40 @@ impl Parser<'_> {
         Ok(left)
     }
 
-    fn unary(&mut self) -> Result<Value, String> {
+    fn unary(&mut self) -> Result<Value, Error> {
         if self.eat_op(&["-"]).is_some() {
             let value = self.unary()?;
             return value
                 .as_num()
                 .map(|n| Value::Num(-n))
-                .ok_or_else(|| format!("cannot negate `{}`", value));
+                .ok_or_else(|| Error::Invalid(format!("cannot negate `{}`", value)));
         }
         self.primary()
     }
 
-    fn primary(&mut self) -> Result<Value, String> {
-        let token = self
-            .peek()
+    fn primary(&mut self) -> Result<Value, Error> {
+        let (token, at) = self
+            .tokens
+            .get(self.pos)
             .cloned()
             .ok_or_else(|| "expected a value at the end".to_string())?;
         self.pos += 1;
         match token {
             Token::Num(n) => Ok(Value::Num(n)),
-            Token::Str(s) => Ok(Value::Str(interpolate(&s, self.resolve))),
-            Token::Var(name) => Ok((self.resolve)(&name).unwrap_or(Value::Str(String::new()))),
+            Token::Str(s) => {
+                let (text, problems) = interp::interpolate(&s, self.scope);
+                match problems.into_iter().next() {
+                    None => Ok(Value::Str(text)),
+                    Some(Problem::Undefined { name, offset }) => Err(Error::Undefined {
+                        name,
+                        offset: at + 1 + offset,
+                    }),
+                    Some(Problem::Invalid { message, .. }) => Err(Error::Invalid(message)),
+                }
+            }
+            Token::Var(name) => {
+                interp::resolve(&name, self.scope).ok_or(Error::Undefined { name, offset: at })
+            }
             Token::Word(w) if w == "true" => Ok(Value::Bool(true)),
             Token::Word(w) if w == "false" => Ok(Value::Bool(false)),
             Token::Word(name) if self.peek() == Some(&Token::LParen) => {
@@ -330,7 +408,7 @@ impl Parser<'_> {
                     }
                 }
                 self.expect(Token::RParen)?;
-                call(&name, args)
+                Ok(call(&name, args)?)
             }
             Token::Word(w) => Ok(Value::Str(w)),
             Token::LParen => {
@@ -338,7 +416,7 @@ impl Parser<'_> {
                 self.expect(Token::RParen)?;
                 Ok(value)
             }
-            other => Err(format!("unexpected {}", other)),
+            other => Err(format!("unexpected {}", other).into()),
         }
     }
 }
@@ -357,10 +435,6 @@ fn arithmetic(op: &str, left: &Value, right: &Value) -> Result<Value, String> {
         "%" => a % b,
         _ => unreachable!(),
     }))
-}
-
-fn is_var_char(c: char) -> bool {
-    c.is_alphanumeric() || matches!(c, '_' | '-' | '.')
 }
 
 /// Call a built-in function.
@@ -527,47 +601,29 @@ fn mix_colors(c1: (u8, u8, u8), c2: (u8, u8, u8), weight: f64) -> (u8, u8, u8) {
     (r, g, b)
 }
 
-/// Replace `$name` references inside a string literal.
-fn interpolate(s: &str, resolve: Resolver) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut rest = s;
-    while let Some(pos) = rest.find('$') {
-        out.push_str(&rest[..pos]);
-        let after = &rest[pos + 1..];
-        let end = after.find(|c: char| !is_var_char(c)).unwrap_or(after.len());
-        if end == 0 {
-            out.push('$');
-        } else {
-            out.push_str(
-                &resolve(&after[..end])
-                    .map(|v| v.to_string())
-                    .unwrap_or_default(),
-            );
-        }
-        rest = &after[end..];
-    }
-    out.push_str(rest);
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    use crate::interp::tests::Map;
+
+    fn scope() -> Map {
+        Map::new(&[
+            ("tags#", "2"),
+            ("tags.0", "rust"),
+            ("tags.1", "web dev"),
+            ("count", "3"),
+            ("name", "World"),
+            ("theme", "dark"),
+            ("tricky", "a == b"),
+            ("empty", ""),
+            ("post", ""),
+            ("post.title", "Hi"),
+        ])
+    }
+
     fn ev(src: &str) -> Value {
-        let resolve = |name: &str| {
-            let text = |s: &str| Some(Value::Str(s.to_string()));
-            match name {
-                "tags" => Some(Value::List(vec!["rust".into(), "web dev".into()])),
-                "count" => text("3"),
-                "name" => text("World"),
-                "theme" => text("dark"),
-                "tricky" => text("a == b"),
-                "empty" => text(""),
-                _ => None,
-            }
-        };
-        eval(src, &resolve).unwrap()
+        eval(src, &scope()).unwrap()
     }
 
     #[test]
@@ -602,7 +658,29 @@ mod tests {
     fn strings_and_if() {
         assert_eq!(ev("\"Hi $name!\"").to_string(), "Hi World!");
         assert_eq!(ev("if($count > 2, big, small)").to_string(), "big");
-        assert_eq!(ev("$missing").to_string(), "");
+        assert_eq!(ev("${name}").to_string(), "World");
+        assert_eq!(ev("${$count + 1} * 2").to_string(), "8");
+    }
+
+    #[test]
+    fn names_and_fields() {
+        assert_eq!(ev("$post.title").to_string(), "Hi");
+        // A field the record doesn't have is empty
+        assert_eq!(ev("default($post.draft, no)").to_string(), "no");
+        assert_eq!(
+            eval("$missing == 1", &scope()),
+            Err(Error::Undefined {
+                name: "missing".into(),
+                offset: 0
+            })
+        );
+        assert_eq!(
+            eval("\"a $nope\"", &scope()),
+            Err(Error::Undefined {
+                name: "nope".into(),
+                offset: 3
+            })
+        );
     }
 
     #[test]
@@ -627,7 +705,7 @@ mod tests {
 
     #[test]
     fn errors_are_reported() {
-        let none = |_: &str| None;
+        let none = Map::new(&[]);
         assert!(eval("dark * 2", &none).is_err());
         assert!(eval("1 +", &none).is_err());
         assert!(eval("(1", &none).is_err());

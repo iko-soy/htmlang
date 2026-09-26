@@ -76,6 +76,11 @@ fn snapshot_variables_defines() {
 }
 
 #[test]
+fn snapshot_variable_slots() {
+    snapshot_test("variable_slots");
+}
+
+#[test]
 fn snapshot_functions() {
     snapshot_test("functions");
 }

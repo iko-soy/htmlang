@@ -1413,7 +1413,7 @@ impl Reader<'_> {
 
 /// An attribute's key, value, and whether it is written `key=value`:
 /// `padding 20`, `type=email`, `required`.
-fn split_attribute(raw: &str) -> (String, Option<String>, bool) {
+pub(crate) fn split_attribute(raw: &str) -> (String, Option<String>, bool) {
     if let Some((key, value)) = split_html_attribute(raw) {
         return (key.to_string(), Some(value.to_string()), true);
     }

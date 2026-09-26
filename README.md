@@ -47,6 +47,9 @@ unless you write some, and nothing is added that you didn't ask for.
   `type=email`) or bare (`required`).
 - **`@let` defines everything.** It defines values, computed values,
   attribute bundles and functions. A layout is just a function with slots.
+  `$name` fills in a value exactly where it is written (a line of text, an
+  attribute's value, a file path), whole attributes come from a bundle, and
+  an undefined name is an error.
 - **Data comes in as lists and records.** `@data` loads JSON, and `@each` and
   `@if` run at compile time.
 

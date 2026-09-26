@@ -786,29 +786,14 @@ pub(crate) fn semantic_tokens(text: &str, tree: &Tree, result: &ParseResult) -> 
         if verbatim.contains(&line_num) {
             continue;
         }
-        let bytes = line.as_bytes();
-        let mut i = 0;
-        while i < bytes.len() {
-            if bytes[i] == b'$' {
-                let start = i;
-                i += 1;
-                while i < bytes.len()
-                    && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'-' || bytes[i] == b'_')
-                {
-                    i += 1;
-                }
-                if i > start + 1 {
-                    found.push((
-                        line_num,
-                        start as u32,
-                        (i - start) as u32,
-                        TOKEN_VARIABLE,
-                        0,
-                    ));
-                }
-            } else {
-                i += 1;
-            }
+        for (start, end) in variable_refs(line) {
+            found.push((
+                line_num,
+                start as u32,
+                (end - start) as u32,
+                TOKEN_VARIABLE,
+                0,
+            ));
         }
     }
 
@@ -904,37 +889,38 @@ pub(crate) fn inlay_hints(text: &str, tree: &Tree) -> Vec<InlayHint> {
         if skip.contains(&(line_idx as u32)) {
             continue;
         }
-        let bytes = line.as_bytes();
-        let mut i = 0;
-        while i < bytes.len() {
-            if bytes[i] == b'$' {
-                let start = i;
-                i += 1;
-                while i < bytes.len()
-                    && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'-' || bytes[i] == b'_')
-                {
-                    i += 1;
-                }
-                if i > start + 1
-                    && let Some(value) = values.get(&line[start + 1..i])
-                {
-                    hints.push(InlayHint {
-                        position: Position::new(line_idx as u32, i as u32),
-                        label: InlayHintLabel::String(format!(" \u{2192} {}", value)),
-                        kind: None,
-                        text_edits: None,
-                        tooltip: None,
-                        padding_left: Some(false),
-                        padding_right: Some(true),
-                        data: None,
-                    });
-                }
-            } else {
-                i += 1;
+        for (start, end) in variable_refs(line) {
+            if let Some(value) = values.get(&line[start + 1..end]) {
+                hints.push(InlayHint {
+                    position: Position::new(line_idx as u32, end as u32),
+                    label: InlayHintLabel::String(format!(" \u{2192} {}", value)),
+                    kind: None,
+                    text_edits: None,
+                    tooltip: None,
+                    padding_left: Some(false),
+                    padding_right: Some(true),
+                    data: None,
+                });
             }
         }
     }
     hints
+}
+
+/// The `$name` references on a line, as byte ranges that include the `$`.
+/// A name ends as the compiler ends it; `$5` is text.
+fn variable_refs(line: &str) -> Vec<(usize, usize)> {
+    let mut refs = Vec::new();
+    let mut from = 0;
+    while let Some(i) = line[from..].find('$') {
+        let start = from + i;
+        let len = htmlang::interp::name_len(&line[start + 1..]);
+        if len > 0 {
+            refs.push((start, start + 1 + len));
+        }
+        from = start + 1 + len;
+    }
+    refs
 }
 
 // ---------------------------------------------------------------------------
@@ -1108,6 +1094,21 @@ mod tests {
         // `@let`, `gap`, `@style`, `@el`, `$gap`, `@card` (a call)
         assert_eq!(tokens.len(), 6, "{:?}", tokens);
         assert_eq!(tokens[5].token_type, TOKEN_FUNCTION);
+    }
+
+    #[test]
+    fn variable_tokens_end_where_the_compiler_ends_names() {
+        assert_eq!(
+            variable_refs("$lang.json costs $5, ${x} $--brand $a- b"),
+            [(0, 5), (26, 34), (35, 37)]
+        );
+        // A typo'd variable gets the compiler's suggestion as a fix
+        let found = fixes("@let gap 8\n@el [padding $gpa]\n");
+        assert!(
+            found.iter().any(|(t, _)| t == "Replace with '$gap'"),
+            "{:?}",
+            found
+        );
     }
 
     #[test]

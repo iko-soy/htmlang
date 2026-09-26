@@ -188,10 +188,19 @@ fn multi_line_content_is_a_function() {
 
 #[test]
 fn each_else_does_not_leak_variables() {
-    let out = compile(
+    // Outside the @else, `$leaked` is undefined: an error, not "yes"
+    let result = parser::parse(
         "@let empty \"\"\n@each $x in $empty\n  @text $x\n@else\n  @let leaked yes\n  @text none\n@text v=$leaked",
     );
-    assert!(!out.contains("v=yes"), "{}", out);
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "undefined-variable" && d.line == 7),
+        "{:?}",
+        result.diagnostics
+    );
+    assert!(!codegen::generate(&result.document).contains("v=yes"));
 }
 
 #[test]
@@ -333,7 +342,7 @@ fn conditions_do_not_reparse_variable_values() {
     // The value contains `==`; the condition compares it as a whole.
     let out = compile("@let v \"a == b\"\n@if $v == \"a == b\"\n  @text yes");
     assert!(out.contains(">yes<"), "{}", out);
-    let out = compile("@let n 5\n@if $n > 2 and not $missing\n  @text big");
+    let out = compile("@let n 5\n@let none \"\"\n@if $n > 2 and not $none\n  @text big");
     assert!(out.contains(">big<"), "{}", out);
 }
 
@@ -742,4 +751,122 @@ fn an_escaped_quote_does_not_split_an_attribute() {
     let out = compile("@el [content \"a\\\", b\", padding 4] x\n");
     assert!(out.contains("content:\"a\\\", b\""), "{}", out);
     assert!(out.contains("padding:4px"), "{}", out);
+}
+
+// --- Variables fill the slot they are written in ---
+
+fn codes_of(src: &str) -> Vec<(&'static str, usize)> {
+    parser::parse(src)
+        .diagnostics
+        .iter()
+        .filter(|d| d.severity == Severity::Error)
+        .map(|d| (d.code, d.line))
+        .collect()
+}
+
+#[test]
+fn a_variable_never_makes_an_attribute() {
+    // Text in attribute position used to become an HTML attribute
+    let src = "@let attr href=/x\n@el [$attr] y";
+    assert_eq!(codes_of(src), [("attribute-from-variable", 2)]);
+    assert!(!compile_in(&std::env::temp_dir(), src).contains("href"));
+    // ... or build an attribute's name
+    assert_eq!(
+        codes_of("@let key padding\n@el [$key 8] y"),
+        [("attribute-from-variable", 2)]
+    );
+    // A bundle is the way to reuse attributes
+    let out = compile("@let attr [href=/x]\n@el [$attr] y");
+    assert!(out.contains("href=\"/x\""), "{}", out);
+}
+
+#[test]
+fn a_value_with_commas_stays_one_value() {
+    let out = compile("@let fonts Inter, sans-serif\n@el [font-family $fonts, color red] x");
+    assert!(out.contains("font-family:Inter, sans-serif;"), "{}", out);
+    assert!(out.contains("color:red"), "{}", out);
+}
+
+#[test]
+fn a_variable_name_ends_before_a_dot_of_text() {
+    let out = compile("@let lang fr\n@text file $lang.json, ${lang}uage");
+    assert!(out.contains("file fr.json, fruage"), "{}", out);
+    // In a path too
+    let dir = scratch_dir("lang_path");
+    std::fs::create_dir_all(dir.join("locales")).unwrap();
+    std::fs::write(dir.join("locales/fr.json"), r#"{"hello": "Bonjour"}"#).unwrap();
+    let result = parser::parse_with_base(
+        "@let lang fr\n@data $t locales/$lang.json\n@text $t.hello",
+        Some(&dir),
+    );
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    assert!(codegen::generate(&result.document).contains("Bonjour"));
+}
+
+#[test]
+fn a_dollar_before_anything_but_a_name_is_text() {
+    let out = compile("@text costs $5, $$ and $\n@text [id=a$] x");
+    assert!(out.contains("costs $5, $$ and $"), "{}", out);
+    assert!(out.contains("id=\"a$\""), "{}", out);
+}
+
+#[test]
+fn an_undefined_variable_is_an_error_everywhere() {
+    for src in [
+        "@text Hello $nobody",
+        "@el [padding $nobody] x",
+        "@let x = $nobody + 1\n@text $x",
+        "@if $nobody\n  @text y",
+        "@each $x in $nobody\n  @text $x",
+        "@page $nobody",
+        "@link /$nobody x",
+    ] {
+        let result = parser::parse(src);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "undefined-variable" && d.severity == Severity::Error),
+            "{}: {:?}",
+            src,
+            result.diagnostics
+        );
+    }
+    // A typo gets a suggestion and a column
+    let result = parser::parse("@let gap 8\n@el [padding $gpa] x");
+    let d = &result.diagnostics[0];
+    assert_eq!(d.suggestion.as_deref(), Some("gap"));
+    assert_eq!(d.column, Some(13));
+}
+
+#[test]
+fn a_missing_field_of_a_record_is_empty() {
+    let out = compile(
+        "@data $post {\"title\": \"T\"}\n@text x${post.draft}y ${default($post.tag, none)}\n@if $post.draft\n  @text draft\n@each $t in $post.tags\n  @text $t",
+    );
+    assert!(out.contains("<span>xy none</span>"), "{}", out);
+    assert!(!out.contains("draft"), "{}", out);
+}
+
+#[test]
+fn data_is_never_read_as_markup_or_variables() {
+    let out =
+        compile("@let x no\n@data $d {\"t\": \"$x {@b bold}\"}\n@link /a $d.t\n@paragraph $d.t");
+    assert!(!out.contains("<b"), "{}", out);
+    assert!(!out.contains(">no"), "{}", out);
+    assert!(out.contains("$x {@b bold}</a>"), "{}", out);
+}
+
+#[test]
+fn attribute_names_are_checked_in_code_that_does_not_run() {
+    let result = parser::parse("@let card $t\n  @el [paddin $t, $k 4] $t\n");
+    let codes: Vec<_> = result.diagnostics.iter().map(|d| d.code).collect();
+    assert!(codes.contains(&"unknown-attribute"), "{:?}", codes);
+    assert!(codes.contains(&"attribute-from-variable"), "{:?}", codes);
+}
+
+#[test]
+fn a_problem_in_a_loop_is_reported_once() {
+    let result = parser::parse("@each $i in 1..3\n  @text $nobody");
+    assert_eq!(result.diagnostics.len(), 1, "{:?}", result.diagnostics);
 }

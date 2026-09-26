@@ -89,6 +89,8 @@ pub mod code {
     pub const HTML_ATTRIBUTE_FORM: &str = "html-attribute-form";
     pub const UNKNOWN_PAGE_ATTRIBUTE: &str = "unknown-page-attribute";
     pub const UNDEFINED_VARIABLE: &str = "undefined-variable";
+    /// An attribute, or an attribute's name, made from a variable.
+    pub const ATTRIBUTE_FROM_VARIABLE: &str = "attribute-from-variable";
     pub const DUPLICATE_ATTRIBUTE: &str = "duplicate-attribute";
 
     // Values
@@ -146,6 +148,7 @@ pub mod code {
         HTML_ATTRIBUTE_FORM,
         UNKNOWN_PAGE_ATTRIBUTE,
         UNDEFINED_VARIABLE,
+        ATTRIBUTE_FROM_VARIABLE,
         DUPLICATE_ATTRIBUTE,
         INVALID_VALUE,
         UNKNOWN_COLOR,

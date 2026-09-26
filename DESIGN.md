@@ -71,6 +71,10 @@ An attribute can take one of three forms:
 A comma inside `(...)` or `"..."` doesn't split attributes, so a font stack
 is written `font-family "Inter, sans-serif"`.
 
+A variable fills an attribute's value (`padding $gap`, `alt=$title`), never
+its name or a whole attribute: attributes come from a
+[bundle](#definitions), written `[$card]`.
+
 The attribute list belongs to the element name right before it. Anywhere
 else, `[` is an ordinary character, so a line of text can contain one:
 
@@ -95,7 +99,8 @@ inline element:
 A backslash makes the next character literal:
 
 - `\@` and `\--` let a line of text start with `@` or `--`.
-- `\$` writes a `$` that isn't a variable.
+- `\$` writes a `$` that would otherwise start a variable. A `$` that isn't
+  followed by a letter or `_` is text anyway: `$5`, `$$`.
 - `\{` writes a brace that doesn't start an inline element.
 - `\\` writes a backslash.
 
@@ -405,6 +410,41 @@ and an HTML attribute can share a name, because the `=` tells them apart:
 
 A definition applies from its own line onward.
 
+### Variables
+
+`$name` inserts a value wherever htmlang holds text: a line of text, an
+attribute's value, an element's argument, a `@let` value, a file path, the
+title of `@page` and the value of `@meta`. Each line is read first, and then
+`$name` fills the one place it is written in. What it inserts is never read
+again as htmlang, so a value can't become an attribute, an attribute's name,
+a comma between attributes, an inline element or another `$name`. Attributes
+come from a bundle:
+
+```
+@let link-style [color #2563eb, text-decoration underline]
+@let label Docs
+@link [$link-style, aria-label=$label] /docs Read the $label
+```
+
+A name starts with a letter or `_` and goes on with letters, digits, `_`
+and `-`. It ends at the first other character, so after `@let lang fr`,
+`$lang.json` is `fr.json`. A `.field` continues the name only when the value
+is a record or a list (`$post.title`, `$tags.0`). `${name}` is the same name
+with explicit ends, for text that follows it directly, and `${EXPR}` inserts
+the value of an [expression](#expressions). A `$` followed by anything else
+is text.
+
+```
+@let lang fr
+@let size 4
+@data $post {"title": "Hello"}
+@text locales/$lang.json, ${size}px, $post.title, $5
+```
+
+A name that isn't defined is an error. A field that a record doesn't have
+is empty, so optional fields of `@data` records work: `@if $post.draft` is
+false, and `${default($post.tag, none)}` gives `none`.
+
 ### Functions
 
 A function is called like an element:
@@ -493,10 +533,11 @@ Conditions and computed values (`@let x = ...`) are expressions:
 | Color | `lighten(c, pct)`, `darken(c, pct)`, `alpha(c, a)`, `mix(c1, c2, pct)` |
 
 Variables are looked up during evaluation, so a value that contains `==` or
-spaces is still one value. An invalid expression is a compile error.
+spaces is still one value. An invalid expression is a compile error, and so
+is an undefined variable.
 
-In text and attribute values, `$name` inserts a variable, and `${EXPR}`
-inserts the value of any expression:
+In text, values and file paths, `${EXPR}` inserts the value of any
+expression (see [Variables](#variables)):
 
 ```
 @let name htmlang
@@ -609,7 +650,8 @@ raw HTML for the `<head>`, such as a font link, a canonical URL or JSON-LD.
   <link rel="canonical" href="https://example.com/">
 ```
 
-Translations are a JSON file per locale: `@data $t locales/$lang.json`.
+Translations are a JSON file per locale: `@data $t locales/$lang.json`
+loads `locales/fr.json` when `$lang` is `fr`.
 
 ## CSS
 

@@ -1,0 +1,18 @@
+@page Variables fill slots
+@let lang fr
+@let size 12
+@let fonts Inter, sans-serif
+@let label Docs
+@let link-style [color #2563eb, text-decoration underline]
+@data $post {"title": "Hello {@b there} $lang", "tags": ["a", "b"]}
+
+@el [padding ${size}px, font-family $fonts, spacing 4]
+  @text locales/$lang.json
+  @link [$link-style, aria-label=$label] /docs/$lang Read the $label
+  @paragraph $post.title, $5 and $$
+  @each $tag in $post.tags
+    @text #$tag
+  @each $tag in $post.missing
+    @text never
+  @if $post.draft
+    @text never

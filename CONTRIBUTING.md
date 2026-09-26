@@ -31,6 +31,9 @@ Linux, macOS, and Windows. Your change should pass all three.
   - `vocab.rs` — the attribute vocabulary (htmlang attributes, CSS properties,
     HTML attributes) and the state/media prefixes.
   - `expr.rs` — the expression language for conditions and computed values.
+  - `interp.rs` — `$name` and `${...}`: where a name ends and how one slot
+    of text (a text run, an attribute's value, an argument, a path) is
+    filled in. The one place variables are interpolated.
   - `std.hl` — the standard library, written in htmlang and loaded before
     every file.
 - `crates/htmlang-wasm/` — thin wrapper exposing `compile` to the web playground.
