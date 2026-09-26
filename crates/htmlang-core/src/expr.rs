@@ -474,10 +474,10 @@ impl Parser<'_> {
         let arguments =
             || Error::Invalid("if() takes 2 or 3 arguments: if(CONDITION, A, B)".into());
         let condition = self.expr()?;
-        if self.peek() != Some(&Token::Comma) {
-            return Err(arguments());
+        match self.peek() {
+            Some(Token::RParen) | None => return Err(arguments()),
+            _ => self.expect(Token::Comma)?,
         }
-        self.pos += 1;
         let taken = condition.truthy();
         let then = self.skipping(!taken, Self::expr)?;
         let otherwise = if self.peek() == Some(&Token::Comma) {
@@ -755,6 +755,9 @@ mod tests {
         // if() itself takes 2 or 3 arguments
         assert!(eval("if($on)", &zero).is_err());
         assert!(eval("if($on, 1, 2, 3)", &zero).is_err());
+        // Something else after the condition is what is reported
+        let error = eval("if($n.x, 1, 2)", &zero).unwrap_err().to_string();
+        assert!(error.contains("`.x`"), "{}", error);
         // The taken branch still reports its errors
         assert!(eval("if($n == 0, 10 / $n, 0)", &zero).is_err());
         assert!(eval("$n == 0 and 10 / $n > 1", &zero).is_err());

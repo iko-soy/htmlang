@@ -431,12 +431,16 @@ pub(crate) fn owning_element(text: &str, position: Position) -> Option<String> {
             match ch {
                 ']' => depth += 1,
                 '[' => {
-                    if depth == 0 {
+                    // A group in `if(CONDITION, [a, b])` belongs to the
+                    // list around it
+                    let group = line[..col].trim_end().ends_with([',', '(']);
+                    if depth > 0 {
+                        depth -= 1;
+                    } else if !group {
                         bracket_line = Some(line_idx);
                         bracket_col = col;
                         break 'outer;
                     }
-                    depth -= 1;
                 }
                 _ => {}
             }
@@ -1304,6 +1308,17 @@ mod tests {
         assert!(items.iter().any(|i| i.label == "color"));
         let items = completions("@el [pad", Position::new(0, 8));
         assert!(items.iter().any(|i| i.label == "if()"));
+        // A group's element is the one whose list it is in
+        let text = "@input [\n  if($on, [ty";
+        assert_eq!(
+            owning_element(text, Position::new(1, 14)).as_deref(),
+            Some("input")
+        );
+        let text = "@input [if($a, [id=x], [ty";
+        assert_eq!(
+            owning_element(text, Position::new(0, 26)).as_deref(),
+            Some("input")
+        );
     }
 
     #[test]

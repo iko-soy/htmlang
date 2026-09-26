@@ -5661,6 +5661,11 @@ fn the_branch_not_taken_is_checked_but_not_evaluated() {
     let d =
         parse_diagnostics("@let on true\n@let big 24\n@el [if($on, padding 4, padding $big)] x\n");
     assert!(d.is_empty(), "{:?}", d);
+    // ... bundles too, there and in an `@if` that isn't taken
+    let d = parse_diagnostics(
+        "@let on true\n@let card [padding 8]\n@let wide [width 100%]\n@el [if($on, padding 4, [$card])] x\n@if false\n  @el [$wide] y\n",
+    );
+    assert!(d.is_empty(), "{:?}", d);
     // In code that doesn't run, every branch is checked on its own
     let d = parse_diagnostics(
         "@if false\n  @el [if($x, paddin 3, [marginn 4, padding 5]), if($x, gap 1, gap 2)] x\n",
@@ -5722,4 +5727,9 @@ fn css_if_in_a_value_is_css() {
         "{:?}",
         d
     );
+    // Quoted CSS text is text, not a call
+    let d = parse_diagnostics(
+        "@el [before:content \"see if(this)\", font-family \"if(a)\", grid-template-areas 'a if(b)']\n  x\n",
+    );
+    assert!(d.is_empty(), "{:?}", d);
 }

@@ -3111,31 +3111,40 @@ fn css_strings(value: &str) -> Vec<&str> {
 
 /// An `if(...)` in a CSS value that isn't CSS's if(): CSS writes each
 /// branch `CONDITION: VALUE`, so an if() without a `:` is something else.
+/// Quoted CSS strings are text, not calls.
 fn not_css_if(value: &str) -> Option<&str> {
-    let mut from = 0;
-    while let Some(found) = value[from..].find("if(") {
-        let at = from + found;
-        from = at + 3;
-        let word_before = value[..at]
-            .chars()
-            .next_back()
-            .is_some_and(|c| c.is_alphanumeric() || matches!(c, '-' | '_'));
-        if word_before {
-            continue;
-        }
-        let mut depth = 0;
-        let close = value[at + 2..].char_indices().find_map(|(i, c)| {
-            match c {
-                '(' => depth += 1,
-                ')' => depth -= 1,
-                _ => {}
+    let mut quote = None;
+    let mut prev = None;
+    let mut chars = value.char_indices();
+    while let Some((at, c)) = chars.next() {
+        match quote {
+            Some(_) if c == '\\' => {
+                chars.next();
             }
-            (depth == 0).then_some(at + 2 + i)
-        });
-        let end = close.map_or(value.len(), |c| c + 1);
-        if !value[at + 3..end].contains(':') {
-            return Some(&value[at..end]);
+            Some(q) if c == q => quote = None,
+            Some(_) => {}
+            None if matches!(c, '"' | '\'') => quote = Some(c),
+            None => {
+                let word_before =
+                    prev.is_some_and(|p: char| p.is_alphanumeric() || matches!(p, '-' | '_'));
+                if !word_before && value[at..].starts_with("if(") {
+                    let mut depth = 0;
+                    let close = value[at + 2..].char_indices().find_map(|(i, c)| {
+                        match c {
+                            '(' => depth += 1,
+                            ')' => depth -= 1,
+                            _ => {}
+                        }
+                        (depth == 0).then_some(at + 2 + i)
+                    });
+                    let end = close.map_or(value.len(), |c| c + 1);
+                    if !value[at + 3..end].contains(':') {
+                        return Some(&value[at..end]);
+                    }
+                }
+            }
         }
+        prev = Some(c);
     }
     None
 }
@@ -4549,9 +4558,10 @@ fn check_unused(ctx: &mut ParseContext) {
         }
     }
 
-    // Check unused attribute bundles (@let name [...])
+    // Check unused attribute bundles (@let name [...]). A `$name` in code
+    // that doesn't run (an `if()` branch or `@if` not taken) counts too.
     for (name, &line) in &ctx.define_lines {
-        if !ctx.used_defines.contains(name) {
+        if !ctx.used_defines.contains(name) && !ctx.used_variables.contains(name) {
             ctx.diagnostics.push(
                 Diagnostic::new(
                     code::UNUSED_BUNDLE,

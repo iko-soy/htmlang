@@ -204,8 +204,6 @@ fn markdown(title: &str, summary: &str, usage: &str) -> String {
     }
 }
 
-/// Hover text for a name: `@element`, `@directive`, `@component`, an
-/// attribute (possibly prefixed, like `hover:color`), or a prefix itself.
 /// What a whole-attribute `if()` does, for completion and hover.
 pub(crate) const IF_SUMMARY: &str = "Attributes chosen by a condition";
 
@@ -221,6 +219,8 @@ pub(crate) fn if_attribute() -> String {
     )
 }
 
+/// Hover text for a name: `@element`, `@directive`, `@component`, an
+/// attribute (possibly prefixed, like `hover:color`), or a prefix itself.
 pub(crate) fn hover(word: &str) -> Option<String> {
     if let Some(name) = word.strip_prefix('@') {
         if let Some(doc) = component(name) {

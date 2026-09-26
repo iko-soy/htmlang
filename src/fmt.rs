@@ -43,7 +43,7 @@ impl Header {
     }
 
     fn push_list(&mut self, list: &AttrList) {
-        let attrs: Vec<String> = list.attrs.iter().map(|a| a.raw.clone()).collect();
+        let attrs: Vec<String> = list.attrs.iter().map(attr_text).collect();
         let start = self.text.len();
         self.text.push('[');
         self.text.push_str(&attrs.join(", "));
@@ -52,6 +52,34 @@ impl Header {
             self.list = Some((start, self.text.len(), attrs));
         }
     }
+}
+
+/// An attribute as printed: as written, except that a whole-attribute
+/// `if(CONDITION, A, B)` prints its groups like any list (`[a, b]`, on
+/// one line). A misshapen `if()` is kept as written.
+fn attr_text(attr: &syntax::Attr) -> String {
+    let Some(choice) = &attr.choice else {
+        return attr.raw.clone();
+    };
+    let Some(condition) = &choice.condition else {
+        return attr.raw.clone();
+    };
+    let mut parts = vec![condition.raw.clone()];
+    for branch in &choice.branches {
+        parts.push(match branch {
+            syntax::Branch::Empty => String::new(),
+            syntax::Branch::Attr(attr) => attr_text(attr),
+            syntax::Branch::Group {
+                list,
+                trailing: None,
+            } if list.closed => {
+                let attrs: Vec<String> = list.attrs.iter().map(attr_text).collect();
+                format!("[{}]", attrs.join(", "))
+            }
+            syntax::Branch::Group { .. } => return attr.raw.clone(),
+        });
+    }
+    format!("if({})", parts.join(", ").trim_end())
 }
 
 fn print_node(node: &Node, level: usize, lines: &[&str], out: &mut String) {
@@ -303,6 +331,20 @@ mod tests {
         let b = format(&a);
         assert_eq!(a, b, "formatter must be idempotent across runs");
         assert!(a.starts_with("@row [\n  padding 20,\n"), "{a}");
+    }
+
+    #[test]
+    fn a_whole_attribute_if_prints_its_groups_like_lists() {
+        let src = "@el [if($on, [\n    padding 8,\n    color red\n  ], [ ]),  if($on,   margin 2)]\n  a\n";
+        let out = format(src);
+        assert_eq!(
+            out,
+            "@el [if($on, [padding 8, color red], []), if($on, margin 2)]\n  a\n"
+        );
+        assert_eq!(format(&out), out);
+        // A misshapen if() is kept as written
+        let src = "@el [if($on, [padding 4] junk), if($on)]\n  a\n";
+        assert_eq!(format(src), src);
     }
 
     #[test]

@@ -10,7 +10,7 @@ pub(crate) fn hover_at(text: &str, position: Position) -> Option<Hover> {
     let col = (position.character as usize).min(line.len());
     let word = word_at(line, col)?;
 
-    let doc = if word == "if" && is_if_attribute(line, col) {
+    let doc = if word == "if" && is_if_attribute(text, position.line, line, col) {
         Some(docs::if_attribute())
     } else if let Some(var_name) = word.strip_prefix('$') {
         hover_variable(text, var_name).or_else(|| docs::hover(&word))
@@ -29,17 +29,41 @@ pub(crate) fn hover_at(text: &str, position: Position) -> Option<Hover> {
     })
 }
 
-/// Whether the `if` at `col` of `line` starts a whole attribute,
-/// `if(CONDITION, A, B)`: it is followed by `(` and is where an attribute
-/// starts in a list (a `(` inside a value is CSS's own `if()`).
-fn is_if_attribute(line: &str, col: usize) -> bool {
+/// Whether the `if` at `col` of `line` (line `line_idx` of `text`) starts a
+/// whole attribute, `if(CONDITION, A, B)`: one the parser read as such in
+/// an element's list (also on a later line of a list that spans lines),
+/// or, in any other list on one line, where an attribute starts (a `(`
+/// inside a value is CSS's own `if()`).
+fn is_if_attribute(text: &str, line_idx: u32, line: &str, col: usize) -> bool {
+    fn starts_choice(attrs: &[htmlang::syntax::Attr], at: Position) -> bool {
+        attrs.iter().any(|attr| {
+            attr.choice.as_ref().is_some_and(|choice| {
+                tree::range(attr.span).start == at
+                    || choice
+                        .branches
+                        .iter()
+                        .any(|branch| starts_choice(branch.attrs(), at))
+            })
+        })
+    }
     let bytes = line.as_bytes();
     let mut start = col.min(bytes.len());
     while start > 0 && is_word_byte(bytes[start - 1]) {
         start -= 1;
     }
-    line[start..].starts_with("if(")
-        && crate::completion::attr_context(&line[..start])
+    if !line[start..].starts_with("if(") {
+        return false;
+    }
+    let at = Position::new(line_idx, start as u32);
+    let parsed = htmlang::syntax::parse(text);
+    let in_tree = tree::node_at(&parsed, line_idx).is_some_and(|node| {
+        node.heads()
+            .iter()
+            .filter_map(|head| head.attrs.as_ref())
+            .any(|list| starts_choice(&list.attrs, at))
+    });
+    in_tree
+        || crate::completion::attr_context(&line[..start])
             .is_some_and(|context| context.segment.trim().is_empty())
 }
 
@@ -184,6 +208,10 @@ mod tests {
         let text = "@el [padding 4, if($on, [color red])] x\n@el [width if(media(print): 1px)] y\n";
         assert!(hover_text(text, 0, 17).contains("Attributes chosen by a condition"));
         assert!(hover_at(text, Position::new(1, 12)).is_none());
+        // On a later line of a list that spans lines, and inside a group
+        let text = "@el [\n  padding 4,\n  if($on, [if($b, gap 1)])\n]\n  x\n";
+        assert!(hover_text(text, 2, 3).contains("Attributes chosen by a condition"));
+        assert!(hover_text(text, 2, 12).contains("Attributes chosen by a condition"));
     }
 
     #[test]
