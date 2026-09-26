@@ -31,7 +31,9 @@ Linux, macOS, and Windows. Your change should pass all three.
     kind of body, and whether it takes the rest of the line).
   - `vocab.rs` — the attribute vocabulary (htmlang attributes, CSS properties,
     HTML attributes) and the state/media prefixes.
-  - `expr.rs` — the expression language for conditions and computed values.
+  - `expr.rs` — the expression language for conditions, computed values and
+    `${...}`. It evaluates only what decides the result (the branch `if()`
+    takes, the side of `and`/`or` that decides) and only reads the rest.
   - `interp.rs` — `$name` and `${...}`: where a name ends and how one slot
     of text (a text run, an attribute's value, an argument, a path) is
     filled in, including what quoted text inserts in CSS and in text. The

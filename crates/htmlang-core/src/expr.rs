@@ -1,9 +1,15 @@
 //! Expressions: conditions (`@if $count > 2 and not $hidden`), computed
-//! values (`@let gap = $base * 2`) and `if(cond, a, b)`.
+//! values (`@let gap = $base * 2`) and `${...}` in text and values
+//! (`${if($featured, 24, 0)}`).
 //!
 //! Expressions are tokenized and evaluated as a whole. Variables are looked
 //! up while evaluating, never pasted into the text first, so a value that
 //! happens to contain `==` or spaces can't change how an expression parses.
+//!
+//! Only what decides the result is evaluated: `if()` evaluates the branch
+//! it takes, `and` and `or` stop at the first side that decides. The rest
+//! is still parsed (and its function names and argument counts checked),
+//! so `$n != 0 and 10 / $n > 1` is false for `$n` = 0, not an error.
 //!
 //! ```text
 //! expr    := or
@@ -21,7 +27,7 @@
 //! A bare word (`dark`, `red`, `#3b82f6`, `10px`) is a string. A variable
 //! loaded from a JSON array is a list: `length` counts its items and
 //! `contains` tests membership. Functions:
-//! `if(cond, a, b)`, tests (`contains(s, x)`, `starts-with(s, x)`,
+//! `if(cond, a, b)` (`b` may be left out: empty), tests (`contains(s, x)`, `starts-with(s, x)`,
 //! `ends-with(s, x)`), text (`uppercase`, `lowercase`, `capitalize`, `trim`,
 //! `length`, `reverse`, `truncate(s, n)`, `replace(s, old, new)`,
 //! `default(s, fallback)`) and colors (`lighten(c, pct)`, `darken(c, pct)`,
@@ -126,6 +132,7 @@ pub fn eval(src: &str, scope: &dyn Scope) -> Result<Value, Error> {
         tokens: &tokens,
         pos: 0,
         scope,
+        skip: false,
     };
     let value = parser.expr()?;
     match parser.tokens.get(parser.pos) {
@@ -255,7 +262,14 @@ struct Parser<'a> {
     tokens: &'a [(Token, usize)],
     pos: usize,
     scope: &'a dyn Scope,
+    /// Parsing a part whose value isn't needed (the branch `if()` doesn't
+    /// take, the side of `and`/`or` that doesn't decide): it is read and
+    /// checked for syntax, not evaluated.
+    skip: bool,
 }
+
+/// The value a skipped part stands for; nothing reads it.
+const SKIPPED: Value = Value::Bool(false);
 
 impl Parser<'_> {
     fn peek(&self) -> Option<&Token> {
@@ -293,11 +307,26 @@ impl Parser<'_> {
         }
     }
 
+    /// Parse with `f`, skipping evaluation when `skip` (or when already
+    /// skipping).
+    fn skipping(
+        &mut self,
+        skip: bool,
+        f: impl FnOnce(&mut Self) -> Result<Value, Error>,
+    ) -> Result<Value, Error> {
+        let outer = self.skip;
+        self.skip |= skip;
+        let value = f(self);
+        self.skip = outer;
+        value
+    }
+
     fn expr(&mut self) -> Result<Value, Error> {
         let mut left = self.and()?;
         while self.eat_word("or") {
-            let right = self.and()?;
-            left = Value::Bool(left.truthy() || right.truthy());
+            let decided = left.truthy();
+            let right = self.skipping(decided, Self::and)?;
+            left = Value::Bool(decided || right.truthy());
         }
         Ok(left)
     }
@@ -305,8 +334,9 @@ impl Parser<'_> {
     fn and(&mut self) -> Result<Value, Error> {
         let mut left = self.not()?;
         while self.eat_word("and") {
-            let right = self.not()?;
-            left = Value::Bool(left.truthy() && right.truthy());
+            let decided = !left.truthy();
+            let right = self.skipping(decided, Self::not)?;
+            left = Value::Bool(!decided && right.truthy());
         }
         Ok(left)
     }
@@ -324,6 +354,9 @@ impl Parser<'_> {
             return Ok(left);
         };
         let right = self.sum()?;
+        if self.skip {
+            return Ok(SKIPPED);
+        }
         let numbers = left.as_num().zip(right.as_num());
         let (l, r) = (left.to_string(), right.to_string());
         Ok(Value::Bool(match (op, numbers) {
@@ -347,7 +380,7 @@ impl Parser<'_> {
         let mut left = self.product()?;
         while let Some(op) = self.eat_op(&["+", "-"]) {
             let right = self.product()?;
-            left = arithmetic(op, &left, &right)?;
+            left = self.arithmetic(op, &left, &right)?;
         }
         Ok(left)
     }
@@ -356,7 +389,7 @@ impl Parser<'_> {
         let mut left = self.unary()?;
         while let Some(op) = self.eat_op(&["*", "/", "%"]) {
             let right = self.unary()?;
-            left = arithmetic(op, &left, &right)?;
+            left = self.arithmetic(op, &left, &right)?;
         }
         Ok(left)
     }
@@ -364,6 +397,9 @@ impl Parser<'_> {
     fn unary(&mut self) -> Result<Value, Error> {
         if self.eat_op(&["-"]).is_some() {
             let value = self.unary()?;
+            if self.skip {
+                return Ok(SKIPPED);
+            }
             return value
                 .as_num()
                 .map(|n| Value::Num(-n))
@@ -381,6 +417,7 @@ impl Parser<'_> {
         self.pos += 1;
         match token {
             Token::Num(n) => Ok(Value::Num(n)),
+            Token::Str(_) | Token::Var(_) if self.skip => Ok(SKIPPED),
             Token::Str(s) => {
                 let (text, problems) = interp::interpolate(&s, self.scope);
                 match problems.into_iter().next() {
@@ -397,6 +434,10 @@ impl Parser<'_> {
             }
             Token::Word(w) if w == "true" => Ok(Value::Bool(true)),
             Token::Word(w) if w == "false" => Ok(Value::Bool(false)),
+            Token::Word(name) if name == "if" && self.peek() == Some(&Token::LParen) => {
+                self.pos += 1;
+                self.choice()
+            }
             Token::Word(name) if self.peek() == Some(&Token::LParen) => {
                 self.pos += 1;
                 let mut args = Vec::new();
@@ -408,6 +449,10 @@ impl Parser<'_> {
                     }
                 }
                 self.expect(Token::RParen)?;
+                check_call(&name, args.len())?;
+                if self.skip {
+                    return Ok(SKIPPED);
+                }
                 Ok(call(&name, args)?)
             }
             Token::Word(w) => Ok(Value::Str(w)),
@@ -418,6 +463,41 @@ impl Parser<'_> {
             }
             other => Err(format!("unexpected {}", other).into()),
         }
+    }
+}
+
+impl Parser<'_> {
+    /// `if(cond, a, b)` after its `(`: the branch that `cond` picks is
+    /// evaluated, the other only read. Without `b`, a false `cond` gives
+    /// an empty value.
+    fn choice(&mut self) -> Result<Value, Error> {
+        let arguments =
+            || Error::Invalid("if() takes 2 or 3 arguments: if(CONDITION, A, B)".into());
+        let condition = self.expr()?;
+        if self.peek() != Some(&Token::Comma) {
+            return Err(arguments());
+        }
+        self.pos += 1;
+        let taken = condition.truthy();
+        let then = self.skipping(!taken, Self::expr)?;
+        let otherwise = if self.peek() == Some(&Token::Comma) {
+            self.pos += 1;
+            self.skipping(taken, Self::expr)?
+        } else {
+            Value::Str(String::new())
+        };
+        if self.peek() == Some(&Token::Comma) {
+            return Err(arguments());
+        }
+        self.expect(Token::RParen)?;
+        Ok(if taken { then } else { otherwise })
+    }
+
+    fn arithmetic(&self, op: &str, left: &Value, right: &Value) -> Result<Value, Error> {
+        if self.skip {
+            return Ok(SKIPPED);
+        }
+        Ok(arithmetic(op, left, right)?)
     }
 }
 
@@ -437,7 +517,46 @@ fn arithmetic(op: &str, left: &Value, right: &Value) -> Result<Value, String> {
     }))
 }
 
-/// Call a built-in function.
+/// The built-in functions (other than `if`) and how many arguments each
+/// takes.
+const FUNCTIONS: &[(&str, usize)] = &[
+    ("contains", 2),
+    ("starts-with", 2),
+    ("ends-with", 2),
+    ("uppercase", 1),
+    ("lowercase", 1),
+    ("capitalize", 1),
+    ("trim", 1),
+    ("length", 1),
+    ("reverse", 1),
+    ("truncate", 2),
+    ("replace", 3),
+    ("default", 2),
+    ("lighten", 2),
+    ("darken", 2),
+    ("alpha", 2),
+    ("mix", 3),
+];
+
+/// Check that `name` is a built-in function and gets `count` arguments.
+fn check_call(name: &str, count: usize) -> Result<(), String> {
+    let Some(&(_, arity)) = FUNCTIONS.iter().find(|(n, _)| *n == name) else {
+        return Err(format!("unknown function `{}()`", name));
+    };
+    if count == arity {
+        Ok(())
+    } else {
+        Err(format!(
+            "{}() takes {} argument{}",
+            name,
+            arity,
+            if arity == 1 { "" } else { "s" }
+        ))
+    }
+}
+
+/// Call a built-in function with the right number of arguments (see
+/// [`check_call`]).
 fn call(name: &str, args: Vec<Value>) -> Result<Value, String> {
     let text = |i: usize| args.get(i).map(|v| v.to_string()).unwrap_or_default();
     let num = |i: usize| {
@@ -445,52 +564,17 @@ fn call(name: &str, args: Vec<Value>) -> Result<Value, String> {
             .and_then(Value::as_num)
             .ok_or_else(|| format!("{}() needs a number as argument {}", name, i + 1))
     };
-    let arity = |n: usize| {
-        if args.len() == n {
-            Ok(())
-        } else {
-            Err(format!(
-                "{}() takes {} argument{}",
-                name,
-                n,
-                if n == 1 { "" } else { "s" }
-            ))
-        }
-    };
     let color = |rgb: (u8, u8, u8)| Value::Str(format!("#{:02x}{:02x}{:02x}", rgb.0, rgb.1, rgb.2));
     Ok(match name {
-        "if" => {
-            arity(3)?;
-            let mut args = args;
-            let otherwise = args.pop().unwrap();
-            let then = args.pop().unwrap();
-            if args[0].truthy() { then } else { otherwise }
-        }
-        "contains" => {
-            arity(2)?;
-            Value::Bool(match &args[0] {
-                Value::List(items) => items.contains(&text(1)),
-                other => other.to_string().contains(&text(1)),
-            })
-        }
-        "starts-with" => {
-            arity(2)?;
-            Value::Bool(text(0).starts_with(&text(1)))
-        }
-        "ends-with" => {
-            arity(2)?;
-            Value::Bool(text(0).ends_with(&text(1)))
-        }
-        "uppercase" => {
-            arity(1)?;
-            Value::Str(text(0).to_uppercase())
-        }
-        "lowercase" => {
-            arity(1)?;
-            Value::Str(text(0).to_lowercase())
-        }
+        "contains" => Value::Bool(match &args[0] {
+            Value::List(items) => items.contains(&text(1)),
+            other => other.to_string().contains(&text(1)),
+        }),
+        "starts-with" => Value::Bool(text(0).starts_with(&text(1))),
+        "ends-with" => Value::Bool(text(0).ends_with(&text(1))),
+        "uppercase" => Value::Str(text(0).to_uppercase()),
+        "lowercase" => Value::Str(text(0).to_lowercase()),
         "capitalize" => {
-            arity(1)?;
             let s = text(0);
             let mut chars = s.chars();
             Value::Str(match chars.next() {
@@ -498,23 +582,13 @@ fn call(name: &str, args: Vec<Value>) -> Result<Value, String> {
                 None => String::new(),
             })
         }
-        "trim" => {
-            arity(1)?;
-            Value::Str(text(0).trim().to_string())
-        }
-        "length" => {
-            arity(1)?;
-            Value::Num(match &args[0] {
-                Value::List(items) => items.len(),
-                other => other.to_string().chars().count(),
-            } as f64)
-        }
-        "reverse" => {
-            arity(1)?;
-            Value::Str(text(0).chars().rev().collect())
-        }
+        "trim" => Value::Str(text(0).trim().to_string()),
+        "length" => Value::Num(match &args[0] {
+            Value::List(items) => items.len(),
+            other => other.to_string().chars().count(),
+        } as f64),
+        "reverse" => Value::Str(text(0).chars().rev().collect()),
         "truncate" => {
-            arity(2)?;
             let (s, n) = (text(0), num(1)? as usize);
             Value::Str(if s.chars().count() > n {
                 format!("{}...", s.chars().take(n).collect::<String>())
@@ -522,18 +596,12 @@ fn call(name: &str, args: Vec<Value>) -> Result<Value, String> {
                 s
             })
         }
-        "replace" => {
-            arity(3)?;
-            Value::Str(text(0).replace(&text(1), &text(2)))
-        }
+        "replace" => Value::Str(text(0).replace(&text(1), &text(2))),
         "default" => {
-            arity(2)?;
             let s = text(0);
             Value::Str(if s.is_empty() { text(1) } else { s })
         }
         "lighten" | "darken" | "alpha" | "mix" => {
-            let expected = if name == "mix" { 3 } else { 2 };
-            arity(expected)?;
             let Some(rgb) = parse_hex_rgb(&text(0)) else {
                 return Err(format!("{}() needs a hex color, got `{}`", name, text(0)));
             };
@@ -660,6 +728,36 @@ mod tests {
         assert_eq!(ev("if($count > 2, big, small)").to_string(), "big");
         assert_eq!(ev("${name}").to_string(), "World");
         assert_eq!(ev("${$count + 1} * 2").to_string(), "8");
+    }
+
+    #[test]
+    fn only_the_branch_taken_is_evaluated() {
+        let zero = Map::new(&[("n", "0"), ("on", "true")]);
+        let ev0 = |src: &str| eval(src, &zero).map(|v| v.to_string());
+        assert_eq!(ev0("if($n != 0, 10 / $n, 0)"), Ok("0".into()));
+        assert_eq!(ev0("if($n == 0, none, 10 / $n)"), Ok("none".into()));
+        assert_eq!(ev0("if($on, 24)"), Ok("24".into()));
+        assert_eq!(ev0("if(not $on, 24)"), Ok("".into()));
+        assert_eq!(
+            ev0("if($on, \"#10b981\", \"var(--muted)\")"),
+            Ok("#10b981".into())
+        );
+        // and / or stop at the side that decides
+        assert_eq!(ev0("$n != 0 and 10 / $n > 1"), Ok("false".into()));
+        assert_eq!(ev0("$n == 0 or 10 / $n > 1"), Ok("true".into()));
+        assert_eq!(ev0("$on or darken(red, 10)"), Ok("true".into()));
+        // The branch not taken is still read: its syntax, function names and
+        // argument counts are checked; its variables and values are not
+        assert_eq!(ev0("if($on, 1, $undefined)"), Ok("1".into()));
+        assert!(eval("if($on, 1, (2)", &zero).is_err());
+        assert!(eval("if($on, 1, nope(2))", &zero).is_err());
+        assert!(eval("if($on, 1, uppercase(a, b))", &zero).is_err());
+        // if() itself takes 2 or 3 arguments
+        assert!(eval("if($on)", &zero).is_err());
+        assert!(eval("if($on, 1, 2, 3)", &zero).is_err());
+        // The taken branch still reports its errors
+        assert!(eval("if($n == 0, 10 / $n, 0)", &zero).is_err());
+        assert!(eval("$n == 0 and 10 / $n > 1", &zero).is_err());
     }
 
     #[test]

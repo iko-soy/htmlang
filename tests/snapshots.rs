@@ -887,14 +887,15 @@ fn image_explicit_loading_not_doubled() {
 
 #[test]
 fn ternary_expression_in_attrs() {
-    let output = compile("@page T\n@let active true\n@el [color if($active, green, gray)]\n  test");
+    let output =
+        compile("@page T\n@let active true\n@el [if($active, color green, color gray)]\n  test");
     assert!(output.contains("color:green"));
 }
 
 #[test]
 fn ternary_expression_false() {
     let output =
-        compile("@page T\n@let active false\n@el [color if($active, green, gray)]\n  test");
+        compile("@page T\n@let active false\n@el [if($active, color green, color gray)]\n  test");
     assert!(output.contains("color:gray"));
 }
 
@@ -2091,7 +2092,7 @@ fn snapshot_if_expr() {
 
 #[test]
 fn if_expr_true_branch() {
-    let output = compile("@let x true\n@el [background if($x, blue, gray)]\n  test");
+    let output = compile("@let x true\n@el [background ${if($x, blue, gray)}]\n  test");
     assert!(
         output.contains("blue"),
         "should use true branch, got: {}",
@@ -2102,7 +2103,7 @@ fn if_expr_true_branch() {
 
 #[test]
 fn if_expr_false_branch() {
-    let output = compile("@let x false\n@el [background if($x, blue, gray)]\n  test");
+    let output = compile("@let x false\n@el [background ${if($x, blue, gray)}]\n  test");
     assert!(
         output.contains("gray"),
         "should use false branch, got: {}",
@@ -2113,9 +2114,10 @@ fn if_expr_false_branch() {
 
 #[test]
 fn if_expr_equality_condition() {
-    let output = compile("@let theme dark\n@el [color if($theme == dark, white, black)]\n  test");
+    let output =
+        compile("@let theme dark\n@el [color ${if($theme == dark, white, black)}]\n  test");
     assert!(
-        output.contains("white"),
+        output.contains("color:white"),
         "should match equality, got: {}",
         output
     );
@@ -2123,9 +2125,10 @@ fn if_expr_equality_condition() {
 
 #[test]
 fn if_expr_inequality_condition() {
-    let output = compile("@let mode light\n@el [color if($mode != dark, green, red)]\n  test");
+    let output =
+        compile("@let mode light\n@el [if($mode != dark, color green, color red)]\n  test");
     assert!(
-        output.contains("green"),
+        output.contains("color:green"),
         "should match inequality, got: {}",
         output
     );
@@ -3444,8 +3447,9 @@ fn conditional_attr_boolean_false() {
 }
 
 #[test]
-fn conditional_value_without_else_drops_the_attribute() {
-    let html = compile("@let on false\n@el [padding if($on, 10), margin if($on, 4, 8)]\n  test\n");
+fn conditional_attribute_without_else_is_left_out() {
+    let html =
+        compile("@let on false\n@el [if($on, padding 10), if($on, margin 4, margin 8)]\n  test\n");
     assert!(!html.contains("padding"), "{}", html);
     assert!(html.contains("margin:8px"), "{}", html);
 }
@@ -4947,7 +4951,7 @@ fn a_default_is_filled_in_at_the_call() {
     assert!(out.contains("Hello there, $5"), "{}", out);
     // With the parameters before it, and if()
     let out = compile(
-        "@let @card [title, heading \"About $title\", note if($title, yes, no)]\n  @el $heading $note\n@card [title htmlang]\n",
+        "@let @card [title, heading \"About $title\", note ${if($title, yes, no)}]\n  @el $heading $note\n@card [title htmlang]\n",
     );
     assert!(out.contains("About htmlang yes"), "{}", out);
 }
@@ -5569,5 +5573,153 @@ fn an_included_file_s_slots_are_where_its_include_is() {
         unknown[0].message.contains("typo.hl"),
         "{}",
         unknown[0].message
+    );
+}
+
+// -----------------------------------------------------------------------
+// One if(): whole attributes, groups, and expressions in values
+// -----------------------------------------------------------------------
+
+#[test]
+fn one_if_chooses_a_group_of_attributes() {
+    let src = "@let current home\n@let @nav-link [id]\n  @link [if($id == $current, [background #eee, font-weight 600, aria-current=page])] /$id $id\n@nav-link [id home]\n@nav-link [id blog]\n";
+    let html = compile(src);
+    assert!(
+        html.contains("background:#eee;font-weight:600;"),
+        "{}",
+        html
+    );
+    assert_eq!(html.matches("aria-current=\"page\"").count(), 1, "{}", html);
+    assert!(html.contains("<a href=\"/blog\">blog</a>"), "{}", html);
+}
+
+#[test]
+fn one_if_branches_are_attributes_groups_bundles_or_nothing() {
+    let html = compile(
+        "@let on false\n@el [if($on, padding 1, [padding 2, margin 3]), if($on, color red), if(not $on, $truncate, []), if(true, if($on, gap 1, gap 2))]\n  x\n",
+    );
+    for css in [
+        "padding:2px;",
+        "margin:3px;",
+        "text-overflow:ellipsis",
+        "gap:2px",
+    ] {
+        assert!(html.contains(css), "{}: {}", css, html);
+    }
+    assert!(!html.contains("color:red"), "{}", html);
+    // A group may span lines
+    let html =
+        compile("@let on true\n@el [\n  if($on, [\n    padding 4,\n    margin 2\n  ])\n]\n  x\n");
+    assert!(html.contains("padding:4px;margin:2px;"), "{}", html);
+}
+
+#[test]
+fn one_if_passes_parameters_to_a_call() {
+    let html = compile(
+        "@let @card [title, big false]\n  @el [padding ${if($big, 24, 8)}] $title\n@card [title A, if(true, big)]\n@card [title B, if(false, big)]\n",
+    );
+    assert!(html.contains("padding:24px"), "{}", html);
+    assert!(html.contains("padding:8px"), "{}", html);
+}
+
+#[test]
+fn a_misshapen_if_is_an_error() {
+    let d = parse_diagnostics("@el [if($on)] x\n@el [if(true, a, b, c)] y\n");
+    let invalid = coded(&d, "invalid-expression");
+    assert_eq!(invalid.len(), 2, "{:?}", d);
+    assert!(
+        invalid[0].message.contains("if(CONDITION, A, B)"),
+        "{:?}",
+        d
+    );
+    assert_eq!(invalid[0].column, Some(5), "{:?}", invalid[0]);
+    assert!(invalid[0].source_line.is_some(), "{:?}", invalid[0]);
+    let d = parse_diagnostics("@el [if(true, [padding 4] margin 2)] x\n");
+    let trailing = coded(&d, "unexpected-argument");
+    assert_eq!(trailing.len(), 1, "{:?}", d);
+    assert_eq!(trailing[0].subject.as_deref(), Some("margin 2"), "{:?}", d);
+}
+
+#[test]
+fn the_branch_not_taken_is_checked_but_not_evaluated() {
+    // Its attribute names are checked, as in code that doesn't run
+    let d = parse_diagnostics(
+        "@let on false\n@el [if($on, paddin 4, [marginn 2, padding $missing])] x\n",
+    );
+    let unknown = coded(&d, "unknown-attribute");
+    assert_eq!(unknown.len(), 2, "{:?}", d);
+    assert!(
+        unknown.iter().any(|u| u.message.contains("'paddin'")),
+        "{:?}",
+        d
+    );
+    // The branch taken reports its variables; the other doesn't read them
+    assert_eq!(coded(&d, "undefined-variable").len(), 1, "{:?}", d);
+    let d = parse_diagnostics("@let on true\n@el [if($on, padding 4, padding $missing)] x\n");
+    assert!(d.is_empty(), "{:?}", d);
+    // ... and the names it uses count as used
+    let d =
+        parse_diagnostics("@let on true\n@let big 24\n@el [if($on, padding 4, padding $big)] x\n");
+    assert!(d.is_empty(), "{:?}", d);
+    // In code that doesn't run, every branch is checked on its own
+    let d = parse_diagnostics(
+        "@if false\n  @el [if($x, paddin 3, [marginn 4, padding 5]), if($x, gap 1, gap 2)] x\n",
+    );
+    assert_eq!(coded(&d, "unknown-attribute").len(), 2, "{:?}", d);
+    assert!(coded(&d, "duplicate-attribute").is_empty(), "{:?}", d);
+}
+
+#[test]
+fn a_value_s_if_is_an_expression() {
+    let html = compile(
+        "@let on false\n@el [padding ${if($on, 24, 0)}, color ${if($on, \"#10b981\", \"var(--muted)\")}]\n  x\n",
+    );
+    assert!(html.contains("padding:0;"), "{}", html);
+    assert!(html.contains("color:var(--muted);"), "{}", html);
+    // Only the branch taken is evaluated, and `and`/`or` stop early
+    let html = compile(
+        "@let n 0\n@text A ${if($n != 0, 10 / $n, 0)} B\n@if $n != 0 and 10 / $n > 1\n  @text big\n@if $n == 0 or 10 / $n > 1\n  @text small\n",
+    );
+    assert!(html.contains("A 0 B"), "{}", html);
+    assert!(!html.contains("big"), "{}", html);
+    assert!(html.contains("small"), "{}", html);
+}
+
+#[test]
+fn a_failing_expression_is_an_error_not_text() {
+    let d = parse_diagnostics(
+        "@let n 0\n@text A ${10 / $n} B\n@el [padding ${if($n == 0, 10 / $n, 1)}] x\n",
+    );
+    assert_eq!(coded(&d, "invalid-expression").len(), 2, "{:?}", d);
+    // CSS text in a branch is quoted: unquoted, `var(` is a function call
+    let d = parse_diagnostics("@let on true\n@el [color ${if($on, var(--a), red)}] x\n");
+    assert_eq!(coded(&d, "invalid-expression").len(), 1, "{:?}", d);
+}
+
+#[test]
+fn css_if_in_a_value_is_css() {
+    // CSS's own if() passes through, like var()
+    let result = htmlang::parser::parse(
+        "@el [width if(media(width > 40em): 50%; else: 100%), color if(style(--dark: 1): white; else: black)]\n  x\n",
+    );
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    let html = htmlang::codegen::generate(&result.document);
+    assert!(
+        html.contains("width:if(media(width > 40em): 50%; else: 100%);"),
+        "{}",
+        html
+    );
+    // An if() in a value without CSS's `:` isn't CSS's: an ordinary warning
+    let d = parse_diagnostics(
+        "@let on true\n@el [padding if($on, 8, 16), background if($on, red)]\n  x\n",
+    );
+    let invalid = coded(&d, "invalid-value");
+    assert_eq!(invalid.len(), 2, "{:?}", d);
+    assert!(
+        invalid[0]
+            .message
+            .contains("'if(true, 8, 16)' is not CSS's if()"),
+        "{:?}",
+        d
     );
 }

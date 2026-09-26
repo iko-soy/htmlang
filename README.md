@@ -55,7 +55,8 @@ unless you write some, and nothing is added that you didn't ask for.
   a function without `@children`) is an error. A layout is just a function
   with slots.
   `$name` fills in a value exactly where it is written (a line of text, an
-  attribute's value, a file path), whole attributes come from a bundle, and
+  attribute's value, a file path), whole attributes come from a bundle or
+  from `if()` (`if($active, [font-weight bold, aria-current=page])`), and
   an undefined name is an error.
 - **Data comes in as lists and records.** `@data` loads JSON, and `@each` and
   `@if` run at compile time.
@@ -151,7 +152,7 @@ Data, loops and conditions run at compile time:
 @nav
   @row [spacing 16]
     @each $link in $links
-      @link [if($link.url == $current, font-weight bold)] $link.url $link.label
+      @link [if($link.url == $current, [font-weight bold, aria-current=page])] $link.url $link.label
 ```
 
 The [`examples/`](examples) directory has complete pages (a landing page, a

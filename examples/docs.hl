@@ -62,9 +62,7 @@
               padding 6 12,
               border-radius 6,
               hover:background var(--code-bg),
-              if($item.id == $current, background var(--code-bg)),
-              if($item.id == $current, font-weight 600),
-              if($item.id == $current, aria-current=page)
+              if($item.id == $current, [background var(--code-bg), font-weight 600, aria-current=page])
             ] /docs/$item.id $item.label
 
   -- Content

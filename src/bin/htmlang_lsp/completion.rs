@@ -158,11 +158,20 @@ pub(crate) fn attr_key(attr: &str) -> &str {
 
 /// Where `before` ends inside an open attribute list, read as the compiler
 /// reads one: escapes (`\,`, `\]`) and quoted text (`"a, b"`) don't open,
-/// close or split it, and neither do commas inside `(...)` or `{...}`.
+/// close or split it, and neither do commas inside `(...)` or `{...}`. In a
+/// whole-attribute `if(CONDITION, A, B)`, the attribute being written is
+/// the branch (a `[group]` is a list of its own).
 pub(crate) fn attr_context(before: &str) -> Option<AttrContext<'_>> {
     // Each open list: where its current attribute starts, the `(`/`{`
-    // depth inside it, and the attributes before it
-    let mut lists: Vec<(usize, i32, Vec<&str>)> = Vec::new();
+    // depth inside it, the attributes before it, and the depths at which
+    // an `if(` is open with where its current part starts
+    struct List<'a> {
+        start: usize,
+        depth: i32,
+        previous: Vec<&'a str>,
+        ifs: Vec<(i32, usize)>,
+    }
+    let mut lists: Vec<List> = Vec::new();
     let mut quoted = false;
     let mut i = 0;
     while i < before.len() {
@@ -176,36 +185,57 @@ pub(crate) fn attr_context(before: &str) -> Option<AttrContext<'_>> {
         match c {
             '"' if !lists.is_empty() => quoted = !quoted,
             _ if quoted => {}
-            '[' => lists.push((i + 1, 0, Vec::new())),
+            '[' => lists.push(List {
+                start: i + 1,
+                depth: 0,
+                previous: Vec::new(),
+                ifs: Vec::new(),
+            }),
             ']' => {
                 lists.pop();
             }
             '(' | '{' => {
                 if let Some(list) = lists.last_mut() {
-                    list.1 += 1;
+                    list.depth += 1;
+                    let part = list.ifs.last().map_or(list.start, |(_, at)| *at);
+                    if c == '(' && before[part..i].trim_start() == "if" {
+                        list.ifs.push((list.depth, i + 1));
+                    }
                 }
             }
             ')' | '}' => {
                 if let Some(list) = lists.last_mut() {
-                    list.1 -= 1;
+                    if list
+                        .ifs
+                        .last()
+                        .is_some_and(|(depth, _)| *depth == list.depth)
+                    {
+                        list.ifs.pop();
+                    }
+                    list.depth -= 1;
                 }
             }
             ',' => {
-                if let Some(list) = lists.last_mut()
-                    && list.1 <= 0
-                {
-                    list.2.push(&before[list.0..i]);
-                    list.0 = i + 1;
+                if let Some(list) = lists.last_mut() {
+                    if let Some(open) = list.ifs.last_mut()
+                        && open.0 == list.depth
+                    {
+                        open.1 = i + 1;
+                    } else if list.depth <= 0 {
+                        list.previous.push(&before[list.start..i]);
+                        list.start = i + 1;
+                    }
                 }
             }
             _ => {}
         }
         i += c.len_utf8();
     }
-    let (start, _, previous) = lists.pop()?;
+    let list = lists.pop()?;
+    let start = list.ifs.last().map_or(list.start, |(_, at)| *at);
     Some(AttrContext {
         segment: &before[start..],
-        previous,
+        previous: list.previous,
     })
 }
 
@@ -821,6 +851,16 @@ fn attr_completions(range: Range, element: Option<&str>) -> Vec<CompletionItem> 
         let detail = docs::prefix_selector(prefix).unwrap_or_default();
         push(prefix.to_string(), prefix.to_string(), &detail, "6", prefix);
     }
+    let mut choice = item(
+        "if()",
+        CompletionItemKind::SNIPPET,
+        docs::IF_SUMMARY,
+        "if(${1:\\$condition}, ${2:attribute})",
+        range,
+    );
+    choice.insert_text_format = Some(InsertTextFormat::SNIPPET);
+    choice.sort_text = Some("4_if".to_string());
+    items.push(choice);
     items
 }
 
@@ -1243,6 +1283,27 @@ mod tests {
         let text = r"@el [transition opacity 1s\, color 1s, cursor ";
         let items = completions(text, pos(0, text.len() as u32));
         assert!(items.iter().any(|i| i.label == "pointer"), "{:?}", items);
+    }
+
+    #[test]
+    fn a_branch_of_if_is_the_attribute_being_written() {
+        fn context(before: &str) -> Option<(&str, usize)> {
+            attr_context(before).map(|c| (c.segment, c.previous.len()))
+        }
+        assert_eq!(context("@el [padding 4, if($on, col"), Some((" col", 1)));
+        assert_eq!(context("@el [if($on, color red, back"), Some((" back", 0)));
+        assert_eq!(context("@el [if($a, if($b, x, marg"), Some((" marg", 0)));
+        assert_eq!(context("@el [if($on, [padding 4, mar"), Some((" mar", 1)));
+        assert_eq!(context("@el [if($on, padding 4), col"), Some((" col", 1)));
+        // CSS's own if() inside a value is part of the value
+        assert_eq!(
+            context("@el [width if(media(print): 1px; else: 2px), col"),
+            Some((" col", 1))
+        );
+        let items = completions("@el [if($on, col", Position::new(0, 16));
+        assert!(items.iter().any(|i| i.label == "color"));
+        let items = completions("@el [pad", Position::new(0, 8));
+        assert!(items.iter().any(|i| i.label == "if()"));
     }
 
     #[test]

@@ -186,7 +186,7 @@
     @row [spacing $unit, wrap]
       @each $shade in 0, 10, 20, 30
         @el [
-          padding if($compact, 8, 16),
+          if($compact, padding 8, padding 16),
           border-radius $unit,
           color white,
           background ${darken($--brand, $shade)}
@@ -218,7 +218,7 @@
             @td [padding 8] ${$i + 1}
             @td [padding 8, font-weight 600] $person.name
             @td [padding 8] $person.role
-            @td [padding 8, color if($person.active, #10b981, var(--muted))]
+            @td [padding 8, if($person.active, color #10b981, color var(--muted))]
               @if $person.active
                 Active
               @else

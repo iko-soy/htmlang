@@ -6,8 +6,8 @@ Syntax highlighting, snippets, and language server support for
 ## Features
 
 - **Syntax highlighting**: `@` elements and directives, `$variables`,
-  `[attribute]` lists with state and media prefixes, `key=value` HTML
-  attributes, quoted text, escapes (`\,`, `\$`, `\]`), `{@inline}` elements,
+  `[attribute]` lists with state and media prefixes, `if(...)` and its
+  `[groups]`, `key=value` HTML attributes, quoted text, escapes (`\,`, `\$`, `\]`), `{@inline}` elements,
   colors, numbers and `-- comments`.
 - **Diagnostics**: the compiler's own, each with its code: parse errors,
   unknown elements and attributes with "did you mean" suggestions, undefined
@@ -15,11 +15,11 @@ Syntax highlighting, snippets, and language server support for
   checked, including branches and functions that don't run, and relative
   `@include` and `@data` paths resolve from the file's folder.
 - **Completion** of elements, directives, layout attributes, CSS properties,
-  HTML attributes, prefixes, variables, functions and the parameters a
-  function call hasn't passed yet, the slot names of a call's `@slot`
+  HTML attributes, prefixes, `if()` (and attributes inside its branches),
+  variables, functions and the parameters a function call hasn't passed yet, the slot names of a call's `@slot`
   blocks, and elements and functions inside `{@...}` in text. It triggers on `@`, `$`, `[` and `,`.
-- **Hover** documentation for elements, directives and attributes (CSS
-  properties link to MDN), function signatures with their slots and
+- **Hover** documentation for elements, directives, attributes (CSS
+  properties link to MDN) and `if()`, function signatures with their slots and
   whether they take content, variable values, and color swatches.
 - **Navigation**: go to definition, find references and rename for
   `$variables`, bundles and `@let @name` functions. `@include`, `@markdown` and
@@ -55,7 +55,7 @@ to its absolute path. `htmlang.server.args` passes extra arguments to it.
 
 Snippets cover common patterns: `@page`, `@let-fn`, `@let-slots`,
 `@let-tokens`, `@navbar`, `@hero`, `@form`, `@grid`, `@each`, `@if`,
-`@layout` and more. Type a prefix and press `Tab` to expand it.
+`if(` (attributes chosen by a condition), `@layout` and more. Type a prefix and press `Tab` to expand it.
 
 ## Development
 

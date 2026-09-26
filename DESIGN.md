@@ -68,7 +68,7 @@ An attribute can take one of three forms:
 - A bare word is a **flag**: a layout attribute such as `center-x`, or a
   boolean HTML attribute such as `required`, `disabled` or `open`.
 
-A comma inside `(...)` or `"..."` doesn't split attributes. Anywhere else,
+A comma inside `(...)`, `[...]` or `"..."` doesn't split attributes. Anywhere else,
 `\,` keeps a comma in the value:
 
 ```
@@ -77,7 +77,8 @@ A comma inside `(...)` or `"..."` doesn't split attributes. Anywhere else,
 
 A variable fills an attribute's value (`padding $gap`, `alt=$title`), never
 its name or a whole attribute: attributes come from a
-[bundle](#definitions), written `[$card]`.
+[bundle](#definitions), written `[$card]`, and a condition chooses whole
+attributes with [`if()`](#conditional-attributes).
 
 The attribute list belongs to the element name right before it. Anywhere
 else, `[` is an ordinary character, so a line of text can contain one:
@@ -189,7 +190,7 @@ it would otherwise silently become a sibling.
 ### Diagnostics
 
 The compiler checks the whole file, including code that doesn't run: the
-branch of an `@if` that isn't taken, the body of a function that is never
+branch of an `@if` or an `if()` that isn't taken, the body of a function that is never
 called and the body of a loop over an empty list. Unknown elements,
 functions and attributes are reported there too. Code that doesn't run may
 name a function defined anywhere in the file or in an included file, so a
@@ -327,15 +328,26 @@ A prefix applies a style only in some condition:
 
 ### Conditional attributes
 
-`if(CONDITION, A, B)` chooses `A` or `B` depending on the condition. It works
-as a value or as a whole attribute. If the chosen side is empty, the attribute
-is left out, and `B` itself can be omitted.
+`if(CONDITION, A, B)`, written as a whole attribute, is `A` when the
+condition holds and `B` otherwise. Each branch is an attribute, a `[group]`
+of attributes or a `$bundle`. An empty branch leaves the attribute out, and
+`B` itself can be left out. Several attributes that depend on one condition
+are one `if()` with a group:
 
 ```
 @let active true
-@el [background if($active, blue, gray), if($active, font-weight bold), padding if($active, 12)]
+@el [if($active, background blue, background gray), if($active, font-weight bold)]
   Conditionally styled
+@link [if($active, [background #eef2ff, font-weight 600, aria-current=page])] /docs Docs
 ```
+
+A value that depends on a condition is an [expression](#expressions),
+`${if(CONDITION, A, B)}`. Its branches are expressions, so a number or a
+single word is written as it is, and other CSS text is quoted:
+`padding ${if($active, 24, 0)}`, `color ${if($active, #10b981, "var(--muted)")}`.
+An `if()` written in a value without `${...}` is CSS's own `if()`, which the
+browser decides, and it is passed through like any CSS function:
+`width if(media(width > 40em): 50%; else: 100%)`.
 
 ## HTML
 
@@ -505,7 +517,7 @@ The body uses them as `$title` and `$tone`. `@let @name` without brackets
 takes no parameters.
 
 A default is filled in at each call that leaves its parameter out, like a
-value passed for it: it may hold spaces, quotes, escapes, `if()` and
+value passed for it: it may hold spaces, quotes, escapes, `${...}` and
 `$variables`, including the parameters declared before it
 (`[title, heading "About $title"]`). A default that uses a parameter
 declared after it is an error.
@@ -583,7 +595,7 @@ default `false`, and name it alone to turn it on.
 
 ```
 @let @post-card [post, featured false, label "About $post"]
-  @article [spacing 8, padding if($featured, 24, 0)]
+  @article [spacing 8, padding ${if($featured, 24, 0)}]
     @if $featured
       @text [font-weight bold] Featured
     @h3 $label
@@ -679,7 +691,7 @@ Conditions and computed values (`@let x = ...`) are expressions:
 | Arithmetic | `+ - * / %` with the usual precedence, unary `-`, `( )` |
 | Comparison | `== != < > <= >=` (numeric when both sides are numbers) |
 | Logic | `and`, `or`, `not`. An empty value, `false` and `0` are false |
-| Choice | `if(CONDITION, A, B)` |
+| Choice | `if(CONDITION, A, B)`, where `B` may be left out (empty) |
 | Tests | `contains(s, x)` (in a text, or as an item of a list), `starts-with(s, x)`, `ends-with(s, x)` |
 | Text | `uppercase(s)`, `lowercase(s)`, `capitalize(s)`, `trim(s)`, `length(s)` (the items of a list, or the characters of a text), `reverse(s)`, `truncate(s, n)`, `replace(s, old, new)`, `default(s, fallback)` |
 | Color | `lighten(c, pct)`, `darken(c, pct)`, `alpha(c, a)`, `mix(c1, c2, pct)` |
@@ -687,6 +699,12 @@ Conditions and computed values (`@let x = ...`) are expressions:
 Variables are looked up during evaluation, so a value that contains `==` or
 spaces is still one value. An invalid expression is a compile error, and so
 is an undefined variable.
+
+Only what decides the result is evaluated: `if()` evaluates the branch it
+takes, and `and` and `or` stop at the side that decides. So
+`${if($n != 0, 10 / $n, 0)}` and `@if $n != 0 and 10 / $n > 1` work when
+`$n` is 0. The rest is still read, and its syntax and function names are
+checked.
 
 In text, values and file paths, `${EXPR}` inserts the value of any
 expression (see [Variables](#variables)):

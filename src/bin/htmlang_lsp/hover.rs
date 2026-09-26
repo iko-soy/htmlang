@@ -10,7 +10,9 @@ pub(crate) fn hover_at(text: &str, position: Position) -> Option<Hover> {
     let col = (position.character as usize).min(line.len());
     let word = word_at(line, col)?;
 
-    let doc = if let Some(var_name) = word.strip_prefix('$') {
+    let doc = if word == "if" && is_if_attribute(line, col) {
+        Some(docs::if_attribute())
+    } else if let Some(var_name) = word.strip_prefix('$') {
         hover_variable(text, var_name).or_else(|| docs::hover(&word))
     } else if let Some(fn_name) = word.strip_prefix('@') {
         hover_user_fn(text, fn_name).or_else(|| docs::hover(&word))
@@ -25,6 +27,20 @@ pub(crate) fn hover_at(text: &str, position: Position) -> Option<Hover> {
         }),
         range: None,
     })
+}
+
+/// Whether the `if` at `col` of `line` starts a whole attribute,
+/// `if(CONDITION, A, B)`: it is followed by `(` and is where an attribute
+/// starts in a list (a `(` inside a value is CSS's own `if()`).
+fn is_if_attribute(line: &str, col: usize) -> bool {
+    let bytes = line.as_bytes();
+    let mut start = col.min(bytes.len());
+    while start > 0 && is_word_byte(bytes[start - 1]) {
+        start -= 1;
+    }
+    line[start..].starts_with("if(")
+        && crate::completion::attr_context(&line[..start])
+            .is_some_and(|context| context.segment.trim().is_empty())
 }
 
 pub(crate) fn word_at(line: &str, col: usize) -> Option<String> {
@@ -161,6 +177,13 @@ mod tests {
             Some(HoverContents::Markup(markup)) => markup.value,
             other => panic!("no hover: {:?}", other),
         }
+    }
+
+    #[test]
+    fn a_whole_attribute_if_has_a_hover() {
+        let text = "@el [padding 4, if($on, [color red])] x\n@el [width if(media(print): 1px)] y\n";
+        assert!(hover_text(text, 0, 17).contains("Attributes chosen by a condition"));
+        assert!(hover_at(text, Position::new(1, 12)).is_none());
     }
 
     #[test]

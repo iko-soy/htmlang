@@ -221,6 +221,13 @@
     ],
     "description": "A conditional with an else branch"
   },
+  "Conditional attributes": {
+    "prefix": "if(",
+    "body": [
+      "if(${1:\\$condition}, [${2:font-weight 600}]${3:, [${4:font-weight 400}]})"
+    ],
+    "description": "Attributes chosen by a condition: each branch is an attribute, a [group] or a \\$bundle"
+  },
   "Dark mode": {
     "prefix": "@dark",
     "body": [

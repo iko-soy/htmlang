@@ -1,6 +1,6 @@
 -- Parameters are declared the way a call passes them
 @let brand #eff6ff
-@let @card [title, tone $brand, heading "About $title", mark "→ ", note if($title, set, unset)]
+@let @card [title, tone $brand, heading "About $title", mark "→ ", note ${if($title, set, unset)}]
   @article [padding 16, background $tone, before:content $mark]
     @h3 $heading
     @text $note
@@ -14,7 +14,7 @@
 
 -- A flag: false unless the call names it
 @let @post-card [post, featured false, number ""]
-  @article [padding if($featured, 24, 8)]
+  @article [padding ${if($featured, 24, 8)}]
     @if $featured
       @text Featured
     @if $number

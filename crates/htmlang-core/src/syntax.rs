@@ -146,6 +146,44 @@ pub struct Attr {
     /// Written `key=value`.
     pub html: bool,
     pub span: Span,
+    /// The attribute is `if(CONDITION, A, B)` as a whole.
+    pub choice: Option<Box<Choice>>,
+}
+
+/// A whole attribute `if(CONDITION, A, B)`: `A` or `B`, by the condition.
+#[derive(Clone, Debug)]
+pub struct Choice {
+    /// The condition, an expression; `None` when it is empty.
+    pub condition: Option<Arg>,
+    /// The branches after the condition, as written: `A`, and `B` when
+    /// there is one. Any other number is an error the evaluator reports.
+    pub branches: Vec<Branch>,
+}
+
+/// One branch of an [`if()`](Choice).
+#[derive(Clone, Debug)]
+pub enum Branch {
+    /// Nothing: the attribute is left out.
+    Empty,
+    /// One attribute (or `$bundle`, or another `if()`).
+    Attr(Attr),
+    /// `[attr, attr]`: several attributes at once. `trailing` is text
+    /// written after the `]`, an error.
+    Group {
+        list: AttrList,
+        trailing: Option<Arg>,
+    },
+}
+
+impl Branch {
+    /// The branch's attributes as written.
+    pub fn attrs(&self) -> &[Attr] {
+        match self {
+            Branch::Empty => &[],
+            Branch::Attr(attr) => std::slice::from_ref(attr),
+            Branch::Group { list, .. } => &list.attrs,
+        }
+    }
 }
 
 /// A directive's argument text, as written.
@@ -1252,13 +1290,77 @@ impl Reader<'_> {
     fn attr(&self, start: usize, end: usize) -> Option<Attr> {
         let arg = self.arg(start, end)?;
         let (key, value, html) = split_attribute(&arg.raw);
+        let piece = &self.text[start..end];
+        let s = start + (piece.len() - piece.trim_start().len());
+        let choice = self.choice(s, s + arg.raw.len()).map(Box::new);
         Some(Attr {
             key,
             value,
             html,
             raw: arg.raw,
             span: arg.span,
+            choice,
         })
+    }
+
+    /// `if(CONDITION, A, B)` when it is all of `start..end`: the condition
+    /// and the branches, each an attribute, a `[group]` (a branch that
+    /// starts with `[`) or nothing.
+    fn choice(&self, start: usize, end: usize) -> Option<Choice> {
+        let text = &self.text[start..end];
+        if !text.starts_with("if(") || self.closing_paren(start + 2, end)? + 1 != end {
+            return None;
+        }
+        let mut parts = self.split_commas(start + 3, end - 1).into_iter();
+        let (s, e) = parts.next()?;
+        let condition = self.arg(s, e);
+        let branches = parts
+            .map(|(s, e)| {
+                let at = self.skip_ws(s, e);
+                if self.text[at..e].starts_with('[') {
+                    let (list, after) = self.attr_list(at, e);
+                    let trailing = self.arg(after, e);
+                    Branch::Group { list, trailing }
+                } else {
+                    self.attr(s, e).map_or(Branch::Empty, Branch::Attr)
+                }
+            })
+            .collect();
+        Some(Choice {
+            condition,
+            branches,
+        })
+    }
+
+    /// The `)` that closes the `(` at `open`, before `limit`. Parentheses
+    /// inside `"..."` and escaped characters don't count.
+    fn closing_paren(&self, open: usize, limit: usize) -> Option<usize> {
+        let mut depth = 0;
+        let mut quoted = false;
+        let mut i = open;
+        while i < limit {
+            let rest = &self.text[i..limit];
+            let escape = escape_len(rest);
+            if escape > 0 {
+                i += escape;
+                continue;
+            }
+            let c = rest.chars().next()?;
+            match c {
+                '"' => quoted = !quoted,
+                _ if quoted => {}
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(i);
+                    }
+                }
+                _ => {}
+            }
+            i += c.len_utf8();
+        }
+        None
     }
 
     /// Text from `start` to `end` (trimmed), and whether an inline
@@ -1832,6 +1934,52 @@ mod tests {
         assert_eq!(list.attrs.len(), 2);
         assert_eq!(list.attrs[1].span.line, 4);
         assert_eq!(kinds(&tree.nodes[0].children), ["text"]);
+    }
+
+    #[test]
+    fn a_whole_attribute_if_is_read_into_its_branches() {
+        let src = "@el [if($a == \"x, y\", [padding 4, if($b, gap 1)], $card), width if(media(print): 1px), if(c, )]\n";
+        let tree = parse(src);
+        let NodeKind::Element(line) = &tree.nodes[0].kind else {
+            panic!()
+        };
+        let attrs = &line.chain[0].attrs.as_ref().unwrap().attrs;
+        assert_eq!(attrs.len(), 3);
+        let choice = attrs[0].choice.as_ref().expect("an if()");
+        let condition = choice.condition.as_ref().unwrap();
+        assert_eq!(condition.raw, "$a == \"x, y\"");
+        assert_eq!(
+            &src[condition.span.start..condition.span.end],
+            condition.raw
+        );
+        let Branch::Group { list, trailing } = &choice.branches[0] else {
+            panic!("{:?}", choice.branches[0])
+        };
+        assert!(trailing.is_none());
+        assert_eq!(list.attrs.len(), 2);
+        assert_eq!(list.attrs[0].key, "padding");
+        assert_eq!(
+            &src[list.attrs[0].span.start..list.attrs[0].span.end],
+            "padding 4"
+        );
+        assert!(list.attrs[1].choice.is_some(), "an if() inside a group");
+        assert!(matches!(&choice.branches[1], Branch::Attr(a) if a.key == "$card"));
+        // An if() inside a value is CSS's; an empty branch is empty
+        assert!(attrs[1].choice.is_none());
+        let empty = attrs[2].choice.as_ref().unwrap();
+        assert!(matches!(empty.branches[..], [Branch::Empty]));
+        // A group spanning lines keeps each attribute's line
+        let tree = parse("@el [if($on, [\n  padding 4,\n  margin 2\n])]\n");
+        let NodeKind::Element(line) = &tree.nodes[0].kind else {
+            panic!()
+        };
+        let choice = line.chain[0].attrs.as_ref().unwrap().attrs[0]
+            .choice
+            .clone()
+            .unwrap();
+        let group = choice.branches[0].attrs();
+        assert_eq!((group[0].span.line, group[0].span.column), (2, 2));
+        assert_eq!((group[1].span.line, group[1].span.column), (3, 2));
     }
 
     #[test]

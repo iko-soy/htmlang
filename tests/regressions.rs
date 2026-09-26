@@ -1038,10 +1038,9 @@ fn quoted_custom_property_keeps_its_quotes() {
 #[test]
 fn an_escaped_comma_in_an_if_branch_stays_in_the_branch() {
     let out = compile(
-        "@let on = true\n@el [transition if($on, opacity 1s\\, color 1s, none), if($on, font-family Inter\\, serif, color red)] x",
+        "@let on = true\n@el [if($on, transition opacity 1s\\, color 1s, transition none), if($on, font-family Inter\\, serif, color red)] x",
     );
     assert!(out.contains("transition:opacity 1s, color 1s;"), "{}", out);
-    // A whole-attribute branch is split into its name and value after choosing
     assert!(out.contains("font-family:Inter, serif"), "{}", out);
 }
 

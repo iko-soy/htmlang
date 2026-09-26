@@ -740,23 +740,24 @@ fn check_head(head: &syntax::Head, line: usize, inline: bool, ctx: &mut ParseCon
         return;
     }
     if let Some(list) = &head.attrs {
-        parse_attr_list(&literal_attrs(list), line, ctx, true, &[]);
+        check_attrs(&list.attrs, line, ctx, &[]);
     }
 }
 
-/// The attributes of a list that was never evaluated, as far as they can
-/// be checked. Names are checked; a value with a variable in it depends on
-/// what the variable holds, so only a literal value is.
-fn literal_attrs(list: &syntax::AttrList) -> Vec<syntax::Attr> {
-    list.attrs
+/// The attributes of a list that is never evaluated that can be checked
+/// together: not bundles or `if()`s. Names are checked; a value with a
+/// variable in it depends on what the variable holds, so only a literal
+/// value is.
+fn literal_attrs(tokens: &[syntax::Attr]) -> Vec<syntax::Attr> {
+    tokens
         .iter()
         .filter(|a| {
             let bundle = a.key.starts_with('$') && a.value.is_none() && !a.html;
-            !a.raw.starts_with("if(") && !bundle
+            a.choice.is_none() && !bundle
         })
         .map(|a| {
             let mut a = a.clone();
-            let variable = |v: &String| v.contains('$') || v.contains("if(");
+            let variable = |v: &String| v.contains('$');
             if !a.key.contains('$') && a.value.as_ref().is_some_and(variable) {
                 a.value = None;
                 a.raw = a.key.clone();
@@ -776,11 +777,11 @@ fn check_call(head: &syntax::Head, function: &FnDef, line: usize, ctx: &mut Pars
     written_parameter_forms(name, function, attrs, line, ctx);
     if let Some(list) = &head.attrs {
         let params: Vec<String> = function.params.iter().map(|p| p.name.clone()).collect();
-        parse_attr_list(&literal_attrs(list), line, ctx, true, &params);
+        check_attrs(&list.attrs, line, ctx, &params);
     }
     let unknown = attrs
         .iter()
-        .any(|a| a.raw.starts_with("if(") || (a.key.starts_with('$') && a.value.is_none()));
+        .any(|a| a.choice.is_some() || (a.key.starts_with('$') && a.value.is_none()));
     if unknown {
         return;
     }
@@ -2053,8 +2054,8 @@ fn inline_segments(mut nodes: Vec<Node>, line: usize) -> Vec<TextSegment> {
 }
 
 /// Fill in the default of a parameter that a call leaves out, like the
-/// value of an attribute passed for it: `if()` chooses, variables are
-/// filled in, and one `"..."` is quoted text. Its problems are reported
+/// value of an attribute passed for it: variables are filled in, and one
+/// `"..."` is quoted text. Its problems are reported
 /// at the definition, once.
 fn fill_default(
     fn_def: &FnDef,
@@ -2084,11 +2085,7 @@ fn fill_default(
         ),
         std::mem::replace(&mut ctx.current_node, fn_def.node),
     );
-    let (raw, column) = match choose_if(default, ctx, line) {
-        Some(branch) => (branch, None),
-        None => (default.to_string(), column),
-    };
-    let (text, quoted, _) = ctx.fill_value(&raw, line, column, Sink::Text);
+    let (text, quoted, _) = ctx.fill_value(default, line, column, Sink::Text);
     (ctx.current_source, ctx.current_node) = caller;
     (text, quoted)
 }
@@ -3112,6 +3109,37 @@ fn css_strings(value: &str) -> Vec<&str> {
     strings
 }
 
+/// An `if(...)` in a CSS value that isn't CSS's if(): CSS writes each
+/// branch `CONDITION: VALUE`, so an if() without a `:` is something else.
+fn not_css_if(value: &str) -> Option<&str> {
+    let mut from = 0;
+    while let Some(found) = value[from..].find("if(") {
+        let at = from + found;
+        from = at + 3;
+        let word_before = value[..at]
+            .chars()
+            .next_back()
+            .is_some_and(|c| c.is_alphanumeric() || matches!(c, '-' | '_'));
+        if word_before {
+            continue;
+        }
+        let mut depth = 0;
+        let close = value[at + 2..].char_indices().find_map(|(i, c)| {
+            match c {
+                '(' => depth += 1,
+                ')' => depth -= 1,
+                _ => {}
+            }
+            (depth == 0).then_some(at + 2 + i)
+        });
+        let end = close.map_or(value.len(), |c| c + 1);
+        if !value[at + 3..end].contains(':') {
+            return Some(&value[at..end]);
+        }
+    }
+    None
+}
+
 fn has_css_unit(value: &str) -> bool {
     CSS_UNIT_SUFFIXES.iter().any(|u| value.ends_with(u))
         || value.starts_with("var(")
@@ -3154,6 +3182,25 @@ fn validate_attr_value(attr: &Attribute, line_num: usize, ctx: &mut ParseContext
     }
 
     if let Some(val) = &attr.value {
+        if let Some(call) = not_css_if(val) {
+            ctx.diagnostics.push(
+                Diagnostic::warning(
+                    code::INVALID_VALUE,
+                    line_num,
+                    format!(
+                        "'{}' is not CSS's if(), whose branches are written \
+                         `if(CONDITION: VALUE; else: VALUE)`",
+                        call
+                    ),
+                )
+                .subject(call),
+            );
+            return;
+        }
+        // CSS's if() is decided by the browser, like var()
+        if val.starts_with("if(") {
+            return;
+        }
         if NUMERIC_ATTRS.contains(&base_key) {
             // All space-separated parts must be numeric or have a CSS unit
             for part in val.split_whitespace() {
@@ -3478,24 +3525,17 @@ fn parse_attr_list(
 ) -> Vec<Attribute> {
     let mut attrs = Vec::new();
     let mut seen_keys: Vec<String> = Vec::new();
+    let mut chosen = Vec::new();
+    choose_attrs(tokens, line_num, ctx, validate, text_keys, &mut chosen);
 
-    for token in tokens {
+    for token in &chosen {
         let line = if token.span.line == 0 {
             line_num
         } else {
             token.span.line
         };
-        // A whole attribute `if(cond, a, b)` is the chosen branch, as
-        // written; the attribute as written otherwise.
-        let (key, value, html, as_written) = match choose_if(&token.raw, ctx, line) {
-            Some(branch) if branch.is_empty() => continue,
-            Some(branch) => {
-                let (key, value, html) = syntax::split_attribute(&branch);
-                (key, value, html, false)
-            }
-            None => (token.key.clone(), token.value.clone(), token.html, true),
-        };
-        let column = |at: usize| as_written.then_some(token.span.column + at);
+        let (key, value, html) = (token.key.clone(), token.value.clone(), token.html);
+        let column = |at: usize| Some(token.span.column + at);
 
         // `$name` (or `${name}`) alone: an attribute bundle, spliced in
         let bundle = key.strip_prefix('$').filter(|_| value.is_none() && !html);
@@ -3534,10 +3574,9 @@ fn parse_attr_list(
             continue;
         }
 
-        // A value `if(cond, a, b)` is `a` or `b`, by `cond`; an empty
-        // choice leaves the attribute out. Then its variables are filled.
-        // A style's value is CSS, where quoted text keeps its quotes; an
-        // HTML attribute's (and a parameter's) is text, where it loses them.
+        // A value's variables are filled in. A style's value is CSS, where
+        // quoted text keeps its quotes; an HTML attribute's (and a
+        // parameter's) is text, where it loses them.
         let sink = if html || text_keys.contains(&key) {
             Sink::Text
         } else {
@@ -3549,12 +3588,7 @@ fn parse_attr_list(
             None => None,
             Some(value) => {
                 let at = column(token.raw.len() - value.len());
-                let (text, at) = match choose_if(&value, ctx, line) {
-                    Some(branch) if branch.is_empty() => continue,
-                    Some(branch) => (branch, None),
-                    None => (value, at),
-                };
-                let (text, is_quoted, ok) = ctx.fill_value(&text, line, at, sink);
+                let (text, is_quoted, ok) = ctx.fill_value(&value, line, at, sink);
                 filled = ok;
                 quoted = is_quoted;
                 Some(text)
@@ -3924,89 +3958,133 @@ fn numeric_range(start: i64, end: i64, step: i64) -> Vec<String> {
     items
 }
 
-/// Evaluate `if(cond, a)` or `if(cond, a, b)` when it is all of `text`,
-/// returning the chosen branch (empty when `cond` fails and there is no `b`).
-fn choose_if(text: &str, ctx: &mut ParseContext, line: usize) -> Option<String> {
-    let inner = text.strip_prefix("if(")?.strip_suffix(')')?;
-    let args = split_if_args(inner);
-    // `if(a) (b)` isn't one call
-    if split_trailing_paren(inner) || !(2..=3).contains(&args.len()) {
-        return None;
+/// The attributes of `tokens` after each whole-attribute `if()` has
+/// chosen (see [`syntax::Choice`]), in order, into `out`. The branch not
+/// taken isn't evaluated; with `validate`, its attribute names are checked
+/// like code that doesn't run.
+fn choose_attrs(
+    tokens: &[syntax::Attr],
+    line_num: usize,
+    ctx: &mut ParseContext,
+    validate: bool,
+    text_keys: &[String],
+    out: &mut Vec<syntax::Attr>,
+) {
+    for token in tokens {
+        let Some(choice) = &token.choice else {
+            out.push(token.clone());
+            continue;
+        };
+        let Some(condition) = choice_shape(token, choice, line_num, ctx) else {
+            continue;
+        };
+        let taken = match condition.span.line {
+            0 => ctx.condition(&condition.raw, line_num, None),
+            line => ctx.condition(&condition.raw, line, Some(condition.span.column)),
+        };
+        let (chosen, other) = match taken {
+            true => (choice.branches.first(), choice.branches.get(1)),
+            false => (choice.branches.get(1), choice.branches.first()),
+        };
+        if let Some(other) = other {
+            track_var_refs(&branch_text(other), &mut ctx.used_variables);
+            if validate {
+                check_attrs(other.attrs(), line_num, ctx, text_keys);
+            }
+        }
+        if let Some(branch) = chosen {
+            choose_attrs(branch.attrs(), line_num, ctx, validate, text_keys, out);
+        }
     }
-    let branch = if ctx.condition(args[0].trim(), line, None) {
-        args[1]
+}
+
+/// Report what is wrong with the shape of `if()`: an empty condition, a
+/// number of branches other than one or two, text after a group's `]`.
+/// Returns the condition when the `if()` can be evaluated.
+fn choice_shape<'a>(
+    token: &syntax::Attr,
+    choice: &'a syntax::Choice,
+    line_num: usize,
+    ctx: &mut ParseContext,
+) -> Option<&'a syntax::Arg> {
+    let line = if token.span.line == 0 {
+        line_num
     } else {
-        args.get(2).copied().unwrap_or("")
+        token.span.line
     };
-    Some(branch.trim().to_string())
-}
-
-/// The characters of `text` with their offsets, leaving out the escapes
-/// (`\,`, `\"`, see [`syntax::ESCAPES`]), which stand for themselves.
-fn unescaped_chars(text: &str) -> impl Iterator<Item = (usize, char)> + '_ {
-    let mut i = 0;
-    std::iter::from_fn(move || {
-        loop {
-            let rest = &text[i..];
-            let escape = syntax::escape_len(rest);
-            if escape > 0 {
-                i += escape;
-                continue;
-            }
-            let c = rest.chars().next()?;
-            let at = i;
-            i += c.len_utf8();
-            return Some((at, c));
-        }
-    })
-}
-
-/// Whether the parentheses in `inner` close before its end, as in the
-/// inside of `if(a)(b)`.
-fn split_trailing_paren(inner: &str) -> bool {
-    let mut depth = 0i32;
-    let mut quote = None;
-    for (_, c) in unescaped_chars(inner) {
-        match c {
-            '"' | '\'' if quote == Some(c) => quote = None,
-            '"' | '\'' if quote.is_none() => quote = Some(c),
-            _ if quote.is_some() => {}
-            '(' => depth += 1,
-            ')' => {
-                depth -= 1;
-                if depth < 0 {
-                    return true;
-                }
-            }
-            _ => {}
+    // The line the column points into, when it is the one being evaluated
+    let source = |ctx: &ParseContext, diagnostic: Diagnostic, at: usize| match &ctx.current_source {
+        (current, Some(text)) if *current == at => diagnostic.source(text.clone()),
+        _ => diagnostic,
+    };
+    for branch in &choice.branches {
+        if let syntax::Branch::Group {
+            trailing: Some(trailing),
+            ..
+        } = branch
+        {
+            let diagnostic = source(
+                ctx,
+                Diagnostic::error(
+                    code::UNEXPECTED_ARGUMENT,
+                    trailing.span.line,
+                    format!(
+                        "'{}' after the `]` of a group in if(): a branch is one attribute, \
+                         one `[group]` of attributes or one `$bundle`",
+                        trailing.raw
+                    ),
+                )
+                .column(trailing.span.column)
+                .subject(trailing.raw.as_str()),
+                trailing.span.line,
+            );
+            ctx.push_once(diagnostic);
         }
     }
-    false
-}
-
-/// The arguments of `if(...)`: split at the commas that aren't escaped
-/// (`\,`) or inside `(...)` or quotes.
-fn split_if_args(input: &str) -> Vec<&str> {
-    let mut parts = Vec::new();
-    let mut start = 0;
-    let mut depth = 0;
-    let mut quote = None;
-    for (i, c) in unescaped_chars(input) {
-        match c {
-            '"' | '\'' if quote == Some(c) => quote = None,
-            '"' | '\'' if quote.is_none() => quote = Some(c),
-            _ if quote.is_some() => {}
-            '(' => depth += 1,
-            ')' => depth -= 1,
-            ',' if depth == 0 => {
-                parts.push(&input[start..i]);
-                start = i + 1;
-            }
-            _ => {}
+    match &choice.condition {
+        Some(condition) if (1..=2).contains(&choice.branches.len()) => Some(condition),
+        _ => {
+            let diagnostic = source(
+                ctx,
+                Diagnostic::error(
+                    code::INVALID_EXPRESSION,
+                    line,
+                    format!(
+                        "`{}`: if() takes a condition and one or two branches, \
+                         `if(CONDITION, A, B)`",
+                        token.raw
+                    ),
+                )
+                .column(token.span.column),
+                line,
+            );
+            ctx.push_once(diagnostic);
+            None
         }
     }
-    parts.push(&input[start..]);
-    parts
+}
+
+/// A branch's text, for the names it uses.
+fn branch_text(branch: &syntax::Branch) -> String {
+    let raws: Vec<&str> = branch.attrs().iter().map(|a| a.raw.as_str()).collect();
+    raws.join(", ")
+}
+
+/// Check attributes that are never evaluated (in code that doesn't run,
+/// or the branch an `if()` didn't take), as far as they can be checked:
+/// names are, and literal values; a value with a variable depends on what
+/// the variable holds. Each branch of an `if()` is checked on its own.
+fn check_attrs(tokens: &[syntax::Attr], line: usize, ctx: &mut ParseContext, text_keys: &[String]) {
+    parse_attr_list(&literal_attrs(tokens), line, ctx, true, text_keys);
+    for token in tokens {
+        if let Some(choice) = &token.choice
+            && choice_shape(token, choice, line, ctx).is_some()
+        {
+            for branch in &choice.branches {
+                check_attrs(branch.attrs(), line, ctx, text_keys);
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

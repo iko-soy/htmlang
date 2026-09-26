@@ -1,12 +1,30 @@
 @page If Expression
 @let active true
 @let theme dark
+@let n 0
 
-@el [background if($active, blue, gray)]
+-- A whole attribute: each branch is an attribute
+@el [if($active, background blue, background gray)]
   Active element
 
-@el [background if($active, #3b82f6, #999), color if($theme == dark, white, black)]
+-- A value: an expression, whose CSS text is quoted when it isn't one word
+@el [background ${if($active, #3b82f6, "var(--muted)")}, if($theme == dark, color white, color black)]
   Themed element
 
-@el [padding if($active != true, 10, 20)]
+@el [padding ${if($active != true, 10, 20)}]
   Inactive padding
+
+-- A group: one condition for several attributes
+@el [if($active, [border 1 solid var(--line), font-weight 600, aria-current=page])]
+  Grouped attributes
+
+-- An empty branch leaves the attribute out; a branch can be a bundle
+@el [if(not $active, padding 4), if($active, $truncate, [])]
+  Empty branch and a bundle
+
+-- Only the branch taken is evaluated
+@text Ratio ${if($n != 0, 10 / $n, 0)}, ${$n == 0 or 10 / $n > 1}
+
+-- CSS's own if() is CSS, decided by the browser
+@el [width if(media(width > 40em): 50%; else: 100%)]
+  CSS if()
