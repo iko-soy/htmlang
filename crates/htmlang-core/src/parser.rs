@@ -3114,7 +3114,7 @@ fn parse_single_element(
                 // The attribute wins; the text is content, as if the
                 // element had no leading argument
                 ctx.push_once(leading_twice(&kind, &token, &key, &value, text, ctx));
-                if kind.layout() != Layout::Void {
+                if !takes_no_text(&kind) {
                     children.push(Node::Text(text_segments(text, ctx)));
                 }
             } else {
@@ -3124,7 +3124,7 @@ fn parse_single_element(
                         .0,
                 );
                 if let Some(rest) = rest {
-                    if kind.layout() == Layout::Void {
+                    if takes_no_text(&kind) {
                         let d = after_the_leading_argument(&kind, &token.raw, &rest);
                         let d = at_attribute(d, Some(rest.span.column), ctx);
                         ctx.push_once(d);
@@ -3179,7 +3179,13 @@ fn leading_twice(
 ) -> Diagnostic {
     let name = kind.name();
     let what = leading_name(kind);
-    let written = if kind.layout() == Layout::Void {
+    // The value as one token: quoted when it is empty or has a space in it
+    let value = if !value.is_empty() && syntax::leading_token_len(value) == value.len() {
+        value.to_string()
+    } else {
+        format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+    };
+    let written = if takes_no_text(kind) {
         format!("@{} {}", name, value)
     } else {
         format!("@{} {} {}", name, value, text.raw)
@@ -3205,6 +3211,14 @@ fn leading_name(kind: &ElementKind) -> &'static str {
     }
 }
 
+/// Whether text after an element's leading argument has nowhere to go:
+/// an element without content (`@image`, `@source`, ...), or `@optgroup`,
+/// which holds only `@option` lines, so `@optgroup Citrus fruits` would
+/// otherwise make `Citrus` the label and drop `fruits`.
+fn takes_no_text(kind: &ElementKind) -> bool {
+    kind.layout() == Layout::Void || kind.is_tag("optgroup")
+}
+
 /// Text after the leading argument of an element without content:
 /// `@image logo.png Our logo`.
 fn after_the_leading_argument(kind: &ElementKind, token: &str, rest: &syntax::Text) -> Diagnostic {
@@ -3215,14 +3229,19 @@ fn after_the_leading_argument(kind: &ElementKind, token: &str, rest: &syntax::Te
     } else {
         ""
     };
+    let holds = if kind.layout() == Layout::Void {
+        "it has no content"
+    } else {
+        "it holds only the elements on the lines under it"
+    };
+    let bare = syntax::quoted_string(token).unwrap_or(token);
     Diagnostic::error(
         code::UNEXPECTED_ARGUMENT,
         rest.span.line,
         format!(
-            "@{0} takes one word after its attributes, its {1} ('{2}'), and it has no \
-             content, so '{3}' would go nowhere. A value with a space in it is quoted: \
-             `\"{2} {3}\"`.{4}",
-            name, attr, token, rest.raw, alt
+            "@{0} takes one word after its attributes, its {1} ('{2}'), and {5}, so '{3}' \
+             would go nowhere. A value with a space in it is quoted: `\"{6} {3}\"`.{4}",
+            name, attr, token, rest.raw, alt, holds, bare
         ),
     )
     .subject(rest.raw.clone())
@@ -4778,8 +4797,9 @@ fn validate_tree(
 /// What an element has no place for in HTML, which would otherwise be
 /// left out of the page: attributes on `@fragment` (which has no element
 /// of its own), styles on `@script` (which isn't shown), a body under a
-/// `@script` that has a src (which the browser doesn't run), and content in
-/// a void element such as `@input`.
+/// `@script` that has a src (which the browser doesn't run), an element
+/// under a `@script` (whose body is code), and content in a void element
+/// such as `@input`.
 fn dropped_by_the_element(elem: &Element, diagnostics: &mut Vec<Diagnostic>) {
     let name = elem.kind.name();
     let keys = |attrs: Vec<&Attribute>| {
@@ -4854,6 +4874,21 @@ fn dropped_by_the_element(elem: &Element, diagnostics: &mut Vec<Diagnostic>) {
                     "@{0} has both a src ('{1}') and a body: the browser runs only the file, \
                      so the body would go nowhere. Put the code in {1}, or leave out the src",
                     name, src
+                ),
+            );
+        } else if let Some(Node::Element(child)) = elem
+            .children
+            .iter()
+            .find(|child| matches!(child, Node::Element(_)))
+        {
+            // `@script > @b x`: its body is code, not elements
+            error(
+                code::UNEXPECTED_CONTENT,
+                format!(
+                    "@{} holds its code as the lines under it, kept as written, so @{} would \
+                     go nowhere",
+                    name,
+                    child.kind.name()
                 ),
             );
         }

@@ -101,7 +101,7 @@ pub(crate) const ELEMENTS: &[Doc] = &[
     doc("menu", "List of commands (`<menu>`), shown without markers like `@ul`.", "@menu [spacing 4]\n  @li > @button Copy"),
     doc("caption", "Table title (`<caption>`), the first child of `@table`.", "@table\n  @caption Team\n  @tr\n    @td Ada"),
     doc("tfoot", "Table footer rows (`<tfoot>`).", "@tfoot\n  @tr\n    @td Total"),
-    doc("optgroup", "Group of options in a `@select`: the first word after its attributes is its `label` (quote one with a space in it).", "@select [aria-label=Fruit]\n  @optgroup \"Citrus fruits\"\n    @option Lemon"),
+    doc("optgroup", "Group of options in a `@select`: the first word after its attributes is its `label` (quote one with a space in it); its options go on the lines under it.", "@select [aria-label=Fruit]\n  @optgroup \"Citrus fruits\"\n    @option Lemon"),
     doc("track", "Captions or subtitles for `@video`: the one word after its attributes is its `src`.", "@track [kind=captions, srclang=en] captions.vtt"),
     doc("source", "A media source: the one word after its attributes is its `srcset` inside `@picture`, and its `src` inside `@video` or `@audio`.", "@picture\n  @source [type=image/avif] photo.avif\n  @image [alt=Photo] photo.jpg"),
 ];

@@ -623,8 +623,9 @@ and `@link /page/${$n + 1} Next` take the whole `$url` and
 the rest of the text is the element's content, read like any text; an
 element without content (`@image`, `@source`, `@track`, `@embed`, `@area`)
 takes nothing more, and a word after its argument is an error (write a
-text alternative as `alt=...`). A value with a space in it is quoted, as
-an `@optgroup`'s label: `@optgroup "Citrus fruits"`. The first word is
+text alternative as `alt=...`). So is a word after an `@optgroup`'s label,
+since it holds only the `@option` lines under it. A value with a space in
+it is quoted, as such a label: `@optgroup "Citrus fruits"`. The first word is
 always the argument, so on an element whose attribute is often left out
 (`@form`, `@video`, `@audio`), text goes on the lines under it: `@form Sign
 in` would make `Sign` the form's action.

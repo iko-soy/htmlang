@@ -7178,3 +7178,62 @@ fn a_leading_attribute_passed_to_a_function_s_root_is_given_twice() {
         found[0].message
     );
 }
+
+#[test]
+fn a_word_after_an_optgroup_s_label_is_an_error() {
+    // It holds only the @option lines under it, so `fruits` would go nowhere
+    let d =
+        parse_diagnostics("@select [aria-label=f]\n  @optgroup Citrus fruits\n    @option Lemon\n");
+    let found = coded(&d, "unexpected-argument");
+    assert_eq!(found.len(), 1, "{:?}", d);
+    assert!(found[0].message.contains("`\"Citrus fruits\"`"), "{:?}", d);
+    // Quoted, it is one label
+    let html =
+        compile("@select [aria-label=f]\n  @optgroup \"Citrus fruits\"\n    @option Lemon\n");
+    assert!(
+        html.contains(r#"<optgroup label="Citrus fruits"><option>Lemon</option></optgroup>"#),
+        "{}",
+        html
+    );
+    // Given twice, the suggestion has no content either
+    let d = parse_diagnostics("@select [aria-label=f]\n  @optgroup [label=Stone] fruits\n");
+    let found = coded(&d, "duplicate-attribute");
+    assert_eq!(found.len(), 1, "{:?}", d);
+    assert!(found[0].message.contains("`@optgroup Stone`"), "{:?}", d);
+}
+
+#[test]
+fn the_one_way_form_of_a_duplicate_quotes_a_value_with_a_space() {
+    let d = parse_diagnostics("@link [href=/my page] About\n");
+    let found = coded(&d, "duplicate-attribute");
+    assert_eq!(found.len(), 1, "{:?}", d);
+    assert!(
+        found[0].message.contains("`@link \"/my page\" About`"),
+        "{:?}",
+        d
+    );
+    let d = parse_diagnostics("@link [href=] About\n");
+    assert!(
+        coded(&d, "duplicate-attribute")[0]
+            .message
+            .contains("`@link \"\" About`"),
+        "{:?}",
+        d
+    );
+    // A quoted source isn't quoted twice in the hint
+    let d = parse_diagnostics("@image [alt=x] \"a b\" c\n");
+    let found = coded(&d, "unexpected-argument");
+    assert_eq!(found.len(), 1, "{:?}", d);
+    assert!(found[0].message.contains("`\"a b c\"`"), "{:?}", d);
+}
+
+#[test]
+fn an_element_under_script_is_not_dropped_silently() {
+    // `@script > @b x` would write `<script></script>`: its body is code
+    let d = parse_diagnostics("@script [defer] > @b oops\n");
+    let found = coded(&d, "unexpected-content");
+    assert_eq!(found.len(), 1, "{:?}", d);
+    assert!(found[0].message.contains("@b would go nowhere"), "{:?}", d);
+    // Its code under it is fine
+    assert!(parse_diagnostics("@script\n  @b(1)\n").is_empty());
+}
