@@ -90,15 +90,69 @@ pub(crate) fn find_word_start(text: &str) -> usize {
 }
 
 pub(crate) fn in_brackets(text: &str) -> bool {
-    let mut depth: i32 = 0;
-    for ch in text.chars() {
-        if ch == '[' {
-            depth += 1;
-        } else if ch == ']' {
-            depth -= 1;
+    attr_context(text).is_some()
+}
+
+/// The attribute being written at the end of `before`, inside an attribute
+/// list that is still open there.
+pub(crate) struct AttrContext<'a> {
+    /// The attribute's text so far: what follows the list's last comma.
+    pub segment: &'a str,
+    /// How many attributes come before it in the list.
+    pub index: usize,
+}
+
+/// Where `before` ends inside an open attribute list, read as the compiler
+/// reads one: escapes (`\,`, `\]`) and quoted text (`"a, b"`) don't open,
+/// close or split it, and neither do commas inside `(...)` or `{...}`.
+pub(crate) fn attr_context(before: &str) -> Option<AttrContext<'_>> {
+    // Each open list: where its current attribute starts, how many came
+    // before it, and the `(`/`{` depth inside it
+    let mut lists: Vec<(usize, usize, i32)> = Vec::new();
+    let mut quoted = false;
+    let mut i = 0;
+    while i < before.len() {
+        let rest = &before[i..];
+        let escape = htmlang::syntax::escape_len(rest);
+        if escape > 0 {
+            i += escape;
+            continue;
         }
+        let Some(c) = rest.chars().next() else { break };
+        match c {
+            '"' if !lists.is_empty() => quoted = !quoted,
+            _ if quoted => {}
+            '[' => lists.push((i + 1, 0, 0)),
+            ']' => {
+                lists.pop();
+            }
+            '(' | '{' => {
+                if let Some(list) = lists.last_mut() {
+                    list.2 += 1;
+                }
+            }
+            ')' | '}' => {
+                if let Some(list) = lists.last_mut() {
+                    list.2 -= 1;
+                }
+            }
+            ',' => {
+                if let Some(list) = lists.last_mut()
+                    && list.2 <= 0
+                {
+                    list.0 = i + 1;
+                    list.1 += 1;
+                }
+            }
+            _ => {}
+        }
+        i += c.len_utf8();
     }
-    depth > 0
+    let &(start, index, _) = lists.last()?;
+    Some(AttrContext {
+        segment: &before[start..],
+        index,
+    })
 }
 
 fn item(
@@ -285,6 +339,11 @@ pub(crate) fn owning_element(text: &str, position: Position) -> Option<String> {
             line.len()
         };
         for (col, ch) in line[..last].char_indices().rev() {
+            // `\[` and `\]` are brackets in a value (see `attr_context`)
+            let backslashes = col - line[..col].trim_end_matches('\\').len();
+            if backslashes % 2 == 1 {
+                continue;
+            }
             match ch {
                 ']' => depth += 1,
                 '[' => {
@@ -447,8 +506,7 @@ fn element_specific_attrs(element: &str) -> &'static [&'static str] {
 /// Returns the list of valid values when `before` ends with the attribute
 /// name plus a single space and no value yet typed.
 fn attr_value_completions(before: &str, range: Range) -> Option<Vec<CompletionItem>> {
-    let bracket_content = before.rsplit('[').next()?;
-    let segment = bracket_content.rsplit(',').next()?.trim_start();
+    let segment = attr_context(before)?.segment.trim_start();
     // A style (`cursor `) or an HTML attribute (`type=`) with no value typed yet.
     let attr = segment
         .strip_suffix('=')
@@ -737,9 +795,7 @@ fn color_value_completions(before: &str, range: Range) -> Option<Vec<CompletionI
     // Find the preceding attribute name before the cursor value position.
     // Inside brackets, attributes are comma-separated. Look for the last attribute token
     // before the current value position. Pattern: "attr value" or "attr " at end.
-    let bracket_content = before.rsplit('[').next()?;
-    // Split by commas to get the current segment
-    let segment = bracket_content.rsplit(',').next()?.trim();
+    let segment = attr_context(before)?.segment.trim();
 
     // Check if the first word in this segment is a color-related attribute
     let attr = segment.split_whitespace().next()?;
@@ -1024,6 +1080,36 @@ mod tests {
         assert!(items.iter().any(|i| i.label == "hover:background"));
         let items = completions("@el [md:", Position::new(0, 8));
         assert!(items.iter().any(|i| i.label == "md:padding"));
+    }
+
+    #[test]
+    fn escaped_commas_and_quotes_do_not_start_an_attribute() {
+        fn context(before: &str) -> Option<(&str, usize)> {
+            attr_context(before).map(|c| (c.segment, c.index))
+        }
+        assert_eq!(
+            context(r"@el [transition opacity 1s\, color 1s, cursor "),
+            Some((" cursor ", 1))
+        );
+        assert_eq!(context(r#"@el [content "a, b", "#), Some((" ", 1)));
+        assert_eq!(
+            context("@el [box-shadow 0 0 rgba(0,0,0,1), "),
+            Some((" ", 1))
+        );
+        // `\]` and `"]"` don't close the list, `]` does
+        assert!(in_brackets(r"@el [width 4\], "));
+        assert!(in_brackets(r#"@el [content "]"#));
+        assert!(!in_brackets("@el [width 4] text"));
+        // An escaped `]` is not a list the cursor is inside of
+        let text = r"@input [pattern=\d\], ";
+        assert_eq!(
+            owning_element(text, pos(0, text.len() as u32)),
+            Some("input".to_string())
+        );
+        // The value `cursor` is still offered after an escaped comma
+        let text = r"@el [transition opacity 1s\, color 1s, cursor ";
+        let items = completions(text, pos(0, text.len() as u32));
+        assert!(items.iter().any(|i| i.label == "pointer"), "{:?}", items);
     }
 
     #[test]

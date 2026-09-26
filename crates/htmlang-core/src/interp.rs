@@ -67,9 +67,24 @@ fn css_string_after(text: &str, mut inside: bool) -> bool {
     inside
 }
 
-/// `text` as it goes inside a CSS string: `"` escaped as `\"`.
+/// `text` as it goes inside a CSS string: `"` escaped as `\"`. A backslash
+/// and the character after it are a CSS escape and stay as written
+/// (`\201C`), but a backslash at the end is doubled, so it can't escape
+/// the rest of the string (`a\` gives `a\\`).
 pub fn css_string_body(text: &str) -> String {
-    text.replace('"', "\\\"")
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => {
+                out.push('\\');
+                out.push(chars.next().unwrap_or('\\'));
+            }
+            '"' => out.push_str("\\\""),
+            _ => out.push(c),
+        }
+    }
+    out
 }
 
 /// A problem found while interpolating, at a byte offset into the text.
@@ -489,6 +504,12 @@ pub(crate) mod tests {
             r#""(a\"b) x\"y" "a\"b""#
         );
         assert_eq!(fill(r#""\" $q""#, Sink::Css), r#""\" a\"b""#);
+        // What an unquoted value holds goes into a string that stays valid
+        let scope = Map::new(&[("end", r"a\"), ("esc", r"\201C"), ("q", r#"x\"y"#)]);
+        let fill = |text: &str| interpolate_for(text, &scope, Sink::Css).0;
+        assert_eq!(fill(r#""$end""#), r#""a\\""#);
+        assert_eq!(fill(r#""$esc""#), r#""\201C""#);
+        assert_eq!(fill(r#""$q""#), r#""x\"y""#);
     }
 
     #[test]

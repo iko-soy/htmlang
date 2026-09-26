@@ -5,7 +5,7 @@ use htmlang::parser::ParseResult;
 use htmlang::syntax::{self, DefinitionKind, NodeKind, Tree};
 use tower_lsp::lsp_types::*;
 
-use crate::completion::in_brackets;
+use crate::completion::attr_context;
 use crate::tree::{self as lsp_tree, Def};
 
 // ---------------------------------------------------------------------------
@@ -969,7 +969,7 @@ pub(crate) fn get_signature_help(text: &str, position: Position) -> Option<Signa
     if fn_name.is_empty() {
         return None;
     }
-    let inside_args = in_brackets(before);
+    let inside_args = attr_context(before);
 
     let def: Def = lsp_tree::definitions(text)
         .into_iter()
@@ -993,12 +993,7 @@ pub(crate) fn get_signature_help(text: &str, position: Position) -> Option<Signa
 
     // The active parameter: commas before the cursor inside the brackets,
     // or the first parameter before the argument list is entered.
-    let active_param = if inside_args {
-        let bracket_start = before.rfind('[').unwrap_or(0);
-        before[bracket_start..].matches(',').count() as u32
-    } else {
-        0
-    };
+    let active_param = inside_args.map_or(0, |args| args.index as u32);
 
     Some(SignatureHelp {
         signatures: vec![SignatureInformation {
@@ -1155,5 +1150,11 @@ mod tests {
         let hints = inlay_hints(text, &syntax::parse(text));
         assert_eq!(hints.len(), 1);
         assert_eq!(hints[0].position, Position::new(2, 11));
+        // An escaped comma is part of the value, not a second argument
+        let escaped = "@let card $title $tone=info\n  @el $title\n@card [title A\\, B, ";
+        let help = get_signature_help(escaped, Position::new(2, 20)).expect("signature");
+        assert_eq!(help.active_parameter, Some(1));
+        let help = get_signature_help(escaped, Position::new(2, 17)).expect("signature");
+        assert_eq!(help.active_parameter, Some(0));
     }
 }

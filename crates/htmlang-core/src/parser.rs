@@ -2468,7 +2468,7 @@ fn parse_attr_list(
                 );
             } else {
                 let suggestion = suggest_closest(base_key, &crate::vocab::all_attributes());
-                let mut msg = match suggestion {
+                let mut msg = match &suggestion {
                     Some(closest) => {
                         format!(
                             "unknown attribute '{}', did you mean '{}'?",
@@ -2477,9 +2477,13 @@ fn parse_attr_list(
                     }
                     None => format!("unknown attribute '{}'", attr.key),
                 };
-                // `box-shadow 0 1px red, 0 2px blue`: the comma ended the
-                // attribute, and the rest of the value became one
-                if !base_key.starts_with(|c: char| c.is_ascii_alphabetic() || c == '-') {
+                // `box-shadow 0 1px red, 0 2px blue` or `font-family Inter,
+                // sans-serif`: the comma ended the attribute, and the rest
+                // of the value became one
+                let rest_of_a_value = !base_key
+                    .starts_with(|c: char| c.is_ascii_alphabetic() || c == '-')
+                    || (suggestion.is_none() && attr.value.is_none() && !attrs.is_empty());
+                if rest_of_a_value {
                     msg.push_str(
                         ". A comma separates attributes: to keep one in a value, write `\\,`",
                     );
@@ -2738,12 +2742,32 @@ fn choose_if(text: &str, ctx: &mut ParseContext, line: usize) -> Option<String> 
     Some(branch.trim().to_string())
 }
 
+/// The characters of `text` with their offsets, leaving out the escapes
+/// (`\,`, `\"`, see [`syntax::ESCAPES`]), which stand for themselves.
+fn unescaped_chars(text: &str) -> impl Iterator<Item = (usize, char)> + '_ {
+    let mut i = 0;
+    std::iter::from_fn(move || {
+        loop {
+            let rest = &text[i..];
+            let escape = syntax::escape_len(rest);
+            if escape > 0 {
+                i += escape;
+                continue;
+            }
+            let c = rest.chars().next()?;
+            let at = i;
+            i += c.len_utf8();
+            return Some((at, c));
+        }
+    })
+}
+
 /// Whether the parentheses in `inner` close before its end, as in the
 /// inside of `if(a)(b)`.
 fn split_trailing_paren(inner: &str) -> bool {
     let mut depth = 0i32;
     let mut quote = None;
-    for c in inner.chars() {
+    for (_, c) in unescaped_chars(inner) {
         match c {
             '"' | '\'' if quote == Some(c) => quote = None,
             '"' | '\'' if quote.is_none() => quote = Some(c),
@@ -2761,12 +2785,14 @@ fn split_trailing_paren(inner: &str) -> bool {
     false
 }
 
+/// The arguments of `if(...)`: split at the commas that aren't escaped
+/// (`\,`) or inside `(...)` or quotes.
 fn split_if_args(input: &str) -> Vec<&str> {
     let mut parts = Vec::new();
     let mut start = 0;
     let mut depth = 0;
     let mut quote = None;
-    for (i, c) in input.char_indices() {
+    for (i, c) in unescaped_chars(input) {
         match c {
             '"' | '\'' if quote == Some(c) => quote = None,
             '"' | '\'' if quote.is_none() => quote = Some(c),

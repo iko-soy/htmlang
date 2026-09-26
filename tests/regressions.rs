@@ -1035,6 +1035,24 @@ fn quoted_custom_property_keeps_its_quotes() {
 }
 
 #[test]
+fn an_escaped_comma_in_an_if_branch_stays_in_the_branch() {
+    let out = compile(
+        "@let on = true\n@el [transition if($on, opacity 1s\\, color 1s, none), if($on, font-family Inter\\, serif, color red)] x",
+    );
+    assert!(out.contains("transition:opacity 1s, color 1s;"), "{}", out);
+    // A whole-attribute branch is split into its name and value after choosing
+    assert!(out.contains("font-family:Inter, serif"), "{}", out);
+}
+
+#[test]
+fn a_backslash_at_the_end_of_a_value_keeps_a_css_string_closed() {
+    let out =
+        compile("@let dir C:\\\\\n@el [before:content \"$dir\", after:content \"« $dir »\"] x");
+    assert!(out.contains(r#"::before{content:"C:\\";}"#), "{}", out);
+    assert!(out.contains(r#"::after{content:"« C:\\ »";}"#), "{}", out);
+}
+
+#[test]
 fn text_list_items_split_at_unescaped_commas() {
     let out = compile("@each $x in a\\, b, c\n  @text item $x.");
     assert!(out.contains("<span>item a, b.</span>"), "{}", out);
@@ -1060,5 +1078,25 @@ fn a_comma_split_value_says_how_to_keep_the_comma() {
         warning.message.contains(r"write `\,`"),
         "{}",
         warning.message
+    );
+    // An unquoted font stack: the rest of the value is a bare word
+    let result = parser::parse("@el [font-family Inter, sans-serif] x");
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "unknown-attribute" && d.message.contains(r"write `\,`")),
+        "{:?}",
+        result.diagnostics
+    );
+    // A misspelled attribute of its own gets no such hint
+    let result = parser::parse("@el [color red, paddin 4] x");
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .all(|d| !d.message.contains("comma")),
+        "{:?}",
+        result.diagnostics
     );
 }
