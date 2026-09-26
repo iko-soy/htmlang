@@ -2,9 +2,7 @@ use std::env;
 use std::process;
 
 /// Subcommands understood by the CLI.
-pub const COMMANDS: &[&str] = &[
-    "build", "serve", "watch", "check", "lint", "fmt", "lsp",
-];
+pub const COMMANDS: &[&str] = &["build", "serve", "watch", "check", "lint", "fmt", "lsp"];
 
 pub fn print_help() {
     eprintln!(

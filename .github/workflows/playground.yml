@@ -40,13 +40,12 @@ jobs:
             --out-dir target/wasm-pkg \
             target/wasm32-unknown-unknown/release/htmlang_wasm.wasm
 
-      - name: Build htmlang CLI
-        run: cargo build --release --bin htmlang
-
-      - name: Generate playground HTML
+      - name: Assemble the playground
         run: |
           mkdir -p dist
-          ./target/release/htmlang playground dist/index.html
+          cp crates/htmlang-wasm/playground/index.html dist/
+          cp target/wasm-pkg/htmlang_wasm.js target/wasm-pkg/htmlang_wasm_bg.wasm dist/
+          cp examples/demo.hl dist/
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

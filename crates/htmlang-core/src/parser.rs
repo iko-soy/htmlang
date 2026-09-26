@@ -226,12 +226,22 @@ impl Evaluator {
         nodes
     }
 
-    fn eval(&mut self, node: &Syntax, ctx: &mut ParseContext) -> Result<Option<Vec<Node>>, ParseError> {
+    fn eval(
+        &mut self,
+        node: &Syntax,
+        ctx: &mut ParseContext,
+    ) -> Result<Option<Vec<Node>>, ParseError> {
         let line_num = node.line();
         ctx.current_line = line_num;
         let (content, current_indent, children) = match node {
             Syntax::Raw { text, .. } => return Ok(Some(vec![Node::Raw(text.clone())])),
-            Syntax::Function { name, params, defaults, body, .. } => {
+            Syntax::Function {
+                name,
+                params,
+                defaults,
+                body,
+                ..
+            } => {
                 self.define_function(name, params, defaults, body, line_num, ctx);
                 return Ok(None);
             }
@@ -250,10 +260,20 @@ impl Evaluator {
                 }
                 return Ok(chosen.map(|body| self.eval_scoped(body, ctx)));
             }
-            Syntax::Each { header, body, empty, .. } => {
+            Syntax::Each {
+                header,
+                body,
+                empty,
+                ..
+            } => {
                 return self.eval_each(header, body, empty, line_num, ctx).map(Some);
             }
-            Syntax::Line { text, indent, children, .. } => (text.clone(), *indent, children),
+            Syntax::Line {
+                text,
+                indent,
+                children,
+                ..
+            } => (text.clone(), *indent, children),
         };
 
         // --- Directives ---
@@ -287,7 +307,6 @@ impl Evaluator {
             ctx.page_title = Some(substitute_vars(title.trim(), &ctx.variables));
             return Ok(None);
         }
-
 
         if let Some(rest) = content.strip_prefix("@let ") {
             let rest = rest.trim();
@@ -355,7 +374,6 @@ impl Evaluator {
             return Ok(None);
         }
 
-
         if content == "@head" || content.starts_with("@head ") {
             let trimmed = block_text(children).trim().to_string();
             if !trimmed.is_empty() {
@@ -373,13 +391,13 @@ impl Evaluator {
             return Ok(None);
         }
 
-
         // --- @markdown block or file (convert markdown to HTML) ---
         if content.trim() == "@markdown" || content.trim().starts_with("@markdown ") {
             let arg = content.trim().strip_prefix("@markdown").unwrap().trim();
             if arg.is_empty() {
                 // Inline markdown block: indented children
-                let md_lines: Vec<String> = block_text(children).lines().map(String::from).collect();
+                let md_lines: Vec<String> =
+                    block_text(children).lines().map(String::from).collect();
                 let html = markdown_to_html(&md_lines);
                 return Ok(Some(vec![Node::Raw(html)]));
             } else {
@@ -415,8 +433,6 @@ impl Evaluator {
                 return Ok(Some(vec![Node::Raw(html)]));
             }
         }
-
-
 
         if let Some(rest) = content.strip_prefix("@include ") {
             let rest = rest.trim();
@@ -486,8 +502,6 @@ impl Evaluator {
             ctx.include_stack.pop();
             return Ok(Some(included_nodes));
         }
-
-
 
         // --- @data (load JSON file into variables) ---
 
@@ -737,7 +751,10 @@ impl Evaluator {
                 message: "@each requires: @each $item in LIST".to_string(),
             });
         };
-        let names: Vec<&str> = names.split(',').map(|v| v.trim().trim_start_matches('$')).collect();
+        let names: Vec<&str> = names
+            .split(',')
+            .map(|v| v.trim().trim_start_matches('$'))
+            .collect();
         if names.len() > 2 {
             return Err(ParseError {
                 line: line_num,
@@ -752,11 +769,16 @@ impl Evaluator {
 
         // A list loaded from JSON, by name
         let data_list = list_src.strip_prefix('$').and_then(|name| {
-            let len = ctx.variables.get(&format!("{}#", name))?.parse::<usize>().ok()?;
+            let len = ctx
+                .variables
+                .get(&format!("{}#", name))?
+                .parse::<usize>()
+                .ok()?;
             Some((name.to_string(), len))
         });
         let undefined = list_src.strip_prefix('$').filter(|name| {
-            name.chars().all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '.'))
+            name.chars()
+                .all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '.'))
                 && !ctx.variables.contains_key(*name)
         });
         let text_items: Vec<String> = match (&data_list, undefined) {
@@ -963,7 +985,10 @@ impl Evaluator {
 
         // Attributes that aren't parameters style the function's root
         // element, and a scoped @style's class goes on it too.
-        let scope_class = ctx.scoped_functions.contains(name).then(|| format!("hl-{}", name));
+        let scope_class = ctx
+            .scoped_functions
+            .contains(name)
+            .then(|| format!("hl-{}", name));
         if !forwarded.is_empty() || scope_class.is_some() {
             let mut roots = result_nodes.iter_mut().filter_map(|n| match n {
                 Node::Element(e) => Some(e),
@@ -981,7 +1006,8 @@ impl Evaluator {
                         match root.attrs.iter_mut().find(|a| a.html && a.key == "class") {
                             Some(attr) => {
                                 let existing = attr.value.take().unwrap_or_default();
-                                attr.value = Some(format!("{} {}", existing, class).trim().to_string());
+                                attr.value =
+                                    Some(format!("{} {}", existing, class).trim().to_string());
                             }
                             None => root.attrs.push(Attribute {
                                 key: "class".to_string(),
@@ -1184,7 +1210,10 @@ fn parse_single_element(
             Some(restore_escapes(&rest_sub))
         }
     } else {
-        Some(restore_escapes(&substitute_vars(&protect_escapes(&rest), &ctx.variables)))
+        Some(restore_escapes(&substitute_vars(
+            &protect_escapes(&rest),
+            &ctx.variables,
+        )))
     };
 
     // For @slot, the argument is the slot name
@@ -1231,17 +1260,7 @@ pub fn known_directives() -> &'static [&'static str] {
 }
 
 const KNOWN_DIRECTIVES: &[&str] = &[
-    "page",
-    "let",
-    "include",
-    "raw",
-    "if",
-    "else",
-    "each",
-    "meta",
-    "head",
-    "style",
-    "markdown",
+    "page", "let", "include", "raw", "if", "else", "each", "meta", "head", "style", "markdown",
     "data",
 ];
 
@@ -1935,7 +1954,10 @@ fn parse_attr_list(
 
             // Color validation for hex colors
             if !attr.html
-                && matches!(crate::vocab::base_attribute(&attr.key), "background" | "color")
+                && matches!(
+                    crate::vocab::base_attribute(&attr.key),
+                    "background" | "color"
+                )
                 && let Some(ref val) = attr.value
                 && val.starts_with('#')
                 && !is_valid_hex_color(val)
@@ -2249,8 +2271,6 @@ fn numeric_range(start: i64, end: i64, step: i64) -> Vec<String> {
     items
 }
 
-
-
 /// Evaluate `if(cond, a)` or `if(cond, a, b)` when it is all of `text`,
 /// returning the chosen branch (empty when `cond` fails and there is no `b`).
 fn choose_if(text: &str, ctx: &mut ParseContext, line: usize) -> Option<String> {
@@ -2376,10 +2396,11 @@ pub fn lint(nodes: &[Node]) -> Vec<Diagnostic> {
                     depth
                 ));
             }
-            if matches!(elem.kind, ElementKind::Row | ElementKind::El)
-                && elem.children.is_empty()
-            {
-                warn(format!("empty container (@{}) has no children", elem.kind.name()));
+            if matches!(elem.kind, ElementKind::Row | ElementKind::El) && elem.children.is_empty() {
+                warn(format!(
+                    "empty container (@{}) has no children",
+                    elem.kind.name()
+                ));
             }
             if elem.kind.is_tag("button") && !elem.attrs.iter().any(|a| a.key == "type") {
                 warn("@button missing 'type' attribute (defaults to submit)".to_string());
@@ -2391,7 +2412,6 @@ pub fn lint(nodes: &[Node]) -> Vec<Diagnostic> {
     walk(nodes, 0, &mut out);
     out
 }
-
 
 fn validate_tree(
     nodes: &[Node],
@@ -2475,8 +2495,7 @@ fn validate_tree(
                 }
 
                 // 'rows'/'cols' only on @textarea
-                if (base == "rows" || base == "cols") && !elem.kind.is_tag("textarea")
-                {
+                if (base == "rows" || base == "cols") && !elem.kind.is_tag("textarea") {
                     diagnostics.push(Diagnostic {
                         line: elem.line_num,
                         column: None,
@@ -2526,9 +2545,7 @@ fn validate_tree(
                     source_line: None,
                 });
             }
-            if elem.kind.is_tag("input")
-                && !elem.attrs.iter().any(|a| a.key == "type")
-            {
+            if elem.kind.is_tag("input") && !elem.attrs.iter().any(|a| a.key == "type") {
                 diagnostics.push(Diagnostic {
                     line: elem.line_num,
                     column: None,
@@ -2570,7 +2587,10 @@ fn validate_tree(
                     .find(|a| crate::vocab::base_attribute(&a.key) == "color")
                     .and_then(|a| a.value.as_deref());
                 if let (Some(bg), Some(fg)) = (bg_color, fg_color)
-                    && let (Some(bg_rgb), Some(fg_rgb)) = (crate::expr::parse_hex_rgb(bg), crate::expr::parse_hex_rgb(fg))
+                    && let (Some(bg_rgb), Some(fg_rgb)) = (
+                        crate::expr::parse_hex_rgb(bg),
+                        crate::expr::parse_hex_rgb(fg),
+                    )
                 {
                     let ratio = contrast_ratio(bg_rgb, fg_rgb);
                     if ratio < 4.5 {
@@ -2612,9 +2632,7 @@ fn validate_tree(
             }
 
             // @iframe should have title attribute
-            if elem.kind.is_tag("iframe")
-                && !elem.attrs.iter().any(|a| a.key == "title")
-            {
+            if elem.kind.is_tag("iframe") && !elem.attrs.iter().any(|a| a.key == "title") {
                 diagnostics.push(Diagnostic {
                     line: elem.line_num,
                     column: None,
@@ -2729,7 +2747,9 @@ fn substitute_vars(input: &str, vars: &HashMap<String, String>) -> String {
             rest = &after[close + 1..];
             continue;
         }
-        let mut end = after.find(|c: char| !is_name_char(c)).unwrap_or(after.len());
+        let mut end = after
+            .find(|c: char| !is_name_char(c))
+            .unwrap_or(after.len());
         while end > 0 && after[..end].ends_with('.') {
             end -= 1;
         }
@@ -2756,7 +2776,10 @@ fn inline_svg(node: Node, line_num: usize, ctx: &mut ParseContext) -> Node {
     };
     let is_inline_svg = elem.kind == ElementKind::Image
         && elem.attrs.iter().any(|a| a.key == "inline" && !a.html)
-        && elem.argument.as_deref().is_some_and(|src| src.ends_with(".svg"));
+        && elem
+            .argument
+            .as_deref()
+            .is_some_and(|src| src.ends_with(".svg"));
     if !is_inline_svg {
         return node;
     }
@@ -3231,10 +3254,17 @@ fn flatten_json(prefix: &str, value: &JsonValue, vars: &mut HashMap<String, Stri
 /// JSON array, else its text.
 fn lookup(vars: &HashMap<String, String>, name: &str) -> Option<crate::expr::Value> {
     use crate::expr::Value;
-    match vars.get(&format!("{}#", name)).and_then(|n| n.parse::<usize>().ok()) {
+    match vars
+        .get(&format!("{}#", name))
+        .and_then(|n| n.parse::<usize>().ok())
+    {
         Some(len) => Some(Value::List(
             (0..len)
-                .map(|i| vars.get(&format!("{}.{}", name, i)).cloned().unwrap_or_default())
+                .map(|i| {
+                    vars.get(&format!("{}.{}", name, i))
+                        .cloned()
+                        .unwrap_or_default()
+                })
                 .collect(),
         )),
         None => vars.get(name).cloned().map(Value::Str),

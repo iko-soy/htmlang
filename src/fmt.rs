@@ -87,15 +87,9 @@ fn open_attr_depth(line: &str) -> i32 {
 /// Directives whose indented body is foreign content (CSS, JS, Markdown,
 /// JSON, raw HTML) that must not be reformatted.
 fn is_raw_body_header(code: &str) -> bool {
-    [
-        "@style",
-        "@script",
-        "@markdown",
-        "@head",
-        "@raw",
-    ]
-    .iter()
-    .any(|d| code == *d || code.strip_prefix(d).is_some_and(|r| r.starts_with(' ')))
+    ["@style", "@script", "@markdown", "@head", "@raw"]
+        .iter()
+        .any(|d| code == *d || code.strip_prefix(d).is_some_and(|r| r.starts_with(' ')))
 }
 
 /// Re-indent a verbatim line by `delta` bytes, keeping its relative
@@ -496,7 +490,10 @@ mod tests {
     #[test]
     fn commas_inside_parens_stay_in_value() {
         let src = "@el [box-shadow 0 1px 3px rgba(0,0,0,0.1),font-weight bold] hi\n";
-        assert_eq!(format(src), "@el [box-shadow 0 1px 3px rgba(0,0,0,0.1), font-weight bold] hi\n");
+        assert_eq!(
+            format(src),
+            "@el [box-shadow 0 1px 3px rgba(0,0,0,0.1), font-weight bold] hi\n"
+        );
     }
 
     #[test]

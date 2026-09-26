@@ -375,7 +375,12 @@ fn call(name: &str, args: Vec<Value>) -> Result<Value, String> {
         if args.len() == n {
             Ok(())
         } else {
-            Err(format!("{}() takes {} argument{}", name, n, if n == 1 { "" } else { "s" }))
+            Err(format!(
+                "{}() takes {} argument{}",
+                name,
+                n,
+                if n == 1 { "" } else { "s" }
+            ))
         }
     };
     let color = |rgb: (u8, u8, u8)| Value::Str(format!("#{:02x}{:02x}{:02x}", rgb.0, rgb.1, rgb.2));
@@ -394,10 +399,22 @@ fn call(name: &str, args: Vec<Value>) -> Result<Value, String> {
                 other => other.to_string().contains(&text(1)),
             })
         }
-        "starts-with" => { arity(2)?; Value::Bool(text(0).starts_with(&text(1))) }
-        "ends-with" => { arity(2)?; Value::Bool(text(0).ends_with(&text(1))) }
-        "uppercase" => { arity(1)?; Value::Str(text(0).to_uppercase()) }
-        "lowercase" => { arity(1)?; Value::Str(text(0).to_lowercase()) }
+        "starts-with" => {
+            arity(2)?;
+            Value::Bool(text(0).starts_with(&text(1)))
+        }
+        "ends-with" => {
+            arity(2)?;
+            Value::Bool(text(0).ends_with(&text(1)))
+        }
+        "uppercase" => {
+            arity(1)?;
+            Value::Str(text(0).to_uppercase())
+        }
+        "lowercase" => {
+            arity(1)?;
+            Value::Str(text(0).to_lowercase())
+        }
         "capitalize" => {
             arity(1)?;
             let s = text(0);
@@ -407,7 +424,10 @@ fn call(name: &str, args: Vec<Value>) -> Result<Value, String> {
                 None => String::new(),
             })
         }
-        "trim" => { arity(1)?; Value::Str(text(0).trim().to_string()) }
+        "trim" => {
+            arity(1)?;
+            Value::Str(text(0).trim().to_string())
+        }
         "length" => {
             arity(1)?;
             Value::Num(match &args[0] {
@@ -415,7 +435,10 @@ fn call(name: &str, args: Vec<Value>) -> Result<Value, String> {
                 other => other.to_string().chars().count(),
             } as f64)
         }
-        "reverse" => { arity(1)?; Value::Str(text(0).chars().rev().collect()) }
+        "reverse" => {
+            arity(1)?;
+            Value::Str(text(0).chars().rev().collect())
+        }
         "truncate" => {
             arity(2)?;
             let (s, n) = (text(0), num(1)? as usize);
@@ -425,7 +448,10 @@ fn call(name: &str, args: Vec<Value>) -> Result<Value, String> {
                 s
             })
         }
-        "replace" => { arity(3)?; Value::Str(text(0).replace(&text(1), &text(2))) }
+        "replace" => {
+            arity(3)?;
+            Value::Str(text(0).replace(&text(1), &text(2)))
+        }
         "default" => {
             arity(2)?;
             let s = text(0);
@@ -501,7 +527,6 @@ fn mix_colors(c1: (u8, u8, u8), c2: (u8, u8, u8), weight: f64) -> (u8, u8, u8) {
     (r, g, b)
 }
 
-
 /// Replace `$name` references inside a string literal.
 fn interpolate(s: &str, resolve: Resolver) -> String {
     let mut out = String::with_capacity(s.len());
@@ -513,7 +538,11 @@ fn interpolate(s: &str, resolve: Resolver) -> String {
         if end == 0 {
             out.push('$');
         } else {
-            out.push_str(&resolve(&after[..end]).map(|v| v.to_string()).unwrap_or_default());
+            out.push_str(
+                &resolve(&after[..end])
+                    .map(|v| v.to_string())
+                    .unwrap_or_default(),
+            );
         }
         rest = &after[end..];
     }

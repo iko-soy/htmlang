@@ -156,7 +156,6 @@ fn json_escape_string(s: &str) -> String {
     out
 }
 
-
 fn json_array(items: impl Iterator<Item = String>) -> String {
     let inner: Vec<String> = items.collect();
     format!("[{}]", inner.join(","))
@@ -349,10 +348,17 @@ fn lint_file(path: &str) -> Vec<String> {
         .diagnostics
         .iter()
         .chain(&lint)
-        .map(|d| format!("{}:{}:{}: {}", path, d.line, severity_label(d.severity), d.message))
+        .map(|d| {
+            format!(
+                "{}:{}:{}: {}",
+                path,
+                d.line,
+                severity_label(d.severity),
+                d.message
+            )
+        })
         .collect()
 }
-
 
 fn open_in_browser(port: u16) {
     let url = format!("http://127.0.0.1:{}", port);
@@ -516,7 +522,6 @@ fn main() {
         return;
     }
 
-
     // Handle "fmt" subcommand
     if args.len() >= 3 && args[1] == "fmt" {
         let file = &args[2];
@@ -646,7 +651,6 @@ fn main() {
         return;
     }
 
-
     // Handle "lint" subcommand
     if args.len() >= 2 && args[1] == "lint" {
         let mut lint_target = ".";
@@ -698,7 +702,6 @@ fn main() {
         }
         return;
     }
-
 
     // Handle "check" subcommand
     if args.len() >= 2 && args[1] == "check" {
@@ -773,7 +776,6 @@ fn main() {
         return;
     }
 
-
     // Handle "serve" standalone subcommand
     if args.len() >= 2 && args[1] == "serve" {
         let mut serve_target = None;
@@ -837,7 +839,11 @@ fn main() {
             let server_tx = tx.clone();
             std::thread::spawn(move || {
                 let rt = tokio::runtime::Runtime::new().expect("failed to create runtime");
-                rt.block_on(htmlang::serve::run_dir(effective_port, server_dir, server_tx));
+                rt.block_on(htmlang::serve::run_dir(
+                    effective_port,
+                    server_dir,
+                    server_tx,
+                ));
             });
             if serve_open {
                 open_in_browser(effective_port);
@@ -996,7 +1002,6 @@ fn main() {
         }
         return;
     }
-
 
     let mut i = 1;
     while i < args.len() {

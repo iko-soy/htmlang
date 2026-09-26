@@ -9,7 +9,10 @@ use htmlang::parser::{self, Severity};
 fn compile(input: &str) -> String {
     let result = parser::parse(input);
     assert!(
-        result.diagnostics.iter().all(|d| d.severity != Severity::Error),
+        result
+            .diagnostics
+            .iter()
+            .all(|d| d.severity != Severity::Error),
         "unexpected parse errors: {:?}",
         result.diagnostics
     );
@@ -100,7 +103,8 @@ fn px_values_are_not_doubled() {
 
 #[test]
 fn minify_keeps_significant_spaces() {
-    let result = parser::parse("@page T\n@paragraph\n  Built with {@text [font-weight bold] htmlang}.");
+    let result =
+        parser::parse("@page T\n@paragraph\n  Built with {@text [font-weight bold] htmlang}.");
     let out = codegen::generate_minified(&result.document);
     assert!(out.contains("Built with <span"), "{}", out);
 }
@@ -147,7 +151,8 @@ fn image_with_css_width_gets_no_intrinsic_height() {
 
 #[test]
 fn source_map_uses_real_output_lines() {
-    let html = "<!DOCTYPE html>\n<html>\n<div data-hl-line=\"3\">\n<span data-hl-line=\"4\">x</span>\n";
+    let html =
+        "<!DOCTYPE html>\n<html>\n<div data-hl-line=\"3\">\n<span data-hl-line=\"4\">x</span>\n";
     let map = codegen::source_map_for_html(html, "a.hl");
     // Lines 1-2 have no mapping; line 3 maps to source line 3 (0-based 2 =
     // VLQ "E"), line 4 to source line 4 (delta 1 = "C").
@@ -158,7 +163,8 @@ fn source_map_uses_real_output_lines() {
 
 #[test]
 fn bracket_in_text_does_not_join_lines() {
-    let out = compile("@el\n  Use [ to open a list\n  @text [font-weight bold] Second\n  @text Third");
+    let out =
+        compile("@el\n  Use [ to open a list\n  @text [font-weight bold] Second\n  @text Third");
     assert!(out.contains("Use [ to open a list"), "{}", out);
     assert!(out.contains(">Second<"), "{}", out);
     assert!(out.contains(">Third<"), "{}", out);
@@ -173,7 +179,9 @@ fn multiline_attributes_still_join() {
 
 #[test]
 fn multi_line_content_is_a_function() {
-    let out = compile("@let intro\n  First line\n  Second {@text [font-weight bold] line}\n@paragraph\n  @intro\n");
+    let out = compile(
+        "@let intro\n  First line\n  Second {@text [font-weight bold] line}\n@paragraph\n  @intro\n",
+    );
     assert!(out.contains("First line"), "{}", out);
     assert!(out.contains(">line</span>"), "{}", out);
 }
@@ -216,7 +224,11 @@ fn markdown_keeps_paragraphs_rules_and_ordered_lists() {
     assert!(out.contains("<p>First para.</p>"), "{}", out);
     assert!(out.contains("<p>Second para.</p>"), "{}", out);
     assert!(out.contains("<hr>"), "{}", out);
-    assert!(out.contains("<ol>\n<li>one</li>\n<li>two</li>\n</ol>"), "{}", out);
+    assert!(
+        out.contains("<ol>\n<li>one</li>\n<li>two</li>\n</ol>"),
+        "{}",
+        out
+    );
     assert!(out.contains("if x:\n    y"), "{}", out);
 }
 
@@ -284,7 +296,9 @@ fn container_arguments_are_rendered_as_text() {
 
 #[test]
 fn html_attributes_use_equals_and_are_all_emitted() {
-    let out = compile("@link [target=_blank, rel=me] /x Home\n@iframe [sandbox, allow=camera] https://e.com");
+    let out = compile(
+        "@link [target=_blank, rel=me] /x Home\n@iframe [sandbox, allow=camera] https://e.com",
+    );
     assert!(out.contains("target=\"_blank\""), "{}", out);
     assert!(out.contains("rel=\"me\""), "{}", out);
     assert!(out.contains(" sandbox"), "{}", out);
@@ -364,7 +378,11 @@ fn data_glob_loads_a_list_of_records() {
         "@data $posts posts/*.json\n@text ${length($posts)} posts\n@each $p, $i in $posts\n  @text $i $p.title ($p.file)",
     );
     assert!(out.contains("2 posts"), "{}", out);
-    assert!(out.contains(">0 First (a)<") && out.contains(">1 Second (b)<"), "{}", out);
+    assert!(
+        out.contains(">0 First (a)<") && out.contains(">1 Second (b)<"),
+        "{}",
+        out
+    );
 }
 
 #[test]
@@ -378,18 +396,39 @@ fn lint_adds_only_checks_the_compiler_does_not_already_make() {
         .map(|d| d.message.as_str())
         .collect();
     // Each problem is reported once, whichever pass finds it.
-    assert_eq!(messages.iter().filter(|m| m.contains("'alt'")).count(), 1, "{:?}", messages);
-    assert!(messages.iter().any(|m| m.contains("empty container")), "{:?}", messages);
-    assert!(messages.iter().any(|m| m.contains("'type'")), "{:?}", messages);
+    assert_eq!(
+        messages.iter().filter(|m| m.contains("'alt'")).count(),
+        1,
+        "{:?}",
+        messages
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("empty container")),
+        "{:?}",
+        messages
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("'type'")),
+        "{:?}",
+        messages
+    );
 }
 
 #[test]
 fn inline_svg_resolves_from_the_page_and_keeps_attributes() {
     let dir = scratch_dir("inline_svg");
     std::fs::create_dir_all(dir.join("icons")).unwrap();
-    std::fs::write(dir.join("icons/a.svg"), r#"<svg viewBox="0 0 24 24"></svg>"#).unwrap();
+    std::fs::write(
+        dir.join("icons/a.svg"),
+        r#"<svg viewBox="0 0 24 24"></svg>"#,
+    )
+    .unwrap();
     let out = compile_in(&dir, "@image [inline, width 24, class=icon] icons/a.svg");
-    assert!(out.contains(r#"<svg viewBox="0 0 24 24" width="24" class="icon">"#), "{}", out);
+    assert!(
+        out.contains(r#"<svg viewBox="0 0 24 24" width="24" class="icon">"#),
+        "{}",
+        out
+    );
 }
 
 #[test]
@@ -407,7 +446,11 @@ fn lines_under_text_are_its_siblings() {
     let html = htmlang::codegen::generate(
         &htmlang::parser::parse("@el\n  Some text\n    more text\n").document,
     );
-    assert!(html.contains("<span>Some text</span><span>more text</span>"), "{}", html);
+    assert!(
+        html.contains("<span>Some text</span><span>more text</span>"),
+        "{}",
+        html
+    );
 }
 
 #[test]

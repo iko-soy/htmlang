@@ -790,8 +790,7 @@ fn match_selects_correct_case() {
 
 #[test]
 fn match_falls_to_default() {
-    let output =
-        compile("@let x z\n@if $x == \"a\"\n  @text A\n@else\n  @text Default");
+    let output = compile("@let x z\n@if $x == \"a\"\n  @text A\n@else\n  @text Default");
     assert!(output.contains("Default"));
     assert!(!output.contains(">A<"));
 }
@@ -884,7 +883,8 @@ fn ternary_expression_in_attrs() {
 
 #[test]
 fn ternary_expression_false() {
-    let output = compile("@page T\n@let active false\n@el [color if($active, green, gray)]\n  test");
+    let output =
+        compile("@page T\n@let active false\n@el [color if($active, green, gray)]\n  test");
     assert!(output.contains("color:gray"));
 }
 
@@ -902,7 +902,8 @@ fn comparison_operators_lt() {
 
 #[test]
 fn comparison_operators_contains() {
-    let output = compile("@page T\n@let name hello world\n@if contains($name, world)\n  @text found");
+    let output =
+        compile("@page T\n@let name hello world\n@if contains($name, world)\n  @text found");
     assert!(output.contains("found"));
 }
 
@@ -967,7 +968,9 @@ fn internal_link_no_noopener() {
 
 #[test]
 fn theme_color_meta_from_theme() {
-    let output = compile("@page T\n@let primary #3b82f6\n@let --primary #3b82f6\n@meta theme-color #3b82f6\n@el\n  test");
+    let output = compile(
+        "@page T\n@let primary #3b82f6\n@let --primary #3b82f6\n@meta theme-color #3b82f6\n@el\n  test",
+    );
     assert!(output.contains("theme-color"));
     assert!(output.contains("#3b82f6"));
 }
@@ -1286,9 +1289,17 @@ fn each_binds_records() {
 #[test]
 fn each_second_variable_is_the_index() {
     let output = compile("@each $item, $i in New York, Paris\n  @text $i=$item");
-    assert!(output.contains("0=New York") && output.contains("1=Paris"), "{}", output);
+    assert!(
+        output.contains("0=New York") && output.contains("1=Paris"),
+        "{}",
+        output
+    );
     let diags = parse_diagnostics("@each $a, $b, $c in x\n  @text $a");
-    assert!(diags.iter().any(|d| d.message.contains("`$item, $index`")), "{:?}", diags);
+    assert!(
+        diags.iter().any(|d| d.message.contains("`$item, $index`")),
+        "{:?}",
+        diags
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1395,7 +1406,12 @@ fn fmt_examples_idempotent_and_semantics_preserving() {
         let src = fs::read_to_string(&path).unwrap();
         let once = htmlang::fmt::format(&src);
         let twice = htmlang::fmt::format(&once);
-        assert_eq!(once, twice, "formatter not idempotent on {}", path.display());
+        assert_eq!(
+            once,
+            twice,
+            "formatter not idempotent on {}",
+            path.display()
+        );
         assert_eq!(
             compile_with_base(&src, &dir),
             compile_with_base(&once, &dir),
@@ -2337,9 +2353,8 @@ fn element_grid() {
 
 #[test]
 fn element_in_front() {
-    let output = compile(
-        "@page T\n@el [width 200, height 200]\n  Main\n  @in-front\n    @text Overlay",
-    );
+    let output =
+        compile("@page T\n@el [width 200, height 200]\n  Main\n  @in-front\n    @text Overlay");
     assert!(
         output.contains("position:absolute"),
         "@in-front should have position:absolute: {}",
@@ -2370,8 +2385,7 @@ fn element_behind() {
 
 #[test]
 fn in_front_makes_parent_positioning_context() {
-    let output =
-        compile("@page T\n@el [width 200, height 200]\n  Main\n  @in-front\n    Overlay");
+    let output = compile("@page T\n@el [width 200, height 200]\n  Main\n  @in-front\n    Overlay");
     assert!(
         output.contains("position:relative"),
         "parent of @in-front should be position:relative: {}",
@@ -2795,8 +2809,9 @@ fn test_color_filter_lighten() {
 
 #[test]
 fn test_color_filter_darken() {
-    let result =
-        htmlang::parser::parse("@let primary #ffffff\n@el [background ${darken($primary, 50)}] Content");
+    let result = htmlang::parser::parse(
+        "@let primary #ffffff\n@el [background ${darken($primary, 50)}] Content",
+    );
     let html = htmlang::codegen::generate(&result.document);
     // Darken white by 50% should produce gray (#808080 approximately)
     assert!(
@@ -2812,8 +2827,9 @@ fn test_color_filter_darken() {
 
 #[test]
 fn test_color_filter_alpha() {
-    let result =
-        htmlang::parser::parse("@let primary #3b82f6\n@el [background ${alpha($primary, 0.5)}] Content");
+    let result = htmlang::parser::parse(
+        "@let primary #3b82f6\n@el [background ${alpha($primary, 0.5)}] Content",
+    );
     let html = htmlang::codegen::generate(&result.document);
     // Should produce 8-digit hex with alpha
     assert!(
@@ -2911,8 +2927,9 @@ fn snapshot_layer_wrapping() {
 
 #[test]
 fn grid_template_areas_passthrough() {
-    let output =
-        compile("@page T\n@el [display grid, grid-template-areas \"a b\"]\n  @el [grid-area a]\n    A");
+    let output = compile(
+        "@page T\n@el [display grid, grid-template-areas \"a b\"]\n  @el [grid-area a]\n    A",
+    );
     assert!(
         output.contains("grid-template-areas:\"a b\""),
         "grid-template-areas should pass through: {}",
@@ -2941,9 +2958,7 @@ fn view_transition_name_passthrough() {
 
 #[test]
 fn animate_generates_animation_css() {
-    let output = compile(
-        "@page T\n@el [animation fade 0.3s ease]\n  Content",
-    );
+    let output = compile("@page T\n@el [animation fade 0.3s ease]\n  Content");
     assert!(
         output.contains("animation:fade 0.3s ease"),
         "animate should generate animation CSS: {}",
@@ -3133,7 +3148,9 @@ fn search_element() {
 
 #[test]
 fn font_face_directive() {
-    let output = compile("@page T\n@style\n  @font-face { font-family: 'Inter'; src: url('fonts/inter.woff2') format('woff2'); font-display: swap; }\n@head\n  <link rel=\"preload\" href=\"fonts/inter.woff2\" as=\"font\" crossorigin>\n@text Hello");
+    let output = compile(
+        "@page T\n@style\n  @font-face { font-family: 'Inter'; src: url('fonts/inter.woff2') format('woff2'); font-display: swap; }\n@head\n  <link rel=\"preload\" href=\"fonts/inter.woff2\" as=\"font\" crossorigin>\n@text Hello",
+    );
     assert!(output.contains("@font-face"), "font-face: {}", output);
     assert!(
         output.contains("font-family: 'Inter'"),
@@ -3146,7 +3163,9 @@ fn font_face_directive() {
 
 #[test]
 fn json_ld_directive() {
-    let output = compile("@page T\n@head\n  <script type=\"application/ld+json\">\n    {\"@type\": \"WebPage\"}\n  </script>\n@text Hello");
+    let output = compile(
+        "@page T\n@head\n  <script type=\"application/ld+json\">\n    {\"@type\": \"WebPage\"}\n  </script>\n@text Hello",
+    );
     assert!(
         output.contains("application/ld+json"),
         "json-ld type: {}",
@@ -3438,16 +3457,31 @@ fn function_with_style_is_scoped() {
     let html = compile(
         "@let card $title\n  @style\n    & { padding: 4px; }\n    .t { color: red; }\n  @el [class=box]\n    @text [class=t] $title\n@card [title Hello]\n",
     );
-    assert!(html.contains("<div class=\"a box hl-card\"><span class=\"t\">Hello"), "{}", html);
-    assert!(html.contains(".hl-card {& { padding: 4px; }.t { color: red; }}"), "{}", html);
-    let diags = parse_diagnostics("@let pair\n  @style\n    p { color: red; }\n  @text A\n  @text B\n@pair\n");
-    assert!(diags.iter().any(|d| d.message.contains("no single root element to scope it to")), "{:?}", diags);
+    assert!(
+        html.contains("<div class=\"a box hl-card\"><span class=\"t\">Hello"),
+        "{}",
+        html
+    );
+    assert!(
+        html.contains(".hl-card {& { padding: 4px; }.t { color: red; }}"),
+        "{}",
+        html
+    );
+    let diags = parse_diagnostics(
+        "@let pair\n  @style\n    p { color: red; }\n  @text A\n  @text B\n@pair\n",
+    );
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("no single root element to scope it to")),
+        "{:?}",
+        diags
+    );
 }
 
 #[test]
 fn function_without_style_has_no_wrapper() {
-    let html =
-        compile("@let box\n  @el [padding 10]\n    @children\n\n@box\n  @text Inside\n");
+    let html = compile("@let box\n  @el [padding 10]\n    @children\n\n@box\n  @text Inside\n");
     assert!(!html.contains("hl-box"), "{}", html);
     assert!(html.contains("Inside"));
 }
@@ -3921,7 +3955,9 @@ fn markdown_renders_list() {
 
 #[test]
 fn scope_block_generates_css() {
-    let output = compile("@page Test\n@style\n  @scope (.card) {\n    .title { color: red; }\n  }\n@text hello");
+    let output = compile(
+        "@page Test\n@style\n  @scope (.card) {\n    .title { color: red; }\n  }\n@text hello",
+    );
     assert!(
         output.contains("@scope (.card)"),
         "should generate @scope CSS block"
@@ -3930,7 +3966,9 @@ fn scope_block_generates_css() {
 
 #[test]
 fn starting_style_generates_css() {
-    let output = compile("@page Test\n@style\n  @starting-style {\n    .fade { opacity: 0; }\n  }\n@text hello");
+    let output = compile(
+        "@page Test\n@style\n  @starting-style {\n    .fade { opacity: 0; }\n  }\n@text hello",
+    );
     assert!(
         output.contains("@starting-style"),
         "should generate @starting-style CSS block"
@@ -4128,7 +4166,10 @@ fn svg_directive_with_attrs() {
     )
     .unwrap();
 
-    let input = format!("@image [inline, width 24, color red] {}", svg_path.display());
+    let input = format!(
+        "@image [inline, width 24, color red] {}",
+        svg_path.display()
+    );
     let result = htmlang::parser::parse(&input);
     let html = htmlang::codegen::generate(&result.document);
     assert!(
@@ -4464,14 +4505,17 @@ fn markdown_file_missing_reports_error() {
 
 #[test]
 fn function_call_text_becomes_children() {
-    let output = compile("@let box\n  @el [padding 4]\n    @children\n@box Hello {@text [bold] world}");
+    let output =
+        compile("@let box\n  @el [padding 4]\n    @children\n@box Hello {@text [bold] world}");
     assert!(output.contains("Hello"), "{}", output);
     assert!(output.contains(">world</span>"), "{}", output);
 }
 
 #[test]
 fn function_call_extra_attributes_style_the_root() {
-    let output = compile("@let box $label\n  @el [padding 4] $label\n@box [label Hi, background red, hover:color blue]");
+    let output = compile(
+        "@let box $label\n  @el [padding 4] $label\n@box [label Hi, background red, hover:color blue]",
+    );
     assert!(output.contains("background:red"), "{}", output);
     assert!(output.contains(":hover{color:blue"), "{}", output);
     assert!(output.contains("Hi"), "{}", output);
@@ -4481,7 +4525,9 @@ fn function_call_extra_attributes_style_the_root() {
 fn function_call_extra_attributes_need_a_single_root() {
     let diags = parse_diagnostics("@let two\n  @text A\n  @text B\n@two [background red]");
     assert!(
-        diags.iter().any(|d| d.message.contains("no single root element")),
+        diags
+            .iter()
+            .any(|d| d.message.contains("no single root element")),
         "{:?}",
         diags
     );
@@ -4497,7 +4543,11 @@ fn children_prefix_styles_direct_children() {
 fn standard_library_components_compile_cleanly() {
     let src = "@row\n  @text A\n  @spacer\n  @text [$truncate] B";
     let diags = parse_diagnostics(src);
-    assert!(diags.is_empty(), "standard library produced diagnostics: {:?}", diags);
+    assert!(
+        diags.is_empty(),
+        "standard library produced diagnostics: {:?}",
+        diags
+    );
     let output = compile(src);
     assert!(output.contains("flex:1"), "{}", output);
     assert!(output.contains("text-overflow:ellipsis"), "{}", output);

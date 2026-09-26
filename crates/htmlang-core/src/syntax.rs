@@ -78,7 +78,12 @@ impl Syntax {
     pub fn source(&self) -> String {
         match self {
             Syntax::Raw { text, .. } | Syntax::Line { text, .. } => text.clone(),
-            Syntax::Function { name, params, defaults, .. } => {
+            Syntax::Function {
+                name,
+                params,
+                defaults,
+                ..
+            } => {
                 let mut out = format!("@let {}", name);
                 for param in params {
                     match defaults.get(param) {
@@ -333,7 +338,11 @@ pub(crate) fn open_attr_depth(line: &str) -> i32 {
             return 0;
         };
         let inline = &line[start + 1..];
-        return if inline.contains('}') { 0 } else { open_attr_depth(inline) };
+        return if inline.contains('}') {
+            0
+        } else {
+            open_attr_depth(inline)
+        };
     }
     let bytes = line.as_bytes();
     let mut depth: i32 = 0;
@@ -343,11 +352,7 @@ pub(crate) fn open_attr_depth(line: &str) -> i32 {
             b'[' => {
                 // Is this the start of an attribute list?
                 let before = line[..i].trim_end();
-                let last_directive = before
-                    .rsplit([']', '>'])
-                    .next()
-                    .unwrap_or("")
-                    .trim();
+                let last_directive = before.rsplit([']', '>']).next().unwrap_or("").trim();
                 let tokens: Vec<&str> = last_directive.split_whitespace().collect();
                 let starts_list = match tokens.as_slice() {
                     [] => before.is_empty() || before.ends_with('>'),
@@ -368,7 +373,6 @@ pub(crate) fn open_attr_depth(line: &str) -> i32 {
     }
     depth
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -393,21 +397,41 @@ mod tests {
             "@let card $title $icon=x\n  @el\n    @children\n@if $a\n  A\n@else if $b\n  B\n@else\n  C\n@each $x in 1..3\n  $x\n@else\n  none\n@text done\n",
         );
         assert_eq!(kinds(&tree), ["function", "if", "each", "line"]);
-        let Syntax::Function { name, params, defaults, body, .. } = &tree[0] else { unreachable!() };
-        assert_eq!((name.as_str(), params.len(), defaults["icon"].as_str()), ("card", 2, "x"));
+        let Syntax::Function {
+            name,
+            params,
+            defaults,
+            body,
+            ..
+        } = &tree[0]
+        else {
+            unreachable!()
+        };
+        assert_eq!(
+            (name.as_str(), params.len(), defaults["icon"].as_str()),
+            ("card", 2, "x")
+        );
         assert_eq!(kinds(body), ["line"]);
-        let Syntax::If { branches } = &tree[1] else { unreachable!() };
+        let Syntax::If { branches } = &tree[1] else {
+            unreachable!()
+        };
         let conditions: Vec<_> = branches.iter().map(|b| b.condition.as_deref()).collect();
         assert_eq!(conditions, [Some("$a"), Some("$b"), None]);
-        let Syntax::Each { empty, .. } = &tree[2] else { unreachable!() };
+        let Syntax::Each { empty, .. } = &tree[2] else {
+            unreachable!()
+        };
         assert_eq!(kinds(empty), ["line"]);
     }
 
     #[test]
     fn text_bodies_are_verbatim() {
         let tree = parse("@style\n  :root {\n    --brand: red;\n  }\n@text x\n");
-        let Syntax::Line { children, .. } = &tree[0] else { unreachable!() };
-        let [Syntax::Raw { text, .. }] = children.as_slice() else { panic!("{:?}", children) };
+        let Syntax::Line { children, .. } = &tree[0] else {
+            unreachable!()
+        };
+        let [Syntax::Raw { text, .. }] = children.as_slice() else {
+            panic!("{:?}", children)
+        };
         assert_eq!(text, ":root {\n  --brand: red;\n}");
         assert_eq!(kinds(&tree), ["line", "line"]);
     }

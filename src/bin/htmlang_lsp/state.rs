@@ -274,4 +274,3 @@ mod tests {
         assert_eq!(s, "ab!\ncd");
     }
 }
-

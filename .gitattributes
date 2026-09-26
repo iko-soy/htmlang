@@ -1,0 +1,3 @@
+# Check out text files with LF endings on every platform, so snapshot
+# fixtures compare equal on Windows too.
+* text=auto eol=lf

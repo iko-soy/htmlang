@@ -159,7 +159,11 @@ impl StyleCollector {
     fn to_css_formatted(&self, dev: bool) -> String {
         let mut css = String::new();
         let inner_indent = if dev { "  " } else { "" };
-        css.push_str(if dev { "@layer htmlang {\n" } else { "@layer htmlang{" });
+        css.push_str(if dev {
+            "@layer htmlang {\n"
+        } else {
+            "@layer htmlang{"
+        });
 
         // Non-responsive rules. Base and pseudo rules are merged separately by
         // identical body so that e.g. `.a,.b{display:flex;flex-direction:column;}`
@@ -595,7 +599,6 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
         generate_node(node, None, &mut body, &mut styles, &mut ctx);
     }
 
-
     let element_css = build_element_css(doc, &styles, dev);
 
     // Build meta tags string
@@ -774,9 +777,8 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
 fn build_element_css(doc: &Document, styles: &StyleCollector, dev: bool) -> String {
     let mut element_css = String::new();
 
-    // Collect all CSS custom properties (explicit `@let --name` / `@theme`
-    // tokens, plus any auto-extracted repeats) so they can be emitted in a
-    // single `:root` block below.
+    // Collect the CSS custom properties declared with `@let --name` so they
+    // can be emitted in a single `:root` block below.
     let mut root_vars: Vec<(String, String)> = Vec::new();
     for (name, value) in &doc.css_vars {
         root_vars.push((name.clone(), value.clone()));
@@ -834,7 +836,10 @@ fn reset_css(dev: bool, focus_visible_css: &str) -> String {
     };
     let rules = format!("{}{}", base, focus_visible_css);
     if dev {
-        format!("@layer hl-reset, htmlang;\n@layer hl-reset {{\n{}}}\n", rules)
+        format!(
+            "@layer hl-reset, htmlang;\n@layer hl-reset {{\n{}}}\n",
+            rules
+        )
     } else {
         format!("@layer hl-reset,htmlang;@layer hl-reset{{{}}}", rules)
     }
@@ -879,12 +884,10 @@ fn generate_node(
     match node {
         Node::Element(elem) => generate_element(elem, parent_kind, out, styles, ctx),
         Node::Text(segments) => {
-            let needs_wrap = matches!(
-                parent_kind,
-                Some(ElementKind::Row | ElementKind::El)
-            ) || parent_kind
-                .and_then(ElementKind::spec)
-                .is_some_and(|spec| spec.wraps_text);
+            let needs_wrap = matches!(parent_kind, Some(ElementKind::Row | ElementKind::El))
+                || parent_kind
+                    .and_then(ElementKind::spec)
+                    .is_some_and(|spec| spec.wraps_text);
             if needs_wrap {
                 out.push_str(&ctx.indent());
                 out.push_str("<span>");
@@ -902,7 +905,6 @@ fn generate_node(
         }
     }
 }
-
 
 /// Emit the argument of an element whose argument is an HTML attribute
 /// (`@iframe URL` → `src="URL"`, `@form /submit` → `action="/submit"`).
@@ -1091,7 +1093,6 @@ fn generate_element(
     out.push('<');
     out.push_str(tag);
 
-
     if elem.kind == ElementKind::Link
         && let Some(url) = &elem.argument
     {
@@ -1132,8 +1133,8 @@ fn generate_element(
 
     // Children
     ctx.depth += 1;
-    let is_paragraph = elem.kind == ElementKind::Paragraph
-        || elem.kind.spec().is_some_and(|spec| spec.inline);
+    let is_paragraph =
+        elem.kind == ElementKind::Paragraph || elem.kind.spec().is_some_and(|spec| spec.inline);
     for (i, child) in elem.children.iter().enumerate() {
         generate_node(child, Some(&elem.kind), out, styles, ctx);
         if is_paragraph && i < elem.children.len() - 1 {
@@ -1341,9 +1342,20 @@ fn compute_class(
 
     let dark = attrs_to_css(attrs, "dark:", kind, parent_kind, has_overlay_children);
     let print = attrs_to_css(attrs, "print:", kind, parent_kind, has_overlay_children);
-    let motion_safe = attrs_to_css(attrs, "motion-safe:", kind, parent_kind, has_overlay_children);
-    let motion_reduce =
-        attrs_to_css(attrs, "motion-reduce:", kind, parent_kind, has_overlay_children);
+    let motion_safe = attrs_to_css(
+        attrs,
+        "motion-safe:",
+        kind,
+        parent_kind,
+        has_overlay_children,
+    );
+    let motion_reduce = attrs_to_css(
+        attrs,
+        "motion-reduce:",
+        kind,
+        parent_kind,
+        has_overlay_children,
+    );
     let landscape = attrs_to_css(attrs, "landscape:", kind, parent_kind, has_overlay_children);
     let portrait = attrs_to_css(attrs, "portrait:", kind, parent_kind, has_overlay_children);
 
@@ -1490,8 +1502,6 @@ fn emit_class_attr(out: &mut String, gen_class: Option<&str>, user_class: Option
 /// `display:flex;flex-direction:column;` — base layout for `@el` and every
 /// semantic wrapper that behaves like a column.
 const FLEX_COLUMN: &str = "display:flex;flex-direction:column;";
-
-
 
 fn attrs_to_css(
     attrs: &[Attribute],
@@ -2002,7 +2012,8 @@ fn css_px(value: &str) -> String {
         return "0".to_string();
     }
     let is_bare_number = !v.is_empty()
-        && v.bytes().all(|b| b.is_ascii_digit() || matches!(b, b'.' | b'-' | b'+'))
+        && v.bytes()
+            .all(|b| b.is_ascii_digit() || matches!(b, b'.' | b'-' | b'+'))
         && v.parse::<f64>().is_ok();
     if is_bare_number {
         format!("{}px", v)
@@ -2147,5 +2158,3 @@ fn vlq_encode(value: i64, out: &mut String) {
         }
     }
 }
-
-

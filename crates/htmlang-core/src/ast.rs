@@ -38,7 +38,6 @@ pub struct Element {
     pub line_num: usize,
 }
 
-
 #[derive(Debug, Clone)]
 pub struct Attribute {
     pub key: String,
@@ -95,7 +94,9 @@ impl ElementKind {
     /// the semantic containers)?
     pub fn is_column(&self) -> bool {
         matches!(self, ElementKind::El)
-            || self.spec().is_some_and(|spec| spec.css.contains("flex-direction:column"))
+            || self
+                .spec()
+                .is_some_and(|spec| spec.css.contains("flex-direction:column"))
     }
 
     /// Is this the table element named `name` (e.g. `"main"`)?
@@ -123,8 +124,16 @@ impl ElementKind {
     /// Every element name, for suggestions and completions.
     pub fn all_names() -> impl Iterator<Item = &'static str> {
         [
-            "row", "el", "text", "paragraph", "link", "image", "script", "fragment",
-            "children", "slot",
+            "row",
+            "el",
+            "text",
+            "paragraph",
+            "link",
+            "image",
+            "script",
+            "fragment",
+            "children",
+            "slot",
         ]
         .into_iter()
         .chain(TAGS.iter().map(|spec| spec.name))
@@ -176,6 +185,7 @@ impl TagSpec {
 }
 
 /// Every element besides the core ones in [`ElementKind`].
+#[rustfmt::skip]
 pub static TAGS: &[TagSpec] = &[
     TagSpec { name: "nav", html: "nav", css: "display:flex;flex-direction:column;", wraps_text: true, container: true, ..TagSpec::DEFAULT },
     TagSpec { name: "header", html: "header", css: "display:flex;flex-direction:column;", wraps_text: true, container: true, ..TagSpec::DEFAULT },

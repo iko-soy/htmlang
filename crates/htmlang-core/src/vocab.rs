@@ -2,13 +2,14 @@
 //!
 //! An attribute in `[...]` is one of three things:
 //! - one of htmlang's own attributes, which mean more than a single CSS
-//!   property (`spacing`, `center-x`, `rounded`, ...), handled in codegen;
+//!   property (`spacing`, `center-x`, `width fill`, ...), handled in codegen;
 //! - a standard CSS property, copied into the generated CSS unchanged;
 //! - an HTML attribute, written `key=value` (or bare, for booleans such as
 //!   `required`) and emitted on the element.
 
 /// htmlang's own attributes (those that are neither a CSS property nor an
 /// HTML attribute).
+#[rustfmt::skip]
 pub const HTMLANG_ATTRIBUTES: &[&str] = &[
     "align-bottom", "align-left", "align-right", "align-top", "center-x", "center-y",
     "col-span", "grid-cols", "grid-rows", "inline", "row-span",
@@ -17,6 +18,7 @@ pub const HTMLANG_ATTRIBUTES: &[&str] = &[
 
 /// Standard CSS properties, sorted. Any of these can be written as an
 /// attribute and is copied into the generated CSS as-is.
+#[rustfmt::skip]
 pub const CSS_PROPERTIES: &[&str] = &[
     "accent-color", "align-content", "align-items", "align-self", "all", "anchor-name",
     "animation", "animation-composition", "animation-delay", "animation-direction",
@@ -116,6 +118,7 @@ pub const CSS_PROPERTIES: &[&str] = &[
 /// Boolean HTML attributes, written bare (`[required]`) and rendered
 /// without a value (`<input required>`). HTML attributes with a value are
 /// written `key=value`.
+#[rustfmt::skip]
 pub const BOOLEAN_HTML_ATTRS: &[&str] = &[
     "allowfullscreen", "async", "autofocus", "autoplay", "checked", "controls", "defer",
     "disabled", "download", "formnovalidate", "inert", "loop", "multiple", "muted", "nomodule",
@@ -125,6 +128,7 @@ pub const BOOLEAN_HTML_ATTRS: &[&str] = &[
 
 /// Common HTML attribute names, used to suggest `key=value` when one is
 /// written like a style (`type email`). Any name works with `=`.
+#[rustfmt::skip]
 pub const HTML_ATTRIBUTES: &[&str] = &[
     "abbr", "accept", "action", "allow", "allowfullscreen", "alt", "aria-atomic", "aria-live",
     "aria-relevant", "async", "autocomplete", "autofocus", "autoplay", "blocking", "charset",
@@ -145,15 +149,42 @@ pub const HTML_ATTRIBUTES: &[&str] = &[
 /// CSS properties whose bare numbers are lengths, so `margin-top 16` means
 /// `16px`. (Others, like `opacity` or `z-index`, take unitless numbers.)
 pub fn is_length_property(name: &str) -> bool {
-    const PREFIXES: &[&str] = &["margin", "padding", "inset", "scroll-margin", "scroll-padding"];
+    const PREFIXES: &[&str] = &[
+        "margin",
+        "padding",
+        "inset",
+        "scroll-margin",
+        "scroll-padding",
+    ];
     const SUFFIXES: &[&str] = &["-width", "-height", "-radius", "-offset", "-spacing", "gap"];
     const EXACT: &[&str] = &[
-        "top", "right", "bottom", "left", "width", "height", "font-size", "block-size",
-        "inline-size", "min-block-size", "max-block-size", "min-inline-size", "max-inline-size",
-        "text-indent", "flex-basis", "perspective", "text-decoration-thickness",
+        "top",
+        "right",
+        "bottom",
+        "left",
+        "width",
+        "height",
+        "font-size",
+        "block-size",
+        "inline-size",
+        "min-block-size",
+        "max-block-size",
+        "min-inline-size",
+        "max-inline-size",
+        "text-indent",
+        "flex-basis",
+        "perspective",
+        "text-decoration-thickness",
         // Shorthands that start with a width: `border 1 solid red`
-        "border", "border-top", "border-right", "border-bottom", "border-left", "border-block",
-        "border-inline", "outline", "column-rule",
+        "border",
+        "border-top",
+        "border-right",
+        "border-bottom",
+        "border-left",
+        "border-block",
+        "border-inline",
+        "outline",
+        "column-rule",
     ];
     // A bare `line-height` number is a multiplier, not a length
     name != "line-height"

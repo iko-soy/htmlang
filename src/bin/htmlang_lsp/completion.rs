@@ -100,7 +100,6 @@ pub(crate) fn in_brackets(text: &str) -> bool {
     depth > 0
 }
 
-
 fn item(
     label: &str,
     kind: CompletionItemKind,
@@ -145,7 +144,13 @@ fn directive_completions(range: Range) -> Vec<CompletionItem> {
         .map(|name| {
             let label = format!("@{}", name);
             let detail = docs::directive(name).map_or("Directive", |d| d.summary);
-            item(&label, CompletionItemKind::SNIPPET, detail, &format!("{} ", label), range)
+            item(
+                &label,
+                CompletionItemKind::SNIPPET,
+                detail,
+                &format!("{} ", label),
+                range,
+            )
         })
         .collect()
 }
@@ -257,7 +262,6 @@ pub(crate) fn path_completions(uri: &Url, position: Position) -> Vec<CompletionI
     items
 }
 
-
 /// Walk back from `position` to find the element directive that opened the
 /// nearest unmatched `[`. Returns the bare name without the leading `@`
 /// (e.g. `"input"`).
@@ -266,8 +270,8 @@ pub(crate) fn owning_element(text: &str, position: Position) -> Option<String> {
     // First, locate the line that contains the unmatched `[`. We scan from
     // the cursor back, tracking depth.
     let cursor_line = position.line as usize;
-    let cursor_col = (position.character as usize)
-        .min(lines.get(cursor_line).map(|l| l.len()).unwrap_or(0));
+    let cursor_col =
+        (position.character as usize).min(lines.get(cursor_line).map(|l| l.len()).unwrap_or(0));
     let mut depth: i32 = 0;
     let mut bracket_line: Option<usize> = None;
     let mut bracket_col: usize = 0;
@@ -348,7 +352,14 @@ fn element_specific_attrs(element: &str) -> &'static [&'static str] {
             "popovertarget",
             "popovertargetaction",
         ],
-        "select" => &["name", "multiple", "required", "disabled", "size", "autofocus"],
+        "select" => &[
+            "name",
+            "multiple",
+            "required",
+            "disabled",
+            "size",
+            "autofocus",
+        ],
         "textarea" => &[
             "name",
             "rows",
@@ -384,7 +395,14 @@ fn element_specific_attrs(element: &str) -> &'static [&'static str] {
             "srcset",
             "sizes",
         ],
-        "link" => &["href", "target", "rel", "download", "referrerpolicy", "type"],
+        "link" => &[
+            "href",
+            "target",
+            "rel",
+            "download",
+            "referrerpolicy",
+            "type",
+        ],
         "video" => &[
             "src",
             "controls",
@@ -490,7 +508,14 @@ fn attr_value_completions(before: &str, range: Range) -> Option<Vec<CompletionIt
         ],
         "text-align" => &["left", "center", "right", "justify", "start", "end"],
         "text-transform" => &["uppercase", "lowercase", "capitalize", "none"],
-        "white-space" => &["normal", "nowrap", "pre", "pre-line", "pre-wrap", "break-spaces"],
+        "white-space" => &[
+            "normal",
+            "nowrap",
+            "pre",
+            "pre-line",
+            "pre-wrap",
+            "break-spaces",
+        ],
         "overflow" | "overflow-x" | "overflow-y" => {
             &["visible", "hidden", "scroll", "auto", "clip"]
         }
@@ -545,21 +570,22 @@ fn attr_value_completions(before: &str, range: Range) -> Option<Vec<CompletionIt
         "scope" => &["row", "col", "rowgroup", "colgroup"],
         "wrap" => &["soft", "hard", "off"],
         "inputmode" => &[
-            "text",
-            "numeric",
-            "decimal",
-            "email",
-            "search",
-            "tel",
-            "url",
-            "none",
+            "text", "numeric", "decimal", "email", "search", "tel", "url", "none",
         ],
         "enterkeyhint" => &["enter", "done", "go", "next", "previous", "search", "send"],
         "fetchpriority" => &["high", "low", "auto"],
         "spellcheck" | "translate" => &["true", "false"],
         "color-scheme" => &["light", "dark", "light dark", "normal"],
         "appearance" => &["none", "auto"],
-        "autocomplete" => &["on", "off", "name", "email", "username", "current-password", "new-password"],
+        "autocomplete" => &[
+            "on",
+            "off",
+            "name",
+            "email",
+            "username",
+            "current-password",
+            "new-password",
+        ],
         "scroll-behavior" => &["smooth", "auto"],
         "resize" => &["none", "both", "horizontal", "vertical", "block", "inline"],
         "writing-mode" => &["horizontal-tb", "vertical-rl", "vertical-lr"],
@@ -598,7 +624,9 @@ fn attr_value_completions(before: &str, range: Range) -> Option<Vec<CompletionIt
             "auto",
             "pinch-zoom",
         ],
-        "contain" => &["none", "strict", "content", "size", "layout", "style", "paint"],
+        "contain" => &[
+            "none", "strict", "content", "size", "layout", "style", "paint",
+        ],
         "content-visibility" => &["visible", "auto", "hidden"],
         _ => return None,
     };
@@ -649,12 +677,24 @@ fn attr_completions(range: Range, element: Option<&str>) -> Vec<CompletionItem> 
     }
     for name in vocab::BOOLEAN_HTML_ATTRS {
         if !vocab::is_style_attribute(name) {
-            push(name.to_string(), name.to_string(), "HTML attribute (boolean)", "3", name);
+            push(
+                name.to_string(),
+                name.to_string(),
+                "HTML attribute (boolean)",
+                "3",
+                name,
+            );
         }
     }
     for name in vocab::HTML_ATTRIBUTES {
         if !vocab::BOOLEAN_HTML_ATTRS.contains(name) {
-            push(format!("{}=", name), format!("{}=", name), "HTML attribute", "3", name);
+            push(
+                format!("{}=", name),
+                format!("{}=", name),
+                "HTML attribute",
+                "3",
+                name,
+            );
         }
     }
     let prefixes = vocab::PSEUDO_PREFIXES
@@ -800,7 +840,13 @@ fn variable_completions(text: &str, range: Range) -> Vec<CompletionItem> {
     for doc in docs::BUNDLES {
         let label = format!("${}", doc.name);
         let detail = format!("{} (standard-library bundle)", doc.summary);
-        items.push(item(&label, CompletionItemKind::CONSTANT, &detail, &label, range));
+        items.push(item(
+            &label,
+            CompletionItemKind::CONSTANT,
+            &detail,
+            &label,
+            range,
+        ));
     }
 
     for line in text.lines() {
@@ -918,10 +964,7 @@ mod tests {
     #[test]
     fn owning_element_finds_element_across_lines() {
         let text = "@button [\n  padding 10,\n  ";
-        assert_eq!(
-            owning_element(text, pos(2, 2)),
-            Some("button".to_string())
-        );
+        assert_eq!(owning_element(text, pos(2, 2)), Some("button".to_string()));
     }
 
     #[test]
@@ -946,7 +989,11 @@ mod tests {
         let elements = element_completions(range);
         for name in ElementKind::all_names() {
             let label = format!("@{}", name);
-            assert!(elements.iter().any(|i| i.label == label), "missing {}", label);
+            assert!(
+                elements.iter().any(|i| i.label == label),
+                "missing {}",
+                label
+            );
         }
         assert!(elements.iter().any(|i| i.label == "@spacer"));
         let directives = directive_completions(range);

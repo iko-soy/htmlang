@@ -32,6 +32,7 @@ const fn doc(name: &'static str, summary: &'static str, usage: &'static str) -> 
 
 /// Elements (names without `@`). Elements not listed get a summary derived
 /// from their row in `TAGS`.
+#[rustfmt::skip]
 pub(crate) const ELEMENTS: &[Doc] = &[
     doc("row", "Horizontal layout: a flex row.", "@row [spacing 10]\n  @text A\n  @text B"),
     doc("el", "The container: a flex column (only `@row` lays out horizontally).", "@el [padding 20, background white]\n  Content"),
@@ -82,6 +83,7 @@ pub(crate) const ELEMENTS: &[Doc] = &[
 ];
 
 /// Directives (names without `@`).
+#[rustfmt::skip]
 pub(crate) const DIRECTIVES: &[Doc] = &[
     doc(
         "page",
@@ -110,6 +112,7 @@ pub(crate) const DIRECTIVES: &[Doc] = &[
 ];
 
 /// htmlang's own attributes, plus CSS properties htmlang treats specially.
+#[rustfmt::skip]
 pub(crate) const ATTRIBUTES: &[Doc] = &[
     doc("spacing", "Gap between children.", "spacing 20"),
     doc("padding", "Inner space: 1 to 4 values; bare numbers are px.", "padding 12 24"),
@@ -132,11 +135,13 @@ pub(crate) const ATTRIBUTES: &[Doc] = &[
 ];
 
 /// Standard-library components (`std.hl`), used like elements.
+#[rustfmt::skip]
 pub(crate) const COMPONENTS: &[Doc] = &[
     doc("spacer", "Takes up the remaining space in a row or column.", "@spacer"),
 ];
 
 /// Standard-library attribute bundles, used as `[$name]`.
+#[rustfmt::skip]
 pub(crate) const BUNDLES: &[Doc] = &[
     doc("truncate", "Cuts text off at one line with an ellipsis.", "@text [$truncate] A long title"),
 ];
@@ -187,7 +192,10 @@ fn markdown(title: &str, summary: &str, usage: &str) -> String {
     if usage.is_empty() {
         format!("**{}** \u{2014} {}", title, summary)
     } else {
-        format!("**{}** \u{2014} {}\n\n```htmlang\n{}\n```", title, summary, usage)
+        format!(
+            "**{}** \u{2014} {}\n\n```htmlang\n{}\n```",
+            title, summary, usage
+        )
     }
 }
 
@@ -255,7 +263,9 @@ fn attribute_hover(name: &str) -> Option<String> {
             "**{name}** \u{2014} Boolean HTML attribute, written bare: `[{name}]`."
         ));
     }
-    if vocab::HTML_ATTRIBUTES.contains(&name) || name.starts_with("aria-") || name.starts_with("data-")
+    if vocab::HTML_ATTRIBUTES.contains(&name)
+        || name.starts_with("aria-")
+        || name.starts_with("data-")
     {
         return Some(format!(
             "**{name}** \u{2014} HTML attribute, written `{name}=value`."
@@ -329,10 +339,18 @@ mod tests {
     #[test]
     fn documented_names_exist_in_the_compiler() {
         for doc in ELEMENTS {
-            assert!(ElementKind::from_name(doc.name).is_some(), "@{} is not an element", doc.name);
+            assert!(
+                ElementKind::from_name(doc.name).is_some(),
+                "@{} is not an element",
+                doc.name
+            );
         }
         for doc in ATTRIBUTES {
-            assert!(vocab::is_style_attribute(doc.name), "{} is not a style attribute", doc.name);
+            assert!(
+                vocab::is_style_attribute(doc.name),
+                "{} is not a style attribute",
+                doc.name
+            );
         }
     }
 
