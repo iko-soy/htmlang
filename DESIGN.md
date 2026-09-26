@@ -300,8 +300,10 @@ or whatever the parent's own `flex-direction` (or `flex-flow`) says. Along
 that direction, `fill` takes the remaining space and `shrink` keeps the
 content's size; across it, `fill` is the full size and `shrink` fits the
 content. `center-x`, `center-y` and `align-*` are auto margins, which work
-in either direction. A layout word never overrides a CSS property the
-element writes itself: `[width fill, min-width 200]` keeps its 200px.
+in either direction; a `margin` on the same element keeps its other sides
+(`[center-x, margin 20]`). A layout word never overrides a CSS property
+the element writes itself: `[width fill, min-width 200]` keeps its 200px,
+and `[flex-shrink 0, width fill]` still grows but never shrinks.
 
 ```
 @row [spacing 8]

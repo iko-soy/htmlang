@@ -1830,9 +1830,12 @@ struct Sizes {
     /// size may replace it)
     width_word: bool,
     height_word: bool,
-    /// It writes `flex` (or `flex-grow`, `flex-shrink`, `flex-basis`),
-    /// `min-width`, `min-height` itself
+    /// It writes `flex`, one of its longhands (`flex-grow`, `flex-shrink`,
+    /// `flex-basis`), `min-width` or `min-height` itself
     flex: bool,
+    flex_grow: bool,
+    flex_shrink: bool,
+    flex_basis: bool,
     min_width: bool,
     min_height: bool,
 }
@@ -1861,7 +1864,10 @@ impl Sizes {
                         sizes.height = Some(size);
                         sizes.height_word |= size != Size::Set;
                     }
-                    "flex" | "flex-grow" | "flex-shrink" | "flex-basis" => sizes.flex = true,
+                    "flex" => sizes.flex = true,
+                    "flex-grow" => sizes.flex_grow = true,
+                    "flex-shrink" => sizes.flex_shrink = true,
+                    "flex-basis" => sizes.flex_basis = true,
                     "min-width" => sizes.min_width = true,
                     "min-height" => sizes.min_height = true,
                     _ => {}
@@ -1874,12 +1880,48 @@ impl Sizes {
     /// The element writes `property` itself: a layout word leaves it alone.
     fn writes(&self, property: &str) -> bool {
         match property {
-            "flex" | "flex-shrink" => self.flex,
+            "flex" => self.flex,
+            "flex-grow" => self.flex || self.flex_grow,
+            "flex-shrink" => self.flex || self.flex_shrink,
+            "flex-basis" => self.flex || self.flex_basis,
             "min-width" => self.min_width,
             "min-height" => self.min_height,
             "width" => self.width == Some(Size::Set),
             "height" => self.height == Some(Size::Set),
             _ => false,
+        }
+    }
+
+    /// Write a layout word's `property: value`, unless the element writes
+    /// the property itself. When it writes some of `flex`'s longhands, a
+    /// `flex` is written as the others (`flex-shrink 0, width fill` still
+    /// grows).
+    fn push(&self, css: &mut String, property: &str, value: &str) {
+        if property == "flex" && !self.flex {
+            let longhands = match value {
+                "1" => [
+                    ("flex-grow", "1"),
+                    ("flex-shrink", "1"),
+                    ("flex-basis", "0%"),
+                ],
+                // The reset, `0 1 auto`
+                _ => [
+                    ("flex-grow", "0"),
+                    ("flex-shrink", "1"),
+                    ("flex-basis", "auto"),
+                ],
+            };
+            if longhands.iter().any(|&(p, _)| self.writes(p)) {
+                for (longhand, value) in longhands {
+                    if !self.writes(longhand) {
+                        push_css(css, longhand, value);
+                    }
+                }
+                return;
+            }
+        }
+        if !self.writes(property) {
+            push_css(css, property, value);
         }
     }
 }
@@ -1912,14 +1954,10 @@ fn sizing_rule(attrs: &[Attribute], prefixes: &[&str], axis: Axis) -> String {
             continue;
         }
         written.push(property);
-        if !sizes.writes(property) {
-            push_css(&mut css, property, value);
-        }
+        sizes.push(&mut css, property, value);
     }
     for &(property, value) in &sets {
-        if !sizes.writes(property) {
-            push_css(&mut css, property, value);
-        }
+        sizes.push(&mut css, property, value);
     }
     css
 }
@@ -1991,6 +2029,8 @@ fn layout_css(layout: Layout, inline: bool) -> &'static str {
 
 fn attrs_to_css(attrs: &[Attribute], state_prefix: &str, site: &Site) -> String {
     let mut css = String::new();
+    // The auto margins of `center-x`, `align-left`, ..., written at the end
+    let mut aligned = String::new();
     let kind = site.kind;
     // The direction `fill` and `shrink` compile against: `children:` styles
     // go on the children, whose parent is this element
@@ -2097,9 +2137,7 @@ fn attrs_to_css(attrs: &[Attribute], state_prefix: &str, site: &Site) -> String 
                 // leaves alone
                 let sizes = Sizes::of(attrs, &in_effect(state_prefix));
                 for &(property, value) in sizing(dim, size, axis) {
-                    if !sizes.writes(property) {
-                        push_css(&mut css, property, value);
-                    }
+                    sizes.push(&mut css, property, value);
                 }
             }
             "width" | "height" => {
@@ -2128,19 +2166,21 @@ fn attrs_to_css(attrs: &[Attribute], state_prefix: &str, site: &Site) -> String 
                 }
             }
 
-            // Alignment: auto margins, which work along either direction
+            // Alignment: auto margins, which work along either direction.
+            // They are written last, so a `margin` on the same element
+            // keeps its other sides (`center-x, margin 20`)
             "center-x" => {
-                push_css(&mut css, "margin-left", "auto");
-                push_css(&mut css, "margin-right", "auto");
+                push_css(&mut aligned, "margin-left", "auto");
+                push_css(&mut aligned, "margin-right", "auto");
             }
             "center-y" => {
-                push_css(&mut css, "margin-top", "auto");
-                push_css(&mut css, "margin-bottom", "auto");
+                push_css(&mut aligned, "margin-top", "auto");
+                push_css(&mut aligned, "margin-bottom", "auto");
             }
-            "align-left" => push_css(&mut css, "margin-right", "auto"),
-            "align-right" => push_css(&mut css, "margin-left", "auto"),
-            "align-top" => push_css(&mut css, "margin-bottom", "auto"),
-            "align-bottom" => push_css(&mut css, "margin-top", "auto"),
+            "align-left" => push_css(&mut aligned, "margin-right", "auto"),
+            "align-right" => push_css(&mut aligned, "margin-left", "auto"),
+            "align-top" => push_css(&mut aligned, "margin-bottom", "auto"),
+            "align-bottom" => push_css(&mut aligned, "margin-top", "auto"),
 
             // Typography
             "letter-spacing" => {
@@ -2441,6 +2481,7 @@ fn attrs_to_css(attrs: &[Attribute], state_prefix: &str, site: &Site) -> String 
         }
     }
 
+    css.push_str(&aligned);
     css
 }
 

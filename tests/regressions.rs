@@ -1656,3 +1656,44 @@ fn an_explicit_min_width_before_width_fill_is_kept() {
     assert!(out.contains("min-width:200px;flex:1;"), "{}", out);
     assert!(!out.contains("min-width:0"), "{}", out);
 }
+
+#[test]
+fn a_margin_does_not_undo_center_x() {
+    // `margin 20` after `center-x` wrote over its auto margins, so the
+    // element was no longer centred in a column
+    let out = compile("@el\n  @el [center-x, margin 20] a\n");
+    assert!(
+        out.contains("margin:20px;margin-left:auto;margin-right:auto;"),
+        "{}",
+        out
+    );
+}
+
+#[test]
+fn a_flex_longhand_keeps_width_fill_growing() {
+    // `flex-shrink 0` (or `flex-basis`) left out the whole `flex:1`, so the
+    // element no longer filled the row
+    let out = compile("@row\n  @el [flex-shrink 0, width fill] a\n");
+    assert!(
+        out.contains("flex-shrink:0;flex-grow:1;flex-basis:0%;min-width:0;"),
+        "{}",
+        out
+    );
+    let out = compile("@row\n  @el [flex-basis 200, width fill] a\n");
+    assert!(
+        out.contains("flex-basis:200px;flex-grow:1;flex-shrink:1;min-width:0;"),
+        "{}",
+        out
+    );
+    // `width shrink` keeps its `flex-shrink:0` beside a `flex-grow`
+    let out = compile("@row\n  @el [flex-grow 2, width shrink] a\n");
+    assert!(out.contains("flex-grow:2;flex-shrink:0;"), "{}", out);
+    // Where the direction changes, the rule puts back only the longhands
+    // the element doesn't write
+    let out = compile("@row [md:flex-direction column]\n  @el [flex-shrink 0, width fill] a\n");
+    assert!(
+        out.contains(":where(.a)>.b{flex-grow:0;flex-basis:auto;min-width:auto;width:100%;}"),
+        "{}",
+        out
+    );
+}
