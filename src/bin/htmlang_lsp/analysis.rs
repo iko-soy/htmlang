@@ -1180,6 +1180,13 @@ mod tests {
         assert_eq!(edits[0].new_text, "title ");
         assert_eq!(edits[0].range.start, Position::new(2, 19));
         assert_eq!(edits[0].range.end, Position::new(2, 25));
+        // On a later line of a list too
+        let found = fixes("@let @card [title]\n  @el $title\n@card [\n  title=Hi,\n]\n");
+        let (_, edits) = found
+            .iter()
+            .find(|(t, _)| t == "Write 'title' as a parameter")
+            .unwrap_or_else(|| panic!("{:?}", found));
+        assert_eq!(edits[0].range.start, Position::new(3, 2));
     }
 
     #[test]

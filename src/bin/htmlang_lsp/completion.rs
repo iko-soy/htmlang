@@ -1021,26 +1021,23 @@ fn function_completions(text: &str, range: Range) -> Vec<CompletionItem> {
         } else {
             format!("Function {}", crate::analysis::param_list(&def.params))
         };
-        // A snippet with a tab stop for each parameter
-        let insert_text = if def.params.is_empty() {
+        // A snippet with a tab stop for each required parameter. One with
+        // a default is left out: its default is filled in at the call,
+        // where it may use the parameters before it, and completion in
+        // the list offers it.
+        let required: Vec<&str> = def
+            .params
+            .iter()
+            .filter(|p| p.default.is_none())
+            .map(|p| p.name.as_str())
+            .collect();
+        let insert_text = if required.is_empty() {
             format!("@{}", name)
         } else {
-            let param_snippets: Vec<String> = def
-                .params
+            let param_snippets: Vec<String> = required
                 .iter()
                 .enumerate()
-                .map(|(i, p)| {
-                    // A default may hold `$name`, `\,` or `}`, which a
-                    // snippet placeholder escapes
-                    let default = p
-                        .default
-                        .as_deref()
-                        .unwrap_or(&p.name)
-                        .replace('\\', "\\\\")
-                        .replace('$', "\\$")
-                        .replace('}', "\\}");
-                    format!("{} ${{{}:{}}}", p.name, i + 1, default)
-                })
+                .map(|(i, p)| format!("{} ${{{}:{}}}", p, i + 1, p))
                 .collect();
             format!("@{} [{}]", name, param_snippets.join(", "))
         };
@@ -1054,7 +1051,7 @@ fn function_completions(text: &str, range: Range) -> Vec<CompletionItem> {
             })),
             ..Default::default()
         };
-        if !def.params.is_empty() {
+        if !required.is_empty() {
             ci.insert_text_format = Some(tower_lsp::lsp_types::InsertTextFormat::SNIPPET);
         }
         items.push(ci);
@@ -1216,16 +1213,20 @@ mod tests {
     }
 
     #[test]
-    fn a_call_snippet_escapes_its_defaults() {
-        let text = "@let @card [tone $brand, list a\\, b]\n  @el $tone\n";
-        let items = function_completions(text, Range::default());
-        let card = items.iter().find(|i| i.label == "@card").expect("@card");
-        let Some(CompletionTextEdit::Edit(edit)) = &card.text_edit else {
-            panic!("{:?}", card);
+    fn a_call_snippet_passes_the_required_parameters() {
+        let snippet = |text: &str| {
+            let items = function_completions(text, Range::default());
+            let card = items.iter().find(|i| i.label == "@card").expect("@card");
+            let Some(CompletionTextEdit::Edit(edit)) = &card.text_edit else {
+                panic!("{:?}", card);
+            };
+            edit.new_text.clone()
         };
-        assert_eq!(
-            edit.new_text,
-            r"@card [tone ${1:\$brand}, list ${2:a\\, b}]"
-        );
+        // A default is filled in at the call, where `$title` is the
+        // parameter; passing its text would read the caller's `$title`
+        let text = "@let @card [title, heading \"About $title\", kind]\n  @el $heading\n";
+        assert_eq!(snippet(text), "@card [title ${1:title}, kind ${2:kind}]");
+        let text = "@let @card [tone $brand, list a\\, b]\n  @el $tone\n";
+        assert_eq!(snippet(text), "@card");
     }
 }

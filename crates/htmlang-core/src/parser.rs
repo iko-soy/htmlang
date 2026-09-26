@@ -648,9 +648,13 @@ fn check_unevaluated_node(node: &syntax::Node, ctx: &mut ParseContext) {
             NodeKind::Text(text) => check_inline_heads(text, line, ctx),
             _ => {}
         }
+        // As written, indented, so a column points into it
+        let text = match node.line_count <= 1 {
+            true => format!("{}{}", " ".repeat(node.indent), node.source),
+            false => node.source.clone(),
+        };
         for d in &mut ctx.diagnostics[before..] {
-            d.source_line
-                .get_or_insert_with(|| node.source.as_str().into());
+            d.source_line.get_or_insert_with(|| text.as_str().into());
         }
     }
     for child in &node.children {
@@ -665,7 +669,7 @@ fn check_head(head: &syntax::Head, line: usize, inline: bool, ctx: &mut ParseCon
     if is_function && !inline {
         ctx.used_functions.insert(head.name.clone());
         if let Some(function) = ctx.functions.get(&head.name).cloned() {
-            check_call(&head.name, &function, head.attrs.as_ref(), line, ctx);
+            check_call(head, &function, line, ctx);
         }
         return;
     }
@@ -703,21 +707,10 @@ fn check_head(head: &syntax::Head, line: usize, inline: bool, ctx: &mut ParseCon
 /// Check how a call that was never evaluated passes its parameters: none
 /// written `name=value`, and every one without a default passed, when no
 /// bundle or `if()` could pass it.
-fn check_call(
-    name: &str,
-    function: &FnDef,
-    list: Option<&syntax::AttrList>,
-    line: usize,
-    ctx: &mut ParseContext,
-) {
-    let attrs = list.map_or(&[][..], |list| &list.attrs[..]);
-    for attr in attrs {
-        if attr.html && function.is_param(&attr.key) {
-            let value = attr.value.as_deref().unwrap_or("");
-            ctx.diagnostics
-                .push(parameter_form(name, &attr.key, value, line));
-        }
-    }
+fn check_call(head: &syntax::Head, function: &FnDef, line: usize, ctx: &mut ParseContext) {
+    let name = head.name.as_str();
+    let attrs = head.attrs.as_ref().map_or(&[][..], |list| &list.attrs[..]);
+    written_parameter_forms(name, function, attrs, line, ctx);
     let unknown = attrs
         .iter()
         .any(|a| a.raw.starts_with("if(") || (a.key.starts_with('$') && a.value.is_none()));
@@ -726,10 +719,41 @@ fn check_call(
     }
     for param in function.params.iter().filter(|p| p.default.is_none()) {
         if !attrs.iter().any(|a| a.key == param.name) {
-            ctx.diagnostics
-                .push(missing_parameter(name, &param.name, line));
+            let column = name_column(head, line);
+            ctx.push_once(missing_parameter(name, &param.name, line, column));
         }
     }
+}
+
+/// Report each parameter a call's list writes `name=value`, with the value
+/// as written and its column; returns their names, so the evaluated call
+/// doesn't report them again.
+fn written_parameter_forms(
+    name: &str,
+    function: &FnDef,
+    attrs: &[syntax::Attr],
+    line: usize,
+    ctx: &mut ParseContext,
+) -> Vec<String> {
+    let mut reported = Vec::new();
+    for attr in attrs {
+        if !(attr.html && function.is_param(&attr.key)) {
+            continue;
+        }
+        let at = if attr.span.line == 0 {
+            line
+        } else {
+            attr.span.line
+        };
+        let value = attr.value.as_deref().unwrap_or("");
+        let diagnostic = parameter_form(name, &attr.key, value, at).column(attr.span.column);
+        ctx.push_once(match &ctx.current_source {
+            (current, Some(text)) if *current == at => diagnostic.source(text.clone()),
+            _ => diagnostic,
+        });
+        reported.push(attr.key.clone());
+    }
+    reported
 }
 
 fn check_inline_heads(text: &syntax::Text, line: usize, ctx: &mut ParseContext) {
@@ -1481,6 +1505,11 @@ impl Evaluator {
                 name: String,
                 args: Vec<Attribute>,
                 text: Option<syntax::Text>,
+                /// Parameters written `name=value`, already reported
+                written_form: Vec<String>,
+                /// The column of the call's name and the line it is on,
+                /// for a missing parameter
+                name_at: Option<(usize, String)>,
             },
         }
         let line_num = node.span.line;
@@ -1492,16 +1521,22 @@ impl Evaluator {
             } else {
                 None
             };
-            if let Some(function) = ctx.functions.get(&head.name) {
+            if let Some(function) = ctx.functions.get(&head.name).cloned() {
                 let params: Vec<String> = function.params.iter().map(|p| p.name.clone()).collect();
                 ctx.used_functions.insert(head.name.clone());
-                let args = head.attrs.as_ref().map_or_else(Vec::new, |list| {
-                    parse_attr_list(&list.attrs, line_num, ctx, false, &params)
-                });
+                let written = head.attrs.as_ref().map_or(&[][..], |list| &list.attrs[..]);
+                let written_form =
+                    written_parameter_forms(&head.name, &function, written, line_num, ctx);
+                let args = parse_attr_list(written, line_num, ctx, false, &params);
                 links.push(Link::Call {
                     name: head.name.clone(),
                     args,
                     text: text.cloned(),
+                    written_form,
+                    name_at: name_column(head, line_num).zip(match &ctx.current_source {
+                        (current, Some(text)) if *current == line_num => Some(text.clone()),
+                        _ => None,
+                    }),
                 });
             } else {
                 links.push(Link::Element(parse_single_element(
@@ -1519,9 +1554,17 @@ impl Evaluator {
                     elem.children.extend(current);
                     vec![inline_svg(Node::Element(elem), line_num, ctx)]
                 }
-                Link::Call { name, args, text } => self.expand_fn_call(
+                Link::Call {
+                    name,
+                    args,
+                    text,
+                    written_form,
+                    name_at,
+                } => self.expand_fn_call(
                     &name,
                     args,
+                    &written_form,
+                    name_at,
                     text.as_ref(),
                     current,
                     line_num,
@@ -1538,6 +1581,8 @@ impl Evaluator {
         &mut self,
         name: &str,
         args: Vec<Attribute>,
+        written_form: &[String],
+        name_at: Option<(usize, String)>,
         trailing_text: Option<&syntax::Text>,
         all_caller_children: Vec<Node>,
         line_num: usize,
@@ -1614,7 +1659,9 @@ impl Evaluator {
                     );
                     continue;
                 }
-                if arg.html {
+                // Written `name=value` in the call's own list is reported
+                // as written; this is one from a bundle
+                if arg.html && !written_form.contains(&arg.key) {
                     let value = arg.value.as_deref().unwrap_or("");
                     ctx.push_once(parameter_form(name, &arg.key, value, line_num).source(content));
                 }
@@ -1634,8 +1681,12 @@ impl Evaluator {
                 None => match &param.default {
                     Some(default) => fill_default(&fn_def, param, default, ctx),
                     None => {
+                        let (column, text) = match &name_at {
+                            Some((column, text)) => (Some(*column), text.as_str()),
+                            None => (None, content),
+                        };
                         ctx.push_once(
-                            missing_parameter(name, &param.name, line_num).source(content),
+                            missing_parameter(name, &param.name, line_num, column).source(text),
                         );
                         (String::new(), None)
                     }
@@ -1744,6 +1795,17 @@ fn fill_default(
     default: &str,
     ctx: &mut ParseContext,
 ) -> (String, Option<Quoted>) {
+    // A default that uses a later parameter is an error in the
+    // definition; the later one isn't bound yet, so don't report it again
+    let later = fn_def
+        .params
+        .iter()
+        .skip_while(|p| p.name != param.name)
+        .skip(1);
+    let names = interp::names(default);
+    if later.clone().any(|p| names.contains(&p.name.as_str())) {
+        return (String::new(), None);
+    }
     let line = param.span.line;
     let at_head = line == fn_def.line && fn_def.source.is_some();
     let column =
@@ -1779,8 +1841,13 @@ fn parameter_form(function: &str, key: &str, value: &str, line: usize) -> Diagno
 }
 
 /// A call that leaves out a parameter without a default.
-fn missing_parameter(function: &str, param: &str, line: usize) -> Diagnostic {
-    Diagnostic::error(
+fn missing_parameter(
+    function: &str,
+    param: &str,
+    line: usize,
+    column: Option<usize>,
+) -> Diagnostic {
+    let diagnostic = Diagnostic::error(
         code::MISSING_PARAMETER,
         line,
         format!(
@@ -1788,7 +1855,16 @@ fn missing_parameter(function: &str, param: &str, line: usize) -> Diagnostic {
             function, param, param
         ),
     )
-    .subject(param)
+    .subject(param);
+    match column {
+        Some(column) => diagnostic.column(column),
+        None => diagnostic,
+    }
+}
+
+/// The column of a call's `@name`, when it is on the call's line.
+fn name_column(head: &syntax::Head, line: usize) -> Option<usize> {
+    (head.name_span.line == line).then_some(head.name_span.column)
 }
 
 /// Define `$name` (and, for `--name`, the CSS custom property, which gets

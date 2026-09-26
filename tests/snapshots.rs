@@ -4990,3 +4990,53 @@ fn a_variable_used_only_in_a_default_is_used() {
     );
     assert!(coded(&diags, "unused-variable").is_empty(), "{:?}", diags);
 }
+
+#[test]
+fn a_parameter_passed_with_equals_is_shown_as_written() {
+    // The value as written (quoted, so its comma stays in it) and where
+    // the parameter is, also on a later line of a list
+    let diags = parse_diagnostics(
+        "@let @card [title]\n  @el $title\n@el\n  @card [title=\"a, b\"]\n@card [\n  title=Hi,\n]\n",
+    );
+    let form = coded(&diags, "parameter-form");
+    assert_eq!(form.len(), 2, "{:?}", diags);
+    assert!(
+        form[0].message.contains("write `title \"a, b\"`"),
+        "{}",
+        form[0].message
+    );
+    assert_eq!((form[0].line, form[0].column), (4, Some(9)));
+    assert_eq!(
+        form[0].source_line.as_deref(),
+        Some("  @card [title=\"a, b\"]")
+    );
+    assert_eq!((form[1].line, form[1].column), (6, Some(2)));
+    // One from a bundle is reported at the call
+    let diags =
+        parse_diagnostics("@let @card [title]\n  @el $title\n@let t [title=Hi]\n@card [$t]\n");
+    let form = coded(&diags, "parameter-form");
+    assert_eq!(form.len(), 1, "{:?}", diags);
+    assert_eq!((form[0].line, form[0].column), (4, None));
+}
+
+#[test]
+fn a_missing_parameter_points_at_the_call() {
+    let diags = parse_diagnostics(
+        "@let @card [title]\n  @el $title\n@el\n  @el > @card\n    @text child\n@if false\n  @card\n",
+    );
+    let missing = coded(&diags, "missing-parameter");
+    assert_eq!(missing.len(), 2, "{:?}", diags);
+    assert_eq!((missing[0].line, missing[0].column), (4, Some(8)));
+    assert_eq!(missing[0].source_line.as_deref(), Some("  @el > @card"));
+    // In code that doesn't run too, with the line as written
+    assert_eq!((missing[1].line, missing[1].column), (7, Some(2)));
+    assert_eq!(missing[1].source_line.as_deref(), Some("  @card"));
+}
+
+#[test]
+fn a_default_that_uses_a_later_parameter_is_reported_once() {
+    let diags =
+        parse_diagnostics("@let @card [heading $title, title]\n  @el $heading\n@card [title A]\n");
+    assert_eq!(diags.len(), 1, "{:?}", diags);
+    assert_eq!(diags[0].code, "invalid-definition");
+}
