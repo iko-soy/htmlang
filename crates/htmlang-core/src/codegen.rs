@@ -861,10 +861,6 @@ fn build_element_css(doc: &Document, styles: &StyleCollector, dev: bool) -> Stri
     // Generated rules always go in `@layer htmlang`, so unlayered user CSS
     // (`@style`, `@raw`) overrides them regardless of specificity.
     let styles_css = styles.to_css_formatted(dev);
-    // Fold literal values declared via `@theme` / `@let --name` back into
-    // `var(--name)` references so the generated CSS actually uses the
-    // custom properties emitted in `:root`.
-    let styles_css = substitute_css_vars(&styles_css, &root_vars);
 
     // Emit the :root block first so the cascade picks up the custom
     // properties before the class rules consume them.
@@ -2213,99 +2209,6 @@ fn css_px(value: &str) -> String {
         v.to_string()
     }
 }
-
-/// Rewrite literal values that match a declared CSS custom property (from
-/// `@theme` or `@let --name value`) to `var(--name)` references. Matches are
-/// anchored to CSS value boundaries so e.g. `#3b82f6` inside a longer hex or
-/// inside an identifier is not replaced. The `:root` block is emitted before
-/// this call runs, so its declarations are not affected.
-fn substitute_css_vars(css: &str, vars: &[(String, String)]) -> String {
-    if css.is_empty() || vars.is_empty() {
-        return css.to_string();
-    }
-    // Prefer longer values first so that if two vars share a prefix, the
-    // longer (more specific) match wins.
-    let mut pairs: Vec<(&str, String)> = vars
-        .iter()
-        .filter(|(name, value)| name.starts_with("--") && !value.is_empty())
-        .map(|(name, value)| (value.as_str(), format!("var({})", name)))
-        .collect();
-    pairs.sort_by_key(|(v, _)| std::cmp::Reverse(v.len()));
-    if pairs.is_empty() {
-        return css.to_string();
-    }
-
-    let is_boundary_before = |b: Option<u8>| match b {
-        None => true,
-        Some(c) => matches!(c, b':' | b' ' | b',' | b'(' | b';' | b'{' | b'\n' | b'\t'),
-    };
-    let is_boundary_after = |b: Option<u8>| match b {
-        None => true,
-        Some(c) => matches!(c, b';' | b'}' | b',' | b' ' | b')' | b'\n' | b'\t'),
-    };
-
-    let bytes = css.as_bytes();
-    let mut out = String::with_capacity(css.len());
-    let mut i = 0;
-    let mut prev: Option<u8> = None;
-    // Only declaration values are rewritten — never selectors or at-rule
-    // preludes such as `@media (min-width:768px)`. `blocks` records, for
-    // each open `{`, whether it holds declarations (a style rule) or nested
-    // rules (an at-rule like `@media` / `@layer`).
-    let mut blocks: Vec<bool> = Vec::new();
-    let mut prelude_start = 0;
-    let mut in_value = false;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'{' => {
-                let prelude = css[prelude_start..i].trim_start();
-                blocks.push(!prelude.starts_with('@'));
-                in_value = false;
-                prelude_start = i + 1;
-            }
-            b'}' => {
-                blocks.pop();
-                in_value = false;
-                prelude_start = i + 1;
-            }
-            b';' => {
-                in_value = false;
-                prelude_start = i + 1;
-            }
-            b':' if blocks.last() == Some(&true) => in_value = true,
-            _ => {}
-        }
-        if in_value && is_boundary_before(prev) {
-            let mut matched = false;
-            for (val, repl) in &pairs {
-                let vb = val.as_bytes();
-                if i + vb.len() <= bytes.len() && &bytes[i..i + vb.len()] == vb {
-                    let next = bytes.get(i + vb.len()).copied();
-                    if is_boundary_after(next) {
-                        out.push_str(repl);
-                        prev = repl.as_bytes().last().copied();
-                        i += vb.len();
-                        matched = true;
-                        break;
-                    }
-                }
-            }
-            if matched {
-                continue;
-            }
-        }
-        // Advance by one UTF-8 code point.
-        let start = i;
-        i += 1;
-        while i < bytes.len() && (bytes[i] & 0xC0) == 0x80 {
-            i += 1;
-        }
-        out.push_str(&css[start..i]);
-        prev = bytes.get(i - 1).copied();
-    }
-    out
-}
-
 
 /// Format a `line-height` value. CSS accepts either a unitless multiplier
 /// (e.g. `1.5`) or a length (e.g. `24px`). Plain integers in htmlang source

@@ -3014,13 +3014,9 @@ fn test_theme_directive() {
         "theme should emit spacing var, got: {}",
         html
     );
-    // Theme tokens collapse to `var(--name)` references so runtime theming
-    // actually takes effect (users can override `--primary` with CSS).
-    assert!(
-        html.contains("background:var(--primary)"),
-        "theme var should resolve to var(--primary), got: {}",
-        html
-    );
+    // Values are written as given: a matching literal is not turned into
+    // `var(--primary)`
+    assert!(html.contains("background:#3b82f6"), "{}", html);
 }
 
 #[test]

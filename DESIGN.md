@@ -318,12 +318,13 @@ A multi-line string uses triple quotes; its indented lines are the value:
 @text $intro
 ```
 
-`@let --name value` also emits a CSS custom property, used as `$--name` and
-as `var(--name)` in the generated CSS:
+`@let --name value` also declares the CSS custom property `--name` on
+`:root`. `$--name` is its value at compile time; `var(--name)` refers to it at
+run time, so a stylesheet can override it:
 
 ```
 @let --brand #3b82f6
-@el [background $--brand] Themed
+@el [background var(--brand), border 1 solid ${darken($--brand, 10)}] Themed
 ```
 
 ## Expressions
