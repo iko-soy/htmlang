@@ -11,8 +11,15 @@ use std::sync::Mutex;
 struct DiagnosticJson {
     file: String,
     line: usize,
+    column: Option<usize>,
+    code: &'static str,
     severity: String,
     message: String,
+}
+
+/// `error[unknown-element]`: the severity and the diagnostic's stable code.
+fn diagnostic_label(d: &htmlang::parser::Diagnostic) -> String {
+    format!("{}[{}]", severity_label(d.severity), d.code)
 }
 
 fn severity_label(s: htmlang::parser::Severity) -> &'static str {
@@ -46,6 +53,8 @@ fn compile(input_path: &str, cfg: &CompileConfig) -> (bool, Vec<PathBuf>) {
                     collector.lock().unwrap().push(DiagnosticJson {
                         file: input_path.to_string(),
                         line: 0,
+                        column: None,
+                        code: htmlang::diagnostic::code::UNREADABLE_FILE,
                         severity: "error".to_string(),
                         message: format!("{}", e),
                     });
@@ -67,6 +76,8 @@ fn compile(input_path: &str, cfg: &CompileConfig) -> (bool, Vec<PathBuf>) {
                 collected.push(DiagnosticJson {
                     file: input_path.to_string(),
                     line: d.line,
+                    column: d.column.map(|c| c + 1),
+                    code: d.code,
                     severity: severity_label(d.severity).to_string(),
                     message: d.message.clone(),
                 });
@@ -74,7 +85,7 @@ fn compile(input_path: &str, cfg: &CompileConfig) -> (bool, Vec<PathBuf>) {
         }
     } else {
         for d in &result.diagnostics {
-            let prefix = severity_label(d.severity);
+            let prefix = diagnostic_label(d);
             if let Some(col) = d.column {
                 eprintln!("{}: line {}:{}: {}", prefix, d.line, col + 1, d.message);
             } else {
@@ -174,6 +185,12 @@ fn print_json_diagnostics(diagnostics: &[DiagnosticJson]) {
         json_object(&[
             ("file", json_escape_string(&d.file)),
             ("line", d.line.to_string()),
+            (
+                "column",
+                d.column
+                    .map_or_else(|| "null".to_string(), |c| c.to_string()),
+            ),
+            ("code", json_escape_string(d.code)),
             ("severity", json_escape_string(&d.severity)),
             ("message", json_escape_string(&d.message)),
         ])
@@ -348,15 +365,7 @@ fn lint_file(path: &str) -> Vec<String> {
         .diagnostics
         .iter()
         .chain(&lint)
-        .map(|d| {
-            format!(
-                "{}:{}:{}: {}",
-                path,
-                d.line,
-                severity_label(d.severity),
-                d.message
-            )
-        })
+        .map(|d| format!("{}:{}:{}: {}", path, d.line, diagnostic_label(d), d.message))
         .collect()
 }
 

@@ -514,3 +514,163 @@ fn page_takes_lang_and_favicon_only() {
         result.diagnostics
     );
 }
+
+// --- One grammar: the syntax tree and the checks built on it ---
+
+fn codes(input: &str) -> Vec<(usize, &'static str, Severity)> {
+    parser::parse(input)
+        .diagnostics
+        .iter()
+        .map(|d| (d.line, d.code, d.severity))
+        .collect()
+}
+
+fn has_code(input: &str, line: usize, code: &str) -> bool {
+    codes(input)
+        .iter()
+        .any(|(l, c, _)| *l == line && *c == code)
+}
+
+#[test]
+fn untaken_branches_are_checked() {
+    let src = "@let on true\n@if $on\n  @text ok\n@else\n  @nosuch [paddin 4]\n  @el [paddin 4]\n";
+    let result = parser::parse(src);
+    let nosuch = result
+        .diagnostics
+        .iter()
+        .find(|d| d.message.contains("unknown element @nosuch"))
+        .expect("unknown element in an untaken @else");
+    assert_eq!((nosuch.line, nosuch.severity), (5, Severity::Error));
+    assert_eq!(nosuch.code, "unknown-element");
+    assert!(has_code(src, 6, "unknown-attribute"), "{:?}", codes(src));
+}
+
+#[test]
+fn uncalled_functions_and_empty_loops_are_checked() {
+    // A function body can call a function defined later in the file
+    let src = "@let a\n  @b\n  @nosuch\n@let b\n  @text hi\n@b\n";
+    let found = codes(src);
+    assert!(has_code(src, 3, "unknown-element"), "{:?}", found);
+    assert!(!found.iter().any(|(l, _, _)| *l == 2), "{:?}", found);
+    // A loop over an empty list, and its `@else` when the list isn't empty
+    let src = "@data $e []\n@each $x in $e\n  @bogus\n@each $y in 1..2\n  $y\n@else\n  @nope\n";
+    assert!(has_code(src, 3, "unknown-element"), "{:?}", codes(src));
+    assert!(has_code(src, 7, "unknown-element"), "{:?}", codes(src));
+    // Inline elements in code that doesn't run warn, as they do when it runs
+    let src = "@if false\n  Text with {@nosuch x}\n";
+    assert!(
+        codes(src).contains(&(2, "unknown-element", Severity::Warning)),
+        "{:?}",
+        codes(src)
+    );
+}
+
+#[test]
+fn names_used_only_in_code_that_does_not_run_are_used() {
+    let src = "@let color red\n@let card\n  @el hi\n@if false\n  @card [color $color]\n";
+    let found = codes(src);
+    assert!(
+        !found
+            .iter()
+            .any(|(_, c, _)| *c == "unused-variable" || *c == "unused-function"),
+        "{:?}",
+        found
+    );
+}
+
+#[test]
+fn unevaluated_names_include_functions_from_included_files() {
+    let dir = scratch_dir("static_include");
+    std::fs::write(dir.join("lib.hl"), "@let helper\n  @el\n    @children\n").unwrap();
+    std::fs::write(dir.join("bad.hl"), "@if false\n  @oops\n").unwrap();
+    let result = parser::parse_with_base(
+        "@let page-body\n  @helper x\n@include lib.hl\n@include bad.hl\n",
+        Some(&dir),
+    );
+    let unknown: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == "unknown-element")
+        .collect();
+    assert_eq!(unknown.len(), 1, "{:?}", result.diagnostics);
+    assert!(unknown[0].message.contains("@oops"), "{:?}", unknown);
+    assert!(unknown[0].message.contains("in bad.hl"), "{:?}", unknown);
+}
+
+#[test]
+fn a_bracket_in_text_does_not_open_a_list() {
+    let out = compile("@text Use [ to open\n@text [color red] next\n");
+    assert!(out.contains("Use [ to open"), "{}", out);
+    assert!(out.contains(">next<"), "{}", out);
+    let out = compile("@link /a[x,y] T\n");
+    assert!(out.contains("href=\"/a[x,y]\""), "{}", out);
+}
+
+#[test]
+fn a_chain_is_only_between_element_heads() {
+    let out = compile("@text Ask me > @support\n");
+    assert!(
+        out.contains("Ask me &gt; @support") || out.contains("Ask me > @support"),
+        "{}",
+        out
+    );
+}
+
+#[test]
+fn indented_lines_under_a_directive_without_a_body_are_errors() {
+    for src in [
+        "@page Home\n  @text x\n",
+        "@meta description A site\n  @text x\n",
+        "@include x.hl\n  @text x\n",
+        "@data $d [1]\n  @text x\n",
+        "@let x = 1\n  @text x\n",
+        "@let b [padding 4]\n  @text x\n",
+    ] {
+        assert!(
+            has_code(src, 2, "unexpected-body"),
+            "{}: {:?}",
+            src,
+            codes(src)
+        );
+    }
+    // Comments and blank lines may be indented anywhere
+    assert!(codes("@page Home\n  -- note\n\n@text x\n").is_empty());
+}
+
+#[test]
+fn verbatim_directives_take_a_line_or_a_body() {
+    let src = "@raw <hr>\n  <br>\n";
+    assert!(has_code(src, 1, "unexpected-body"), "{:?}", codes(src));
+    let src = "@style .a { color: red; }\n";
+    assert!(has_code(src, 1, "unexpected-argument"), "{:?}", codes(src));
+}
+
+#[test]
+fn multi_line_inline_json_object() {
+    let out = compile(
+        "@data $site {\n  \"name\": \"Demo\",\n  \"tags\": [\"a\", \"b\"]\n}\n@text $site.name\n",
+    );
+    assert!(out.contains(">Demo<"), "{}", out);
+}
+
+#[test]
+fn script_attribute_list_may_span_lines() {
+    let out = compile("@script [\n  type=module,\n  defer\n]\n  const a = [1, 2];\n");
+    assert!(out.contains("<script type=\"module\" defer>"), "{}", out);
+    assert!(out.contains("const a = [1, 2];"), "{}", out);
+}
+
+#[test]
+fn every_diagnostic_has_a_known_code() {
+    let src = "@page Home\n  @x\n@el [paddin 4, color #zz, opacity 3] > @link /x\n@let unused 1\n@if\n@else\n@each $x\n@text $undefinedd\n@let undefined 1\n@text $undefined\n";
+    let result = parser::parse(src);
+    assert!(!result.diagnostics.is_empty());
+    for d in &result.diagnostics {
+        assert!(
+            htmlang::diagnostic::code::ALL.contains(&d.code),
+            "unknown code {:?} for {}",
+            d.code,
+            d.message
+        );
+    }
+}

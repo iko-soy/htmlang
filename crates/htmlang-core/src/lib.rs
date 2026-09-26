@@ -1,8 +1,9 @@
 pub mod ast;
 pub mod codegen;
+pub mod diagnostic;
 pub mod expr;
 pub mod parser;
-mod syntax;
+pub mod syntax;
 pub mod vocab;
 
 #[cfg(test)]

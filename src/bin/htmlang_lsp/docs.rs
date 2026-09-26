@@ -213,7 +213,7 @@ pub(crate) fn hover(word: &str) -> Option<String> {
         if let Some(doc) = directive(name) {
             return Some(markdown(word, doc.summary, doc.usage));
         }
-        if htmlang::parser::known_directives().contains(&name) {
+        if htmlang::ast::directive(name).is_some() {
             return Some(markdown(word, "Directive.", ""));
         }
         let summary = element_summary(name)?;
@@ -350,6 +350,27 @@ mod tests {
                 vocab::is_style_attribute(doc.name),
                 "{} is not a style attribute",
                 doc.name
+            );
+        }
+    }
+
+    #[test]
+    fn every_directive_is_documented_once() {
+        let documented: Vec<&str> = DIRECTIVES.iter().map(|d| d.name).collect();
+        let compiled: Vec<&str> = htmlang::ast::DIRECTIVES.iter().map(|d| d.name).collect();
+        let mut a = documented.clone();
+        let mut b = compiled.clone();
+        a.sort_unstable();
+        b.sort_unstable();
+        assert_eq!(
+            a, b,
+            "the hover docs and the compiler's directive table differ"
+        );
+        for name in compiled {
+            assert!(
+                ElementKind::from_name(name).is_none(),
+                "@{} is both a directive and an element",
+                name
             );
         }
     }

@@ -6,6 +6,7 @@
 
 use std::path::Path;
 
+use htmlang::diagnostic::code;
 use htmlang::parser::{self, Severity};
 
 fn code_blocks(markdown: &str) -> Vec<String> {
@@ -48,12 +49,19 @@ fn problems(result: &parser::ParseResult) -> Vec<String> {
         .iter()
         .filter(|d| {
             d.severity == Severity::Error
-                || d.message.contains("unknown")
-                || d.message.contains("undefined variable")
-                || d.message.contains("is an HTML attribute")
-                || d.message.contains("no single root")
+                || [
+                    code::UNKNOWN_ELEMENT,
+                    code::UNKNOWN_ATTRIBUTE,
+                    code::UNKNOWN_PAGE_ATTRIBUTE,
+                    code::UNKNOWN_COLOR,
+                    code::INVALID_VALUE,
+                    code::UNDEFINED_VARIABLE,
+                    code::HTML_ATTRIBUTE_FORM,
+                    code::NO_SINGLE_ROOT,
+                ]
+                .contains(&d.code)
         })
-        .map(|d| format!("line {}: {}", d.line, d.message))
+        .map(|d| format!("line {}: {} [{}]", d.line, d.message, d.code))
         .collect()
 }
 

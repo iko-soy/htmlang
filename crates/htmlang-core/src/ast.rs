@@ -258,3 +258,84 @@ pub static TAGS: &[TagSpec] = &[
 pub fn renders_argument_as_text(kind: &ElementKind) -> bool {
     *kind == ElementKind::Text || kind.spec().is_some_and(|spec| spec.arg == TagArg::Text)
 }
+
+/// How a directive reads the rest of its line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArgGrammar {
+    /// Nothing may follow the name (`@style`).
+    None,
+    /// Free text, taken as written (`@include file.hl`, `@meta name value`).
+    Text,
+    /// An optional `[attributes]` list, then text (`@page [lang en] Title`).
+    AttrsText,
+    /// An expression (`@if $count > 2`).
+    Expression,
+    /// A name, then a value, `= EXPR`, `"text"`, `[attributes]` or the
+    /// parameters of a function (`@let`).
+    Definition,
+    /// Nothing, or `if EXPR` (`@else`, `@else if`).
+    Else,
+    /// `$item in LIST` or `$item, $index in LIST` (`@each`).
+    Loop,
+    /// `$name SOURCE`; inline JSON may span several lines (`@data`).
+    Data,
+}
+
+/// What the lines indented under a directive or element are.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BodyKind {
+    /// Nothing: indented lines are an error.
+    None,
+    /// htmlang: elements, text and directives.
+    Htmlang,
+    /// Foreign text (CSS, HTML, JavaScript, Markdown), kept exactly as
+    /// written: nothing in it is parsed, and `--` is not a comment.
+    Verbatim,
+}
+
+/// A directive: a `@name` that isn't an element. The syntax tree
+/// (`syntax.rs`), the evaluator, the formatter and the editor tools all
+/// read the directives' shapes from this table.
+#[derive(Debug, PartialEq)]
+pub struct DirectiveSpec {
+    /// Name in htmlang source, without the `@`.
+    pub name: &'static str,
+    pub args: ArgGrammar,
+    pub body: BodyKind,
+    /// A verbatim directive may give its content as the rest of its line
+    /// instead of an indented body (`@raw <hr>`, `@markdown file.md`).
+    pub one_line: bool,
+}
+
+/// Every directive.
+#[rustfmt::skip]
+pub static DIRECTIVES: &[DirectiveSpec] = &[
+    DirectiveSpec { name: "page", args: ArgGrammar::AttrsText, body: BodyKind::None, one_line: false },
+    DirectiveSpec { name: "let", args: ArgGrammar::Definition, body: BodyKind::Htmlang, one_line: false },
+    DirectiveSpec { name: "include", args: ArgGrammar::Text, body: BodyKind::None, one_line: false },
+    DirectiveSpec { name: "data", args: ArgGrammar::Data, body: BodyKind::None, one_line: false },
+    DirectiveSpec { name: "meta", args: ArgGrammar::Text, body: BodyKind::None, one_line: false },
+    DirectiveSpec { name: "if", args: ArgGrammar::Expression, body: BodyKind::Htmlang, one_line: false },
+    DirectiveSpec { name: "else", args: ArgGrammar::Else, body: BodyKind::Htmlang, one_line: false },
+    DirectiveSpec { name: "each", args: ArgGrammar::Loop, body: BodyKind::Htmlang, one_line: false },
+    DirectiveSpec { name: "style", args: ArgGrammar::None, body: BodyKind::Verbatim, one_line: false },
+    DirectiveSpec { name: "head", args: ArgGrammar::None, body: BodyKind::Verbatim, one_line: false },
+    DirectiveSpec { name: "raw", args: ArgGrammar::Text, body: BodyKind::Verbatim, one_line: true },
+    DirectiveSpec { name: "markdown", args: ArgGrammar::Text, body: BodyKind::Verbatim, one_line: true },
+];
+
+/// The directive named `name` (without the `@`).
+pub fn directive(name: &str) -> Option<&'static DirectiveSpec> {
+    DIRECTIVES.iter().find(|d| d.name == name)
+}
+
+/// What the lines indented under `@name` are: the directive's body kind,
+/// or an element's (`@script` holds JavaScript, every other element
+/// htmlang).
+pub fn body_kind(name: &str) -> BodyKind {
+    match directive(name) {
+        Some(spec) => spec.body,
+        None if name == "script" => BodyKind::Verbatim,
+        None => BodyKind::Htmlang,
+    }
+}

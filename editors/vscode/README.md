@@ -8,9 +8,11 @@ Syntax highlighting, snippets, and language server support for
 - **Syntax highlighting**: `@` elements and directives, `$variables`,
   `[attribute]` lists with state and media prefixes, `key=value` HTML
   attributes, `{@inline}` elements, colors, numbers and `-- comments`.
-- **Diagnostics**: parse errors, unknown elements and attributes with "did
-  you mean" suggestions, undefined and unused definitions, and accessibility
-  warnings.
+- **Diagnostics**: the compiler's own, each with its code: parse errors,
+  unknown elements and attributes with "did you mean" suggestions, undefined
+  and unused definitions, and accessibility warnings. The whole file is
+  checked, including branches and functions that don't run, and relative
+  `@include` and `@data` paths resolve from the file's folder.
 - **Completion** of elements, directives, layout attributes, CSS properties,
   HTML attributes, prefixes, variables and functions. It triggers on `@`,
   `$`, `[` and `,`.
@@ -18,9 +20,12 @@ Syntax highlighting, snippets, and language server support for
   properties link to MDN), function signatures, variable values, and color
   swatches.
 - **Navigation**: go to definition, find references and rename for
-  `$variables`, bundles and `@let` functions. `@include` paths are links.
-- **Code actions**: fixes for common diagnostics, removing unused definitions,
-  and extracting a selection into a `@let` function or attribute bundle.
+  `$variables`, bundles and `@let` functions. `@include`, `@markdown` and
+  `@data` file paths are links.
+- **Code actions**: fixes keyed on diagnostic codes (replace a misspelled
+  name, add a missing `alt` or `type`, include the file that defines an
+  unknown function), removing unused definitions, and extracting a selection
+  into a `@let` function or attribute bundle.
 - **Outline and symbols**: the document outline, and `Ctrl-T` workspace
   search across every `.hl` file.
 - **Formatting**: `Format Document` and `Format Selection` use the same

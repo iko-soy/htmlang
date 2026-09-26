@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use htmlang::syntax::DefinitionKind;
 use serde_json::json;
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
@@ -16,6 +17,7 @@ mod docs;
 mod hover;
 mod navigation;
 mod state;
+mod tree;
 
 use analysis::{
     code_actions, find_colors, folding_ranges, get_signature_help, inlay_hints, semantic_tokens,
@@ -55,7 +57,8 @@ impl Backend {
     /// Replace the stored document with a new entry, scheduling a debounced
     /// diagnostic publish and refreshing the workspace symbol index.
     async fn set_doc(&self, uri: Url, text: String, version: i32) {
-        let entry = Arc::new(DocumentEntry::new(text, version));
+        let base = state::base_dir(&uri);
+        let entry = Arc::new(DocumentEntry::new(text, version, base));
         self.documents
             .write()
             .await
@@ -137,8 +140,11 @@ fn build_diagnostics(text: &str, result: &htmlang::parser::ParseResult) -> Vec<D
             Diagnostic {
                 range: Range::new(Position::new(line, col_start), Position::new(line, col_end)),
                 severity: Some(severity),
+                code: Some(NumberOrString::String(d.code.into())),
                 source: Some("htmlang".into()),
                 message: d.message.clone(),
+                data: (d.subject.is_some() || d.suggestion.is_some())
+                    .then(|| json!({ "subject": d.subject, "suggestion": d.suggestion })),
                 ..Default::default()
             }
         })
@@ -312,7 +318,7 @@ impl LanguageServer for Backend {
             for change in &params.content_changes {
                 apply_change(&mut text, change, utf8);
             }
-            let entry = Arc::new(DocumentEntry::new(text, version));
+            let entry = Arc::new(DocumentEntry::new(text, version, state::base_dir(&uri)));
             docs.insert(uri.clone(), entry.clone());
             entry
         };
@@ -373,14 +379,11 @@ impl LanguageServer for Backend {
         };
         let text = &doc.text;
 
-        let lines: Vec<&str> = text.lines().collect();
-        if let Some(line) = lines.get(pos.line as usize) {
-            let trimmed = line.trim_start();
-            if trimmed.starts_with("@include ") {
-                let items = path_completions(uri, pos);
-                if !items.is_empty() {
-                    return Ok(Some(CompletionResponse::Array(items)));
-                }
+        // File names after `@include`
+        if tree::node_at(&doc.tree(), pos.line).is_some_and(|node| node.is_directive("include")) {
+            let items = path_completions(uri, pos);
+            if !items.is_empty() {
+                return Ok(Some(CompletionResponse::Array(items)));
             }
         }
 
@@ -475,7 +478,13 @@ impl LanguageServer for Backend {
         let Some(doc) = self.doc(&uri).await else {
             return Ok(None);
         };
-        let actions = code_actions(&doc.text, &params.range, &params.context.diagnostics, &uri);
+        let actions = code_actions(
+            &doc.text,
+            &doc.tree(),
+            &params.range,
+            &params.context.diagnostics,
+            &uri,
+        );
         Ok(if actions.is_empty() {
             None
         } else {
@@ -534,7 +543,7 @@ impl LanguageServer for Backend {
         let Some(doc) = self.doc(uri).await else {
             return Ok(None);
         };
-        let ranges = folding_ranges(&doc.text);
+        let ranges = folding_ranges(&doc.tree());
         Ok(if ranges.is_empty() {
             None
         } else {
@@ -551,7 +560,7 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let parse = doc.parse();
-        let tokens = semantic_tokens(&doc.text, &parse);
+        let tokens = semantic_tokens(&doc.text, &doc.tree(), &parse);
         Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
             result_id: None,
             data: tokens,
@@ -563,7 +572,7 @@ impl LanguageServer for Backend {
         let Some(doc) = self.doc(uri).await else {
             return Ok(None);
         };
-        let hints = inlay_hints(&doc.text);
+        let hints = inlay_hints(&doc.text, &doc.tree());
         Ok(if hints.is_empty() { None } else { Some(hints) })
     }
 
@@ -686,7 +695,6 @@ impl LanguageServer for Backend {
         let Some(doc) = self.doc(&uri).await else {
             return Ok(None);
         };
-        let text = &doc.text;
 
         let Ok(this_path) = uri.to_file_path() else {
             return Ok(None);
@@ -695,54 +703,26 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
+        // The files `@include`, `@markdown` and `@data` name
         let mut links = Vec::new();
-        for (i, raw_line) in text.lines().enumerate() {
-            let trimmed = raw_line.trim_start();
-            let indent = raw_line.len() - trimmed.len();
-            let (prefix, filename) = if let Some(rest) = trimmed.strip_prefix("@include ") {
-                ("@include ", rest)
-            } else {
-                continue;
+        doc.tree().walk(&mut |node| {
+            let Some((name, range)) = tree::file_argument(node) else {
+                return;
             };
-
-            let name_token: &str = filename
-                .trim_start_matches('"')
-                .split(|c: char| c.is_whitespace() || c == ',')
-                .next()
-                .unwrap_or("")
-                .trim_end_matches('"');
-            if name_token.is_empty() {
-                continue;
-            }
-            if name_token.contains('*') || name_token.contains('?') {
-                continue;
-            }
-
-            let target = dir.join(name_token);
+            let target = dir.join(&name);
             if !target.exists() {
-                continue;
+                return;
             }
             let Ok(target_uri) = Url::from_file_path(&target) else {
-                continue;
+                return;
             };
-
-            let scan_from = indent + prefix.len();
-            let Some(rel_start) = raw_line[scan_from..].find(name_token) else {
-                continue;
-            };
-            let start_col = (scan_from + rel_start) as u32;
-            let end_col = start_col + name_token.len() as u32;
-
             links.push(DocumentLink {
-                range: Range::new(
-                    Position::new(i as u32, start_col),
-                    Position::new(i as u32, end_col),
-                ),
+                range,
                 target: Some(target_uri),
-                tooltip: Some(format!("Open {}", name_token)),
+                tooltip: Some(format!("Open {}", name)),
                 data: None,
             });
-        }
+        });
 
         Ok(if links.is_empty() { None } else { Some(links) })
     }
@@ -755,65 +735,17 @@ impl LanguageServer for Backend {
         let text = &doc.text;
         let lines: Vec<&str> = text.lines().collect();
 
-        #[derive(Clone)]
-        struct Def {
-            line: u32,
-            col: u32,
-            name: String,
-            kind: &'static str,
-        }
-        let mut defs: Vec<Def> = Vec::new();
-
-        for (i, line) in lines.iter().enumerate() {
-            let trimmed = line.trim_start();
-            if let Some(rest) = trimmed.strip_prefix("@let ") {
-                // `rest` is a suffix of `line`, so the name's column is
-                // however much of the line precedes it.
-                let col = (line.len() - rest.trim_start().len()) as u32;
-                let rest = rest.trim();
-                if let Some(name) = rest.split_whitespace().next() {
-                    let has_body = lines
-                        .get(i + 1)
-                        .map(|l| l.starts_with("  ") || l.starts_with('\t'))
-                        .unwrap_or(false);
-                    let value_after_name = rest[name.len()..].trim_start();
-                    if has_body
-                        && (value_after_name.is_empty() || value_after_name.starts_with('$'))
-                    {
-                        defs.push(Def {
-                            line: i as u32,
-                            col,
-                            name: name.to_string(),
-                            kind: "fn",
-                        });
-                    } else if value_after_name.starts_with('[') {
-                        defs.push(Def {
-                            line: i as u32,
-                            col,
-                            name: name.to_string(),
-                            kind: "define",
-                        });
-                    } else {
-                        defs.push(Def {
-                            line: i as u32,
-                            col,
-                            name: name.to_string(),
-                            kind: "let",
-                        });
-                    }
-                }
-            }
-        }
-
+        let defs = tree::definitions(text);
+        let verbatim = tree::verbatim_lines(&doc.tree());
         let mut lenses = Vec::with_capacity(defs.len());
         for def in &defs {
             let mut locations: Vec<Location> = Vec::new();
             let needle = match def.kind {
-                "fn" => format!("@{}", def.name),
+                DefinitionKind::Function => format!("@{}", def.name),
                 _ => format!("${}", def.name),
             };
             for (i, line) in lines.iter().enumerate() {
-                if i as u32 == def.line {
+                if i as u32 == def.line || verbatim.contains(&(i as u32)) {
                     continue;
                 }
                 let mut from = 0;
@@ -848,7 +780,7 @@ impl LanguageServer for Backend {
             // The locations are sent precomputed because a reference query at
             // the definition site would resolve the `@let` keyword instead.
             let line_pos = Position::new(def.line, 0);
-            let name_pos = Position::new(def.line, def.col);
+            let name_pos = def.name_range.start;
             lenses.push(CodeLens {
                 range: Range::new(line_pos, line_pos),
                 command: Some(Command {

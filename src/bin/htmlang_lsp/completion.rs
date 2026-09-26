@@ -1,4 +1,5 @@
 use htmlang::ast::ElementKind;
+use htmlang::syntax::DefinitionKind;
 use htmlang::vocab;
 use tower_lsp::lsp_types::*;
 
@@ -137,10 +138,11 @@ fn element_completions(range: Range) -> Vec<CompletionItem> {
         .collect()
 }
 
-/// Directives, from the parser's directive list.
+/// Directives, from the compiler's directive table.
 fn directive_completions(range: Range) -> Vec<CompletionItem> {
-    htmlang::parser::known_directives()
+    htmlang::ast::DIRECTIVES
         .iter()
+        .map(|spec| spec.name)
         .map(|name| {
             let label = format!("@{}", name);
             let detail = docs::directive(name).map_or("Directive", |d| d.summary);
@@ -849,31 +851,30 @@ fn variable_completions(text: &str, range: Range) -> Vec<CompletionItem> {
         ));
     }
 
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix("@let ")
-            && let Some((name, value)) = rest.trim().split_once(' ')
-        {
-            let value = value.trim();
-            if value.starts_with('[') {
-                // Attribute bundle
+    for def in crate::tree::definitions(text) {
+        let label = format!("${}", def.name);
+        match def.kind {
+            DefinitionKind::Bundle => {
                 items.push(item(
-                    &format!("${}", name),
+                    &label,
                     CompletionItemKind::CONSTANT,
                     "Attribute bundle",
-                    &format!("${}", name),
-                    range,
-                ));
-            } else if !value.starts_with('$') {
-                // Scalar variable (skip function params like $param)
-                items.push(item(
-                    &format!("${}", name),
-                    CompletionItemKind::VARIABLE,
-                    &format!("= {}", value),
-                    &format!("${}", name),
+                    &label,
                     range,
                 ));
             }
+            DefinitionKind::Value => {
+                let value = def.value.unwrap_or_default();
+                let detail = format!("= {}", value.trim_start_matches("= "));
+                items.push(item(
+                    &label,
+                    CompletionItemKind::VARIABLE,
+                    &detail,
+                    &label,
+                    range,
+                ));
+            }
+            DefinitionKind::Function => {}
         }
     }
 
@@ -882,62 +883,53 @@ fn variable_completions(text: &str, range: Range) -> Vec<CompletionItem> {
 
 fn function_completions(text: &str, range: Range) -> Vec<CompletionItem> {
     let mut items = Vec::new();
-    let all_lines: Vec<&str> = text.lines().collect();
-
-    for (idx, line) in all_lines.iter().enumerate() {
-        let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix("@let ") {
-            let parts: Vec<&str> = rest.split_whitespace().collect();
-            if let Some(name) = parts.first() {
-                // Only suggest as function if it has params or an indented body
-                let has_params = parts.len() > 1 && parts[1..].iter().any(|p| p.starts_with('$'));
-                let has_body = all_lines
-                    .get(idx + 1)
-                    .map(|l| l.starts_with("  ") || l.starts_with('\t'))
-                    .unwrap_or(false);
-                if !has_params && !has_body {
-                    continue;
-                }
-                let params: Vec<&str> = parts[1..]
-                    .iter()
-                    .map(|p| p.strip_prefix('$').unwrap_or(p))
-                    .collect();
-                let detail = if params.is_empty() {
-                    "Function".to_string()
-                } else {
-                    format!("Function({})", params.join(", "))
-                };
-                // Generate snippet with tab stops for parameters
-                let insert_text = if params.is_empty() {
-                    format!("@{}", name)
-                } else {
-                    let param_snippets: Vec<String> = params
-                        .iter()
-                        .enumerate()
-                        .map(|(i, p)| {
-                            let p_name = p.split('=').next().unwrap_or(p);
-                            let default = p.split('=').nth(1).unwrap_or(p_name);
-                            format!("{} ${{{}:{}}}", p_name, i + 1, default)
-                        })
-                        .collect();
-                    format!("@{} [{}]", name, param_snippets.join(", "))
-                };
-                let mut ci = CompletionItem {
-                    label: format!("@{}", name),
-                    kind: Some(CompletionItemKind::FUNCTION),
-                    detail: Some(detail),
-                    text_edit: Some(CompletionTextEdit::Edit(TextEdit {
-                        range,
-                        new_text: insert_text,
-                    })),
-                    ..Default::default()
-                };
-                if !params.is_empty() {
-                    ci.insert_text_format = Some(tower_lsp::lsp_types::InsertTextFormat::SNIPPET);
-                }
-                items.push(ci);
-            }
+    for def in crate::tree::definitions(text) {
+        if def.kind != DefinitionKind::Function {
+            continue;
         }
+        let name = &def.name;
+        let params: Vec<String> = def
+            .params
+            .iter()
+            .map(|p| match &p.default {
+                Some(default) => format!("{}={}", p.name, default),
+                None => p.name.clone(),
+            })
+            .collect();
+        let detail = if params.is_empty() {
+            "Function".to_string()
+        } else {
+            format!("Function({})", params.join(", "))
+        };
+        // A snippet with a tab stop for each parameter
+        let insert_text = if params.is_empty() {
+            format!("@{}", name)
+        } else {
+            let param_snippets: Vec<String> = def
+                .params
+                .iter()
+                .enumerate()
+                .map(|(i, p)| {
+                    let default = p.default.as_deref().unwrap_or(&p.name);
+                    format!("{} ${{{}:{}}}", p.name, i + 1, default)
+                })
+                .collect();
+            format!("@{} [{}]", name, param_snippets.join(", "))
+        };
+        let mut ci = CompletionItem {
+            label: format!("@{}", name),
+            kind: Some(CompletionItemKind::FUNCTION),
+            detail: Some(detail),
+            text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                range,
+                new_text: insert_text,
+            })),
+            ..Default::default()
+        };
+        if !params.is_empty() {
+            ci.insert_text_format = Some(tower_lsp::lsp_types::InsertTextFormat::SNIPPET);
+        }
+        items.push(ci);
     }
 
     items
@@ -997,8 +989,12 @@ mod tests {
         }
         assert!(elements.iter().any(|i| i.label == "@spacer"));
         let directives = directive_completions(range);
-        for name in htmlang::parser::known_directives() {
-            assert!(directives.iter().any(|i| i.label == format!("@{}", name)));
+        for spec in htmlang::ast::DIRECTIVES {
+            assert!(
+                directives
+                    .iter()
+                    .any(|i| i.label == format!("@{}", spec.name))
+            );
         }
     }
 

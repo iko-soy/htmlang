@@ -1,6 +1,8 @@
 use tower_lsp::lsp_types::*;
 
-use crate::docs;
+use htmlang::syntax::DefinitionKind;
+
+use crate::{docs, tree};
 
 pub(crate) fn hover_at(text: &str, position: Position) -> Option<Hover> {
     let lines: Vec<&str> = text.lines().collect();
@@ -46,104 +48,69 @@ pub(crate) fn is_word_byte(c: u8) -> bool {
 }
 
 fn hover_variable(text: &str, name: &str) -> Option<String> {
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix("@let ")
-            && let Some((n, v)) = rest.trim().split_once(' ')
-            && n == name
-        {
-            return Some(format!("**${}** = `{}`", name, v.trim()));
+    let defs = tree::definitions(text);
+    if let Some(def) = defs.iter().find(|d| d.name == name) {
+        match def.kind {
+            DefinitionKind::Value => {
+                let value = def.value.as_deref().unwrap_or("");
+                return Some(format!("**${}** = `{}`", name, value));
+            }
+            DefinitionKind::Bundle => {
+                return Some(format!(
+                    "**${}** \u{2014} Attribute bundle\n\n`[{}]`",
+                    name,
+                    def.value.as_deref().unwrap_or("")
+                ));
+            }
+            DefinitionKind::Function => {}
         }
     }
-
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix("@let ") {
-            let rest = rest.trim();
-            // Attribute bundle: @let name [...]
-            if let Some(bracket) = rest.find('[') {
-                let def_name = rest[..bracket].trim();
-                if def_name == name {
-                    return Some(format!(
-                        "**${}** \u{2014} Attribute bundle\n\n`{}`",
-                        name, trimmed
-                    ));
-                }
-            }
-            // Function parameter: @let fn-name $param (with body)
-            let parts: Vec<&str> = rest.split_whitespace().collect();
-            if let Some(fn_name) = parts.first() {
-                for param in &parts[1..] {
-                    let p = param.strip_prefix('$').unwrap_or(param);
-                    if p == name {
-                        return Some(format!(
-                            "**${}** \u{2014} Parameter of `@{}`",
-                            name, fn_name
-                        ));
-                    }
-                }
-            }
-        }
-    }
-
-    None
+    // A function's parameter
+    defs.iter()
+        .find(|d| d.params.iter().any(|p| p.name == name))
+        .map(|d| format!("**${}** \u{2014} Parameter of `@{}`", name, d.name))
 }
 
 fn hover_user_fn(text: &str, name: &str) -> Option<String> {
+    let def = tree::definitions(text)
+        .into_iter()
+        .find(|d| d.kind == DefinitionKind::Function && d.name == name)?;
+
+    // Comment lines right above the definition are its documentation
     let lines: Vec<&str> = text.lines().collect();
-    for (i, line) in lines.iter().enumerate() {
-        let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix("@let ") {
-            let parts: Vec<&str> = rest.split_whitespace().collect();
-            if parts.first() == Some(&name) {
-                let params = &parts[1..];
-
-                // Collect doc-comment lines above the definition (lines starting with --)
-                let mut doc_lines: Vec<&str> = Vec::new();
-                let mut j = i;
-                while j > 0 {
-                    j -= 1;
-                    let prev = lines[j].trim();
-                    if let Some(comment) = prev.strip_prefix("-- ") {
-                        doc_lines.push(comment);
-                    } else if let Some(comment) = prev.strip_prefix("--") {
-                        doc_lines.push(comment);
-                    } else {
-                        break;
-                    }
-                }
-                doc_lines.reverse();
-
-                let doc_str = if doc_lines.is_empty() {
-                    String::new()
-                } else {
-                    format!("\n\n{}", doc_lines.join("\n"))
-                };
-
-                // Format params showing defaults
-                let params_str = if params.is_empty() {
-                    String::new()
-                } else {
-                    let formatted: Vec<String> = params
-                        .iter()
-                        .map(|p| {
-                            if p.contains('=') {
-                                let (name, default) = p.split_once('=').unwrap();
-                                format!("{} (default: {})", name, default)
-                            } else {
-                                p.to_string()
-                            }
-                        })
-                        .collect();
-                    format!("\n\nParameters: {}", formatted.join(", "))
-                };
-
-                return Some(format!(
-                    "**@{}** \u{2014} User function{}{}",
-                    name, params_str, doc_str
-                ));
-            }
+    let mut doc_lines: Vec<&str> = Vec::new();
+    let mut j = def.line as usize;
+    while j > 0 {
+        j -= 1;
+        let prev = lines[j].trim();
+        match prev.strip_prefix("--") {
+            Some(comment) => doc_lines.push(comment.strip_prefix(' ').unwrap_or(comment)),
+            None => break,
         }
     }
-    None
+    doc_lines.reverse();
+    let doc_str = if doc_lines.is_empty() {
+        String::new()
+    } else {
+        format!("\n\n{}", doc_lines.join("\n"))
+    };
+
+    let params_str = if def.params.is_empty() {
+        String::new()
+    } else {
+        let formatted: Vec<String> = def
+            .params
+            .iter()
+            .map(|p| match &p.default {
+                Some(default) => format!("${} (default: {})", p.name, default),
+                None => format!("${}", p.name),
+            })
+            .collect();
+        format!("\n\nParameters: {}", formatted.join(", "))
+    };
+
+    Some(format!(
+        "**@{}** \u{2014} User function{}{}",
+        name, params_str, doc_str
+    ))
 }

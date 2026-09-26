@@ -145,3 +145,10 @@ The VS Code extension in [`editors/vscode`](editors/vscode) provides syntax
 highlighting, snippets, and the language server (`htmlang-lsp`). The server
 gives diagnostics, completions, hover documentation, go to definition, rename
 and formatting.
+
+The compiler, the formatter and the language server read a file with the
+same parser, so the editor sees exactly what the compiler sees, relative
+`@include` and `@data` paths included. Every diagnostic has a stable code
+(`error[unknown-element]` on the command line, a `code` field in
+`--format json`), and the whole file is checked, including branches and
+functions that don't run.

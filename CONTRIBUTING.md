@@ -19,14 +19,23 @@ Linux, macOS, and Windows. Your change should pass all three.
 ## Repository layout
 
 - `crates/htmlang-core/` — parser, AST, code generator. No I/O lives here.
-  - `ast.rs` — the element kinds; every plain HTML element is one row in `TAGS`.
+  - `syntax.rs` — the syntax tree: every line as written, with spans. The
+    compiler evaluates it, the formatter prints it back, and the language
+    server takes definitions, directives and verbatim bodies from it.
+  - `parser.rs` — evaluates the tree: definitions, data, loops and
+    conditions, and the checks over code that doesn't run.
+  - `diagnostic.rs` — `Diagnostic` and the stable diagnostic codes.
+  - `ast.rs` — the element kinds; every plain HTML element is one row in
+    `TAGS`, and every directive one row in `DIRECTIVES` (its argument, its
+    kind of body, and whether it takes the rest of the line).
   - `vocab.rs` — the attribute vocabulary (htmlang attributes, CSS properties,
     HTML attributes) and the state/media prefixes.
   - `expr.rs` — the expression language for conditions and computed values.
   - `std.hl` — the standard library, written in htmlang and loaded before
     every file.
 - `crates/htmlang-wasm/` — thin wrapper exposing `compile` to the web playground.
-- `src/` — CLI, dev server and formatter.
+- `src/` — CLI, dev server and formatter (`fmt.rs`, which prints the syntax
+  tree back with its comments and blank lines).
 - `src/bin/htmlang_lsp/` — language server binary (`htmlang-lsp`). Its
   completions come from the compiler's tables; hover and completion text live
   in `docs.rs`.
@@ -35,6 +44,8 @@ Linux, macOS, and Windows. Your change should pass all three.
 - `tests/regressions.rs` — one test per fixed bug.
 - `tests/docs.rs` — compiles every example in `DESIGN.md` and `README.md`,
   and every page in `examples/`.
+- `tests/fmt.rs` — formats every example and snapshot input: the result is
+  stable, compiles to the same HTML and keeps every comment.
 - `examples/` — complete pages: a landing page, a blog, a docs page, and a
   tour of the whole language (`demo.hl`).
 
@@ -57,7 +68,13 @@ Linux, macOS, and Windows. Your change should pass all three.
 
 - Prefer enum-based ASTs and pattern matching over stringly-typed dispatch.
 - Keep `@` prefixes and bracket-attribute syntax consistent with existing
-  directives. Add `KNOWN_DIRECTIVES` entries when you add a new `@foo`.
+  directives. A new `@foo` is a row in `ast::DIRECTIVES`; the parser, the
+  formatter and the language server read that table, and `tests/editor.rs`
+  fails when the VS Code grammar's word lists drift from it.
+- Every diagnostic has a code from `diagnostic::code`; add one there when no
+  existing code fits, and key tool behavior (quick fixes, tests) on the code
+  rather than on the message. Put the name the diagnostic is about in
+  `subject` and a replacement in `suggestion`.
 - Diagnostics should include `line` and, when practical, `column` and a
   `source_line` excerpt. Use `Severity::Help` for suggestions, not `Warning`.
 - No unwrap() on parsed user input. Use `Result<_, ParseError>` and record a

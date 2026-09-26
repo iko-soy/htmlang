@@ -1,30 +1,15 @@
 use std::collections::{HashMap, HashSet};
-use std::fmt;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use crate::ast::*;
-use crate::syntax::{self, Syntax};
+use crate::diagnostic::code;
+pub use crate::diagnostic::{Diagnostic, Severity};
+use crate::syntax::{self, DirectiveArgs, LetForm, NodeKind, Segment, Tree};
 
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Severity {
-    Error,
-    Warning,
-    Info,
-    Help,
-}
-
-#[derive(Debug, Clone)]
-pub struct Diagnostic {
-    pub line: usize,
-    pub column: Option<usize>,
-    pub message: String,
-    pub severity: Severity,
-    pub source_line: Option<String>,
-}
 
 pub struct ParseResult {
     pub document: Document,
@@ -32,17 +17,8 @@ pub struct ParseResult {
     pub included_files: Vec<PathBuf>,
 }
 
-#[derive(Debug)]
-struct ParseError {
-    line: usize,
-    message: String,
-}
-
-impl fmt::Display for ParseError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "line {}: {}", self.line, self.message)
-    }
-}
+/// An error that stops one line from being evaluated.
+type ParseError = Diagnostic;
 
 // ---------------------------------------------------------------------------
 // Internal types
@@ -52,7 +28,7 @@ impl fmt::Display for ParseError {
 struct FnDef {
     params: Vec<String>,
     defaults: HashMap<String, String>,
-    body: Vec<Syntax>,
+    body: Vec<syntax::Node>,
 }
 
 struct ParseContext {
@@ -90,6 +66,18 @@ struct ParseContext {
     fn_lines: HashMap<String, usize>,
     /// Line numbers of attribute bundle definitions (name -> line)
     define_lines: HashMap<String, usize>,
+    /// Syntax nodes evaluated at least once, by id.
+    visited: HashSet<usize>,
+    /// The id the next parsed tree starts at, so ids are unique across
+    /// the file, its includes and the standard library.
+    next_id: usize,
+    /// The file's tree and those of the files it includes, with the
+    /// include chain that leads to each, for the checks of code that never
+    /// runs.
+    trees: Vec<(Rc<Tree>, Option<String>)>,
+    /// Every function defined anywhere in the file or the files it
+    /// includes, whether or not its definition runs.
+    namespace: HashSet<String>,
 }
 
 /// Evaluates a syntax tree (see `syntax.rs`) into the document's nodes.
@@ -104,13 +92,14 @@ impl ParseContext {
         match result {
             Ok(value) => Some(value),
             Err(message) => {
-                self.diagnostics.push(Diagnostic {
-                    line,
-                    column: None,
-                    message: format!("invalid expression: {}", message),
-                    severity: Severity::Error,
-                    source_line: Some(src.to_string()),
-                });
+                self.diagnostics.push(
+                    Diagnostic::error(
+                        code::INVALID_EXPRESSION,
+                        line,
+                        format!("invalid expression: {}", message),
+                    )
+                    .source(src),
+                );
                 None
             }
         }
@@ -120,6 +109,31 @@ impl ParseContext {
     fn condition(&mut self, src: &str, line: usize) -> bool {
         self.eval(src, line).is_some_and(|value| value.truthy())
     }
+
+    /// Parse a file's text into a tree whose ids don't clash with the
+    /// trees parsed before it.
+    fn parse_tree(&mut self, text: &str) -> Rc<Tree> {
+        let tree = syntax::parse_from(text, self.next_id);
+        self.next_id = tree.end_id;
+        Rc::new(tree)
+    }
+
+    /// Read a file (once), relative to the current file.
+    fn read_file(&mut self, resolved: &Path) -> std::io::Result<String> {
+        if let Some(cached) = self.file_cache.get(resolved) {
+            return Ok(cached.clone());
+        }
+        let text = std::fs::read_to_string(resolved)?;
+        self.file_cache.insert(resolved.to_path_buf(), text.clone());
+        Ok(text)
+    }
+
+    fn resolve(&self, filename: &str) -> PathBuf {
+        match &self.base_path {
+            Some(base) => base.join(filename),
+            None => PathBuf::from(filename),
+        }
+    }
 }
 
 /// The standard library (`std.hl`): components and bundles defined in
@@ -127,7 +141,9 @@ impl ParseContext {
 const PRELUDE: &str = include_str!("std.hl");
 
 fn load_prelude(ctx: &mut ParseContext) {
-    let _ = Evaluator.eval_block(&syntax::parse(PRELUDE), ctx);
+    let tree = ctx.parse_tree(PRELUDE);
+    collect_namespace(&tree.nodes, None, &mut HashSet::new(), ctx);
+    let _ = Evaluator.eval_block(&tree.nodes, ctx);
     // Library definitions aren't the file's own: never report them unused.
     ctx.fn_lines.clear();
     ctx.define_lines.clear();
@@ -139,7 +155,6 @@ pub fn parse(input: &str) -> ParseResult {
 }
 
 pub fn parse_with_base(input: &str, base_path: Option<&Path>) -> ParseResult {
-    let tree = syntax::parse(input);
     let mut ctx = ParseContext {
         current_line: 0,
         scoped_functions: std::collections::HashSet::new(),
@@ -166,9 +181,23 @@ pub fn parse_with_base(input: &str, base_path: Option<&Path>) -> ParseResult {
         let_lines: HashMap::new(),
         fn_lines: HashMap::new(),
         define_lines: HashMap::new(),
+        visited: HashSet::new(),
+        next_id: 0,
+        trees: Vec::new(),
+        namespace: HashSet::new(),
     };
     load_prelude(&mut ctx);
-    let nodes = Evaluator.eval_block(&tree, &mut ctx);
+    let tree = ctx.parse_tree(input);
+    ctx.diagnostics.extend(tree.diagnostics.iter().cloned());
+    ctx.trees.push((tree.clone(), None));
+    collect_namespace(
+        &tree.nodes,
+        base_path.map(Path::to_path_buf),
+        &mut HashSet::new(),
+        &mut ctx,
+    );
+    let nodes = Evaluator.eval_block(&tree.nodes, &mut ctx);
+    check_unevaluated(&mut ctx);
     validate_tree(&nodes, None, &mut ctx.diagnostics);
     check_unused(&mut ctx);
     ParseResult {
@@ -191,458 +220,589 @@ pub fn parse_with_base(input: &str, base_path: Option<&Path>) -> ParseResult {
 }
 
 // ---------------------------------------------------------------------------
-// Preprocessing: strip comments/blanks, collapse @raw blocks
+// Code that never runs: an untaken branch, an uncalled function, a loop over
+// an empty list
 // ---------------------------------------------------------------------------
+
+/// Collect the functions defined anywhere in `nodes` and in the files they
+/// include (by a literal path), into `ctx.namespace`.
+fn collect_namespace(
+    nodes: &[syntax::Node],
+    base: Option<PathBuf>,
+    seen: &mut HashSet<PathBuf>,
+    ctx: &mut ParseContext,
+) {
+    let mut includes = Vec::new();
+    for node in nodes {
+        node.walk(&mut |node| match node.directive().map(|d| &d.args) {
+            Some(DirectiveArgs::Let(def)) if matches!(def.form, LetForm::Function(_)) => {
+                ctx.namespace.insert(def.name.clone());
+            }
+            Some(DirectiveArgs::Text(Some(path))) if node.is_directive("include") => {
+                includes.push(path.raw.clone());
+            }
+            _ => {}
+        });
+    }
+    for path in includes {
+        let path = path.trim_matches('"');
+        if path.contains('$') {
+            continue;
+        }
+        let resolved = match &base {
+            Some(base) => base.join(path),
+            None => PathBuf::from(path),
+        };
+        if !seen.insert(resolved.clone()) {
+            continue;
+        }
+        let Ok(text) = ctx.read_file(&resolved) else {
+            continue;
+        };
+        let tree = syntax::parse(&text);
+        let parent = resolved.parent().map(Path::to_path_buf);
+        collect_namespace(&tree.nodes, parent, seen, ctx);
+    }
+}
+
+/// Check the lines that were never evaluated: element and function names,
+/// and the attributes of built-in elements (those that don't depend on a
+/// variable). Names that come from data are only checked when evaluated.
+fn check_unevaluated(ctx: &mut ParseContext) {
+    let trees = std::mem::take(&mut ctx.trees);
+    let mut seen = HashSet::new();
+    for (tree, chain) in &trees {
+        let before = ctx.diagnostics.len();
+        for node in &tree.nodes {
+            check_unevaluated_node(node, ctx);
+        }
+        let mut found = ctx.diagnostics.split_off(before);
+        if let Some(chain) = chain {
+            for d in &mut found {
+                d.message = format!("{}\n  in {}", d.message, chain);
+            }
+        }
+        // A file included twice is checked twice: report each problem once
+        found.retain(|d| seen.insert((d.line, d.message.clone())));
+        ctx.diagnostics.extend(found);
+    }
+    ctx.trees = trees;
+}
+
+fn check_unevaluated_node(node: &syntax::Node, ctx: &mut ParseContext) {
+    if !ctx.visited.contains(&node.id) {
+        let line = node.span.line;
+        // A reference from code that doesn't run still counts as a use
+        track_var_refs(&node.source, &mut ctx.used_variables);
+        let before = ctx.diagnostics.len();
+        match &node.kind {
+            NodeKind::Element(element) => {
+                for head in &element.chain {
+                    check_head(head, line, false, ctx);
+                }
+                if let Some(text) = &element.text {
+                    check_inline_heads(text, line, ctx);
+                }
+            }
+            NodeKind::Text(text) => check_inline_heads(text, line, ctx),
+            _ => {}
+        }
+        for d in &mut ctx.diagnostics[before..] {
+            d.source_line
+                .get_or_insert_with(|| node.source.as_str().into());
+        }
+    }
+    for child in &node.children {
+        check_unevaluated_node(child, ctx);
+    }
+}
+
+/// Check a head that was never evaluated: its name, and for a built-in
+/// element, its attributes.
+fn check_head(head: &syntax::Head, line: usize, inline: bool, ctx: &mut ParseContext) {
+    let is_function = ctx.namespace.contains(&head.name) || ctx.functions.contains_key(&head.name);
+    if is_function && !inline {
+        ctx.used_functions.insert(head.name.clone());
+        return;
+    }
+    if let Err(mut e) = parse_element_kind(&head.name, line, ctx) {
+        if inline {
+            e.severity = Severity::Warning;
+        }
+        ctx.diagnostics.push(e);
+        return;
+    }
+    if let Some(list) = &head.attrs {
+        let literal: Vec<syntax::Attr> = list
+            .attrs
+            .iter()
+            .filter(|a| !a.raw.contains('$') && !a.raw.contains("if("))
+            .cloned()
+            .collect();
+        parse_attr_list(&literal, line, ctx, true);
+    }
+}
+
+fn check_inline_heads(text: &syntax::Text, line: usize, ctx: &mut ParseContext) {
+    for segment in &text.segments {
+        if let Segment::Inline(inline) = segment {
+            check_head(&inline.head, line, true, ctx);
+            if let Some(text) = &inline.text {
+                check_inline_heads(text, line, ctx);
+            }
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Evaluation
 // ---------------------------------------------------------------------------
 
+/// The `@else` lines that continue the `@if` or `@each` before `from`, and
+/// the position after them.
+fn else_branches(block: &[syntax::Node], from: usize, is_if: bool) -> (Vec<&syntax::Node>, usize) {
+    let mut branches = Vec::new();
+    let mut next = from;
+    let mut i = from;
+    while i < block.len() {
+        let node = &block[i];
+        i += 1;
+        if node.is_trivia() {
+            continue;
+        }
+        let condition = match node.directive().map(|d| &d.args) {
+            Some(DirectiveArgs::Else { condition }) => condition.is_some(),
+            _ => break,
+        };
+        if condition && !is_if {
+            break;
+        }
+        branches.push(node);
+        next = i;
+        if !condition {
+            break;
+        }
+    }
+    (branches, next)
+}
+
 impl Evaluator {
-    fn eval_block(&mut self, block: &[Syntax], ctx: &mut ParseContext) -> Vec<Node> {
+    fn eval_block(&mut self, block: &[syntax::Node], ctx: &mut ParseContext) -> Vec<Node> {
         let mut nodes = Vec::new();
-        for node in block {
-            match self.eval(node, ctx) {
+        let mut i = 0;
+        while i < block.len() {
+            let node = &block[i];
+            i += 1;
+            if node.is_trivia() {
+                continue;
+            }
+            let result = match node.directive().map(|d| d.name()) {
+                Some(name @ ("if" | "each")) => {
+                    let (branches, next) = else_branches(block, i, name == "if");
+                    i = next;
+                    if name == "if" {
+                        Ok(Some(self.eval_if(node, &branches, ctx)))
+                    } else {
+                        self.eval_each(node, branches.first().copied(), ctx)
+                    }
+                }
+                // Reported as a syntax error
+                Some("else") => {
+                    ctx.visited.insert(node.id);
+                    Ok(None)
+                }
+                _ => self.eval(node, ctx),
+            };
+            match result {
                 Ok(Some(new_nodes)) => nodes.extend(new_nodes),
                 Ok(None) => {}
                 // Record the error and go on, to report several in one pass
-                Err(e) => ctx.diagnostics.push(Diagnostic {
-                    line: e.line,
-                    column: None,
-                    message: e.message,
-                    severity: Severity::Error,
-                    source_line: Some(node.source()),
-                }),
+                Err(mut e) => {
+                    e.source_line
+                        .get_or_insert_with(|| node.source.as_str().into());
+                    ctx.diagnostics.push(e);
+                }
             }
         }
         nodes
     }
 
     /// Evaluate a block in its own scope: `@let` inside doesn't leak out.
-    fn eval_scoped(&mut self, block: &[Syntax], ctx: &mut ParseContext) -> Vec<Node> {
+    fn eval_scoped(&mut self, block: &[syntax::Node], ctx: &mut ParseContext) -> Vec<Node> {
         let saved_vars = ctx.variables.clone();
         let nodes = self.eval_block(block, ctx);
         ctx.variables = saved_vars;
         nodes
     }
 
+    /// `@if` with its `@else if` / `@else` branches. Every condition is
+    /// checked (and its errors reported); the first that holds picks the
+    /// branch.
+    fn eval_if(
+        &mut self,
+        node: &syntax::Node,
+        branches: &[&syntax::Node],
+        ctx: &mut ParseContext,
+    ) -> Vec<Node> {
+        let mut chosen = None;
+        for branch in std::iter::once(node).chain(branches.iter().copied()) {
+            ctx.visited.insert(branch.id);
+            ctx.current_line = branch.span.line;
+            let holds = match branch.directive().map(|d| &d.args) {
+                Some(DirectiveArgs::Condition(condition))
+                | Some(DirectiveArgs::Else {
+                    condition: Some(condition),
+                }) => !condition.raw.is_empty() && ctx.condition(&condition.raw, branch.span.line),
+                Some(DirectiveArgs::Else { condition: None }) => true,
+                // A syntax error, already reported
+                _ => false,
+            };
+            if holds && chosen.is_none() {
+                chosen = Some(&branch.children);
+            }
+        }
+        chosen.map_or_else(Vec::new, |body| self.eval_scoped(body, ctx))
+    }
+
     fn eval(
         &mut self,
-        node: &Syntax,
+        node: &syntax::Node,
         ctx: &mut ParseContext,
     ) -> Result<Option<Vec<Node>>, ParseError> {
-        let line_num = node.line();
+        ctx.visited.insert(node.id);
+        let line_num = node.span.line;
         ctx.current_line = line_num;
-        let (content, current_indent, children) = match node {
-            Syntax::Raw { text, .. } => return Ok(Some(vec![Node::Raw(text.clone())])),
-            Syntax::Function {
-                name,
-                params,
-                defaults,
-                body,
-                ..
-            } => {
-                self.define_function(name, params, defaults, body, line_num, ctx);
-                return Ok(None);
-            }
-            Syntax::If { branches } => {
-                // Every condition is checked (and its errors reported);
-                // the first that holds picks the branch.
-                let mut chosen = None;
-                for branch in branches {
-                    let holds = match &branch.condition {
-                        Some(condition) => ctx.condition(condition, branch.line),
-                        None => true,
-                    };
-                    if holds && chosen.is_none() {
-                        chosen = Some(&branch.body);
-                    }
+        match &node.kind {
+            NodeKind::Blank | NodeKind::Comment => Ok(None),
+            NodeKind::Verbatim(body) => Ok(Some(vec![Node::Raw(body.text.clone())])),
+            NodeKind::Directive(directive) => {
+                let mut nodes = self.eval_directive(node, directive, ctx)?;
+                // A directive that takes no body: the lines indented under
+                // it (a syntax error) are evaluated as its siblings
+                let takes_body = match &directive.args {
+                    DirectiveArgs::Let(def) => matches!(def.form, LetForm::Function(_)),
+                    _ => directive.spec.body != BodyKind::None,
+                };
+                if !takes_body {
+                    let siblings = self.eval_block(&node.children, ctx);
+                    nodes.get_or_insert_with(Vec::new).extend(siblings);
                 }
-                return Ok(chosen.map(|body| self.eval_scoped(body, ctx)));
+                Ok(nodes)
             }
-            Syntax::Each {
-                header,
-                body,
-                empty,
-                ..
-            } => {
-                return self.eval_each(header, body, empty, line_num, ctx).map(Some);
+            NodeKind::Element(element) => self.eval_element(node, element, ctx).map(Some),
+            NodeKind::Text(text) => {
+                let var_warnings = check_undefined_vars(
+                    &protect_escapes(&text.raw),
+                    &ctx.variables,
+                    line_num,
+                    node.indent,
+                );
+                ctx.diagnostics.extend(var_warnings);
+                track_var_refs(&text.raw, &mut ctx.used_variables);
+                let mut nodes = vec![Node::Text(text_segments(text, ctx))];
+                // Text takes no body: lines indented under it are its
+                // siblings
+                nodes.extend(self.eval_block(&node.children, ctx));
+                Ok(Some(nodes))
             }
-            Syntax::Line {
-                text,
-                indent,
-                children,
-                ..
-            } => (text.clone(), *indent, children),
-        };
+        }
+    }
 
-        // --- Directives ---
-
-        // @page [lang en, favicon /f.png] Title
-        if let Some(rest) = content.strip_prefix("@page ") {
-            let rest = rest.trim_start();
-            let title = if rest.starts_with('[') {
-                let (attrs, title) = parse_attr_brackets_no_validate(rest, line_num, ctx)?;
-                for attr in attrs {
-                    let value = attr.value.unwrap_or_default();
-                    match attr.key.as_str() {
-                        "lang" => ctx.lang = Some(value),
-                        "favicon" => ctx.favicon = Some(value),
-                        other => ctx.diagnostics.push(Diagnostic {
-                            line: line_num,
-                            column: None,
-                            message: format!(
-                                "unknown @page attribute '{}' (expected lang or favicon)",
-                                other
+    fn eval_directive(
+        &mut self,
+        node: &syntax::Node,
+        directive: &syntax::Directive,
+        ctx: &mut ParseContext,
+    ) -> Result<Option<Vec<Node>>, ParseError> {
+        let line_num = node.span.line;
+        let content = &node.source;
+        match (directive.name(), &directive.args) {
+            // @page [lang en, favicon /f.png] Title
+            ("page", DirectiveArgs::Page { attrs, title }) => {
+                if let Some(list) = attrs {
+                    for attr in parse_attr_list(&list.attrs, line_num, ctx, false) {
+                        let value = attr.value.unwrap_or_default();
+                        match attr.key.as_str() {
+                            "lang" => ctx.lang = Some(value),
+                            "favicon" => ctx.favicon = Some(value),
+                            other => ctx.diagnostics.push(
+                                Diagnostic::warning(
+                                    code::UNKNOWN_PAGE_ATTRIBUTE,
+                                    line_num,
+                                    format!(
+                                        "unknown @page attribute '{}' (expected lang or favicon)",
+                                        other
+                                    ),
+                                )
+                                .source(content.clone())
+                                .subject(other),
                             ),
-                            severity: Severity::Warning,
-                            source_line: Some(content.clone()),
-                        }),
+                        }
                     }
                 }
-                title
-            } else {
-                rest.to_string()
-            };
-            ctx.page_title = Some(substitute_vars(title.trim(), &ctx.variables));
-            return Ok(None);
-        }
-
-        if let Some(rest) = content.strip_prefix("@let ") {
-            let rest = rest.trim();
-
-            if !children.is_empty() {
-                return Err(ParseError {
-                    line: line_num,
-                    message: "@let with body requires a name".to_string(),
-                });
+                let title = title.as_ref().map_or("", |t| t.raw.as_str());
+                ctx.page_title = Some(substitute_vars(title, &ctx.variables));
+                Ok(None)
             }
 
-            if let Some((name, value)) = rest.split_once(' ') {
-                let value = value.trim();
-                // `@let name = EXPR` computes its value (see expr.rs); any
-                // other value is literal text with `$var` interpolation.
-                if let Some(expression) = value.strip_prefix('=') {
-                    let value = ctx
-                        .eval(expression.trim(), line_num)
-                        .map(|v| v.to_string())
-                        .unwrap_or_default();
-                    if name.starts_with("--") {
-                        ctx.css_vars.push((name.to_string(), value.clone()));
+            ("let", DirectiveArgs::Let(def)) => {
+                let name = def.name.as_str();
+                match &def.form {
+                    LetForm::Function(params) => {
+                        self.define_function(name, params, &node.children, line_num, ctx);
                     }
-                    ctx.variables.insert(name.to_string(), value);
-                    ctx.let_lines.entry(name.to_string()).or_insert(line_num);
-                    return Ok(None);
+                    // `@let name = EXPR` computes its value (see expr.rs)
+                    LetForm::Computed(expression) => {
+                        let value = ctx
+                            .eval(&expression.raw, line_num)
+                            .map(|v| v.to_string())
+                            .unwrap_or_default();
+                        set_variable(name, value, line_num, ctx);
+                    }
+                    // Attribute bundle: @let name [attr1, attr2, ...]
+                    LetForm::Bundle(list) => {
+                        let attrs = parse_attr_list(&list.attrs, line_num, ctx, true);
+                        ctx.defines.insert(name.to_string(), attrs);
+                        ctx.define_lines.entry(name.to_string()).or_insert(line_num);
+                    }
+                    // Literal text with `$var` interpolation, quoted or not:
+                    // @let greeting "Hello $name"
+                    LetForm::Value(Some(value)) | LetForm::Quoted(value) => {
+                        track_var_refs(&value.raw, &mut ctx.used_variables);
+                        let value = substitute_vars(&value.raw, &ctx.variables);
+                        set_variable(name, value, line_num, ctx);
+                    }
+                    LetForm::Value(None) => {}
                 }
+                Ok(None)
+            }
 
-                // Attribute bundle: @let name [attr1, attr2, ...]
-                if value.starts_with('[') {
-                    let (attrs, _) = parse_attr_brackets(value, line_num, ctx)?;
-                    ctx.defines.insert(name.to_string(), attrs);
-                    ctx.define_lines.entry(name.to_string()).or_insert(line_num);
-                    return Ok(None);
+            // @meta NAME VALUE; `og:` names become Open Graph property tags
+            ("meta", DirectiveArgs::Text(Some(arg))) => {
+                if let Some((name, value)) = arg.raw.split_once(' ') {
+                    let value = substitute_vars(value.trim(), &ctx.variables);
+                    match name.trim().strip_prefix("og:") {
+                        Some(property) => ctx.og_tags.push((property.to_string(), value)),
+                        None => ctx.meta_tags.push((name.trim().to_string(), value)),
+                    }
                 }
+                Ok(None)
+            }
 
-                let value = if value.starts_with('"') && value.ends_with('"') && value.len() >= 2 {
-                    // Support quoted string interpolation: @let greeting "Hello $name"
-                    &value[1..value.len() - 1]
-                } else {
-                    value
+            ("head", _) => {
+                let text = verbatim_text(&node.children);
+                if !text.trim().is_empty() {
+                    ctx.head_blocks.push(text.trim().to_string());
+                }
+                Ok(None)
+            }
+
+            // @style: raw CSS
+            ("style", _) => {
+                let text = verbatim_text(&node.children);
+                if !text.trim().is_empty() {
+                    ctx.custom_css.push(text.trim().to_string());
+                }
+                Ok(None)
+            }
+
+            // @markdown: an indented block, or a file
+            ("markdown", DirectiveArgs::Text(file)) => {
+                let Some(file) = file else {
+                    let md_lines: Vec<String> = verbatim_text(&node.children)
+                        .lines()
+                        .map(String::from)
+                        .collect();
+                    return Ok(Some(vec![Node::Raw(markdown_to_html(&md_lines))]));
                 };
-                track_var_refs(value, &mut ctx.used_variables);
-                let value = substitute_vars(value, &ctx.variables);
-                if name.starts_with("--") {
-                    // CSS custom property
-                    ctx.css_vars.push((name.to_string(), value.clone()));
-                }
-                ctx.variables.insert(name.to_string(), value);
-                ctx.let_lines.entry(name.to_string()).or_insert(line_num);
-            }
-            return Ok(None);
-        }
-
-        // @meta NAME VALUE; `og:` names become Open Graph property tags
-        if let Some(rest) = content.strip_prefix("@meta ") {
-            let rest = rest.trim();
-            if let Some((name, value)) = rest.split_once(' ') {
-                let value = substitute_vars(value.trim(), &ctx.variables);
-                match name.trim().strip_prefix("og:") {
-                    Some(property) => ctx.og_tags.push((property.to_string(), value)),
-                    None => ctx.meta_tags.push((name.trim().to_string(), value)),
-                }
-            }
-            return Ok(None);
-        }
-
-        if content == "@head" || content.starts_with("@head ") {
-            let trimmed = block_text(children).trim().to_string();
-            if !trimmed.is_empty() {
-                ctx.head_blocks.push(trimmed);
-            }
-            return Ok(None);
-        }
-
-        // --- @style block (raw CSS) ---
-        if content.trim() == "@style" {
-            let trimmed = block_text(children).trim().to_string();
-            if !trimmed.is_empty() {
-                ctx.custom_css.push(trimmed);
-            }
-            return Ok(None);
-        }
-
-        // --- @markdown block or file (convert markdown to HTML) ---
-        if content.trim() == "@markdown" || content.trim().starts_with("@markdown ") {
-            let arg = content.trim().strip_prefix("@markdown").unwrap().trim();
-            if arg.is_empty() {
-                // Inline markdown block: indented children
-                let md_lines: Vec<String> =
-                    block_text(children).lines().map(String::from).collect();
-                let html = markdown_to_html(&md_lines);
-                return Ok(Some(vec![Node::Raw(html)]));
-            } else {
-                // External markdown file: @markdown file.md
-                let filename = substitute_vars(arg, &ctx.variables);
-                let resolved = match &ctx.base_path {
-                    Some(base) => base.join(&filename),
-                    None => PathBuf::from(&filename),
-                };
-                let md_text = if let Some(cached) = ctx.file_cache.get(&resolved) {
-                    cached.clone()
-                } else {
-                    match std::fs::read_to_string(&resolved) {
-                        Ok(text) => {
-                            ctx.file_cache.insert(resolved.clone(), text.clone());
-                            text
-                        }
-                        Err(e) => {
-                            ctx.diagnostics.push(Diagnostic {
-                                line: line_num,
-                                column: None,
-                                message: format!("cannot read markdown '{}': {}", filename, e),
-                                severity: Severity::Error,
-                                source_line: Some(content.clone()),
-                            });
-                            return Ok(None);
-                        }
+                let filename = substitute_vars(&file.raw, &ctx.variables);
+                let resolved = ctx.resolve(&filename);
+                let md_text = match ctx.read_file(&resolved) {
+                    Ok(text) => text,
+                    Err(e) => {
+                        ctx.diagnostics.push(
+                            Diagnostic::error(
+                                code::UNREADABLE_FILE,
+                                line_num,
+                                format!("cannot read markdown '{}': {}", filename, e),
+                            )
+                            .source(content.clone()),
+                        );
+                        return Ok(None);
                     }
                 };
                 ctx.included_files.push(resolved);
                 let md_lines: Vec<String> = md_text.lines().map(|l| l.to_string()).collect();
-                let html = markdown_to_html(&md_lines);
-                return Ok(Some(vec![Node::Raw(html)]));
+                Ok(Some(vec![Node::Raw(markdown_to_html(&md_lines))]))
             }
+
+            ("include", DirectiveArgs::Text(Some(path))) => {
+                self.eval_include(&path.raw, line_num, content, ctx)
+            }
+
+            ("data", DirectiveArgs::Data { name, source, .. }) => {
+                self.eval_data(name, &source.raw, line_num, content, ctx);
+                Ok(None)
+            }
+
+            // @raw: the rest of its line, or its indented body, verbatim
+            ("raw", DirectiveArgs::Text(Some(text))) => Ok(Some(vec![Node::Raw(text.raw.clone())])),
+            ("raw", _) => {
+                let text = verbatim_text(&node.children);
+                let text = text.trim_end_matches('\n');
+                Ok((!text.is_empty()).then(|| vec![Node::Raw(text.to_string())]))
+            }
+
+            // A header with a syntax error (reported), or a directive
+            // without its argument
+            _ => Ok(None),
         }
+    }
 
-        if let Some(rest) = content.strip_prefix("@include ") {
-            let rest = rest.trim();
-            let filename = rest
-                .strip_prefix('"')
-                .and_then(|f| f.strip_suffix('"'))
-                .unwrap_or(rest);
-            let filename = substitute_vars(filename, &ctx.variables);
+    fn eval_include(
+        &mut self,
+        path: &str,
+        line_num: usize,
+        content: &str,
+        ctx: &mut ParseContext,
+    ) -> Result<Option<Vec<Node>>, ParseError> {
+        let filename = path
+            .strip_prefix('"')
+            .and_then(|f| f.strip_suffix('"'))
+            .unwrap_or(path);
+        let filename = substitute_vars(filename, &ctx.variables);
+        let resolved = ctx.resolve(&filename);
 
-            let resolved = match &ctx.base_path {
-                Some(base) => base.join(&filename),
-                None => PathBuf::from(&filename),
-            };
-
-            if ctx.include_stack.contains(&resolved) {
-                let cycle_chain = format_include_chain(&ctx.include_stack);
-                ctx.diagnostics.push(Diagnostic {
-                    line: line_num,
-                    column: None,
-                    message: format!(
+        if ctx.include_stack.contains(&resolved) {
+            let cycle_chain = format_include_chain(&ctx.include_stack);
+            ctx.diagnostics.push(
+                Diagnostic::error(
+                    code::CIRCULAR_INCLUDE,
+                    line_num,
+                    format!(
                         "circular include '{}' (cycle: {} → {})",
                         filename, cycle_chain, filename
                     ),
-                    severity: Severity::Error,
-                    source_line: Some(content.clone()),
-                });
-                return Ok(None);
-            }
-
-            let imported_text = if let Some(cached) = ctx.file_cache.get(&resolved) {
-                cached.clone()
-            } else {
-                match std::fs::read_to_string(&resolved) {
-                    Ok(text) => {
-                        ctx.file_cache.insert(resolved.clone(), text.clone());
-                        text
-                    }
-                    Err(e) => {
-                        ctx.diagnostics.push(Diagnostic {
-                            line: line_num,
-                            column: None,
-                            message: format!("cannot include '{}': {}", filename, e),
-                            severity: Severity::Error,
-                            source_line: Some(content.clone()),
-                        });
-                        return Ok(None);
-                    }
-                }
-            };
-
-            ctx.included_files.push(resolved.clone());
-            ctx.include_stack.push(resolved.clone());
-            let saved_base = ctx.base_path.clone();
-            ctx.base_path = resolved.parent().map(|p| p.to_path_buf());
-
-            let diag_count_before = ctx.diagnostics.len();
-
-            let included_nodes = self.eval_block(&syntax::parse(&imported_text), ctx);
-
-            // Annotate new diagnostics with import chain
-            let import_chain = format_include_chain(&ctx.include_stack);
-            for d in &mut ctx.diagnostics[diag_count_before..] {
-                d.message = format!("{}\n  in {}", d.message, import_chain);
-            }
-
-            ctx.base_path = saved_base;
-            ctx.include_stack.pop();
-            return Ok(Some(included_nodes));
-        }
-
-        // --- @data (load JSON file into variables) ---
-
-        // @data $name file.json         values as $name.key
-        // @data $name dir/*.json        a list of the files' records
-        // @data $name [...] / {...}     inline JSON
-        // @data $name env:NAME [DEFAULT] an environment variable
-        if let Some(rest) = content.strip_prefix("@data ") {
-            let rest = rest.trim();
-            let Some((prefix, filename)) = rest
-                .strip_prefix('$')
-                .and_then(|named| named.split_once(char::is_whitespace))
-                .map(|(name, source)| (name.to_string(), source.trim().to_string()))
-            else {
-                return Err(ParseError {
-                    line: line_num,
-                    message: format!(
-                        "@data needs a name: write `@data $name {}` and use `$name.key`",
-                        rest.trim_start_matches('$')
-                    ),
-                });
-            };
-
-            if let Some(env) = filename.strip_prefix("env:") {
-                let (var, default) = match env.split_once(char::is_whitespace) {
-                    Some((var, default)) => (var, Some(default.trim())),
-                    None => (env, None),
-                };
-                let value = std::env::var(var)
-                    .ok()
-                    .or_else(|| default.map(|d| substitute_vars(d, &ctx.variables)));
-                if value.is_none() {
-                    ctx.diagnostics.push(Diagnostic {
-                        line: line_num,
-                        column: None,
-                        message: format!(
-                            "environment variable '{}' is not set and has no default",
-                            var
-                        ),
-                        severity: Severity::Warning,
-                        source_line: Some(content.clone()),
-                    });
-                }
-                ctx.variables.insert(prefix, value.unwrap_or_default());
-                return Ok(None);
-            }
-
-            // Inline JSON: @data $links [{"label": "Home", "url": "/"}]
-            let (json_text, source) = if filename.starts_with(['[', '{']) {
-                (filename, "the inline data".to_string())
-            } else {
-                let filename = substitute_vars(&filename, &ctx.variables);
-                if filename.contains('*') {
-                    self.load_data_glob(&prefix, &filename, line_num, &content, ctx);
-                    return Ok(None);
-                }
-                let resolved = match &ctx.base_path {
-                    Some(base) => base.join(&filename),
-                    None => PathBuf::from(&filename),
-                };
-                match std::fs::read_to_string(&resolved) {
-                    Ok(text) => {
-                        ctx.included_files.push(resolved);
-                        (text, format!("'{}'", filename))
-                    }
-                    Err(e) => {
-                        ctx.diagnostics.push(Diagnostic {
-                            line: line_num,
-                            column: None,
-                            message: format!("cannot load data '{}': {}", filename, e),
-                            severity: Severity::Error,
-                            source_line: Some(content.clone()),
-                        });
-                        return Ok(None);
-                    }
-                }
-            };
-            match parse_json_with_error(&json_text) {
-                Ok(json) => flatten_json(&prefix, &json, &mut ctx.variables),
-                Err(detail) => ctx.diagnostics.push(Diagnostic {
-                    line: line_num,
-                    column: None,
-                    message: format!("invalid JSON in {}: {}", source, detail),
-                    severity: Severity::Error,
-                    source_line: Some(content.clone()),
-                }),
-            }
+                )
+                .source(content),
+            );
             return Ok(None);
         }
 
-        // --- @if / @else ---
-
-        if content.trim() == "@else" || content.trim().starts_with("@else if ") {
-            return Err(ParseError {
-                line: line_num,
-                message: "@else without matching @if".to_string(),
-            });
-        }
-
-        // --- @each loop ---
-
-        // @raw: its indented body, or the rest of the line, verbatim
-        if content == "@raw" {
-            let text = block_text(children);
-            let text = text.trim_end_matches('\n');
-            return Ok((!text.is_empty()).then(|| vec![Node::Raw(text.to_string())]));
-        }
-        if let Some(rest) = content.strip_prefix("@raw ") {
-            return Ok(Some(vec![Node::Raw(rest.to_string())]));
-        }
-
-        // --- Function call ---
-
-        if content.starts_with('@') {
-            let name = extract_element_name(&content);
-            if ctx.functions.contains_key(name) {
-                ctx.used_functions.insert(name.to_string());
-                let nodes = self.expand_fn_call(name, &content, children, line_num, ctx)?;
-                return Ok(Some(nodes));
+        let imported_text = match ctx.read_file(&resolved) {
+            Ok(text) => text,
+            Err(e) => {
+                ctx.diagnostics.push(
+                    Diagnostic::error(
+                        code::UNREADABLE_FILE,
+                        line_num,
+                        format!("cannot include '{}': {}", filename, e),
+                    )
+                    .source(content),
+                );
+                return Ok(None);
             }
+        };
+
+        ctx.included_files.push(resolved.clone());
+        ctx.include_stack.push(resolved.clone());
+        let saved_base = ctx.base_path.clone();
+        ctx.base_path = resolved.parent().map(|p| p.to_path_buf());
+
+        let diag_count_before = ctx.diagnostics.len();
+        let import_chain = format_include_chain(&ctx.include_stack);
+        let tree = ctx.parse_tree(&imported_text);
+        ctx.diagnostics.extend(tree.diagnostics.iter().cloned());
+        ctx.trees.push((tree.clone(), Some(import_chain.clone())));
+        let included_nodes = self.eval_block(&tree.nodes, ctx);
+
+        // Annotate new diagnostics with import chain
+        for d in &mut ctx.diagnostics[diag_count_before..] {
+            d.message = format!("{}\n  in {}", d.message, import_chain);
         }
 
-        // --- Elements ---
+        ctx.base_path = saved_base;
+        ctx.include_stack.pop();
+        Ok(Some(included_nodes))
+    }
 
-        if content.starts_with('@') {
-            let node = self.parse_element_line(&content, children, line_num, ctx)?;
-            return Ok(Some(vec![inline_svg(node, line_num, ctx)]));
+    /// @data $name file.json         values as $name.key
+    /// @data $name dir/*.json        a list of the files' records
+    /// @data $name [...] / {...}     inline JSON
+    /// @data $name env:NAME [DEFAULT] an environment variable
+    fn eval_data(
+        &mut self,
+        prefix: &str,
+        filename: &str,
+        line_num: usize,
+        content: &str,
+        ctx: &mut ParseContext,
+    ) {
+        let prefix = prefix.to_string();
+        if let Some(env) = filename.strip_prefix("env:") {
+            let (var, default) = match env.split_once(char::is_whitespace) {
+                Some((var, default)) => (var, Some(default.trim())),
+                None => (env, None),
+            };
+            let value = std::env::var(var)
+                .ok()
+                .or_else(|| default.map(|d| substitute_vars(d, &ctx.variables)));
+            if value.is_none() {
+                ctx.diagnostics.push(
+                    Diagnostic::warning(
+                        code::UNSET_ENVIRONMENT,
+                        line_num,
+                        format!(
+                            "environment variable '{}' is not set and has no default",
+                            var
+                        ),
+                    )
+                    .source(content),
+                );
+            }
+            ctx.variables.insert(prefix, value.unwrap_or_default());
+            return;
         }
 
-        // --- Bare text ---
-
-        let var_warnings = check_undefined_vars(
-            &protect_escapes(&content),
-            &ctx.variables,
-            line_num,
-            current_indent,
-        );
-        ctx.diagnostics.extend(var_warnings);
-        track_var_refs(&content, &mut ctx.used_variables);
-        let segments = parse_text_segments(&content, ctx);
-        Ok(Some(vec![Node::Text(segments)]))
+        // Inline JSON: @data $links [{"label": "Home", "url": "/"}]
+        let (json_text, source) = if filename.starts_with(['[', '{']) {
+            (filename.to_string(), "the inline data".to_string())
+        } else {
+            let filename = substitute_vars(filename, &ctx.variables);
+            if filename.contains('*') {
+                self.load_data_glob(&prefix, &filename, line_num, content, ctx);
+                return;
+            }
+            let resolved = ctx.resolve(&filename);
+            match std::fs::read_to_string(&resolved) {
+                Ok(text) => {
+                    ctx.included_files.push(resolved);
+                    (text, format!("'{}'", filename))
+                }
+                Err(e) => {
+                    ctx.diagnostics.push(
+                        Diagnostic::error(
+                            code::UNREADABLE_FILE,
+                            line_num,
+                            format!("cannot load data '{}': {}", filename, e),
+                        )
+                        .source(content),
+                    );
+                    return;
+                }
+            }
+        };
+        match parse_json_with_error(&json_text) {
+            Ok(json) => flatten_json(&prefix, &json, &mut ctx.variables),
+            Err(detail) => ctx.diagnostics.push(
+                Diagnostic::error(
+                    code::INVALID_JSON,
+                    line_num,
+                    format!("invalid JSON in {}: {}", source, detail),
+                )
+                .source(content),
+            ),
+        }
     }
 
     /// `@data $name dir/*.json`: a list with one record per matching file
@@ -676,13 +836,15 @@ impl Evaluator {
                 })
                 .collect(),
             Err(e) => {
-                ctx.diagnostics.push(Diagnostic {
-                    line: line_num,
-                    column: None,
-                    message: format!("cannot read directory for '{}': {}", pattern, e),
-                    severity: Severity::Error,
-                    source_line: Some(content.to_string()),
-                });
+                ctx.diagnostics.push(
+                    Diagnostic::new(
+                        code::UNREADABLE_FILE,
+                        Severity::Error,
+                        line_num,
+                        format!("cannot read directory for '{}': {}", pattern, e),
+                    )
+                    .source(content.to_string()),
+                );
                 return;
             }
         };
@@ -697,13 +859,15 @@ impl Evaluator {
             let text = match std::fs::read_to_string(&file) {
                 Ok(text) => text,
                 Err(e) => {
-                    ctx.diagnostics.push(Diagnostic {
-                        line: line_num,
-                        column: None,
-                        message: format!("cannot load data '{}': {}", file.display(), e),
-                        severity: Severity::Error,
-                        source_line: Some(content.to_string()),
-                    });
+                    ctx.diagnostics.push(
+                        Diagnostic::new(
+                            code::UNREADABLE_FILE,
+                            Severity::Error,
+                            line_num,
+                            format!("cannot load data '{}': {}", file.display(), e),
+                        )
+                        .source(content.to_string()),
+                    );
                     continue;
                 }
             };
@@ -714,57 +878,54 @@ impl Evaluator {
                     }
                     records.push(JsonValue::Object(pairs));
                 }
-                Ok(_) => ctx.diagnostics.push(Diagnostic {
-                    line: line_num,
-                    column: None,
-                    message: format!("'{}' should hold a JSON object", file.display()),
-                    severity: Severity::Error,
-                    source_line: Some(content.to_string()),
-                }),
-                Err(detail) => ctx.diagnostics.push(Diagnostic {
-                    line: line_num,
-                    column: None,
-                    message: format!("invalid JSON in '{}': {}", file.display(), detail),
-                    severity: Severity::Error,
-                    source_line: Some(content.to_string()),
-                }),
+                Ok(_) => ctx.diagnostics.push(
+                    Diagnostic::new(
+                        code::INVALID_JSON,
+                        Severity::Error,
+                        line_num,
+                        format!("'{}' should hold a JSON object", file.display()),
+                    )
+                    .source(content.to_string()),
+                ),
+                Err(detail) => ctx.diagnostics.push(
+                    Diagnostic::new(
+                        code::INVALID_JSON,
+                        Severity::Error,
+                        line_num,
+                        format!("invalid JSON in '{}': {}", file.display(), detail),
+                    )
+                    .source(content.to_string()),
+                ),
             }
             ctx.included_files.push(file);
         }
         flatten_json(name, &JsonValue::Array(records), &mut ctx.variables);
     }
 
-    /// `@each $item in LIST` or `@each $item, $index in LIST`. A LIST from
-    /// JSON binds each record or value to `$item`; any other list is text,
-    /// split on commas, or a range `A..B [step N]`.
+    /// `@each $item in LIST` or `@each $item, $index in LIST`, with the
+    /// `@else` that follows it. A LIST from JSON binds each record or value
+    /// to `$item`; any other list is text, split on commas, or a range
+    /// `A..B [step N]`.
     fn eval_each(
         &mut self,
-        header: &str,
-        body: &[Syntax],
-        empty: &[Syntax],
-        line_num: usize,
+        node: &syntax::Node,
+        empty_branch: Option<&syntax::Node>,
         ctx: &mut ParseContext,
-    ) -> Result<Vec<Node>, ParseError> {
-        let Some((names, list_src)) = header.split_once(" in ") else {
-            return Err(ParseError {
-                line: line_num,
-                message: "@each requires: @each $item in LIST".to_string(),
-            });
-        };
-        let names: Vec<&str> = names
-            .split(',')
-            .map(|v| v.trim().trim_start_matches('$'))
-            .collect();
-        if names.len() > 2 {
-            return Err(ParseError {
-                line: line_num,
-                message: "@each takes `$item` or `$item, $index`: to loop over records, \
-                          load them with @data and use `$item.key`"
-                    .to_string(),
-            });
+    ) -> Result<Option<Vec<Node>>, ParseError> {
+        ctx.visited.insert(node.id);
+        if let Some(branch) = empty_branch {
+            ctx.visited.insert(branch.id);
         }
-        let (item, index) = (names[0], names.get(1).copied());
-        let list_src = list_src.trim();
+        let line_num = node.span.line;
+        ctx.current_line = line_num;
+        // A malformed header is a syntax error, already reported
+        let Some(DirectiveArgs::Each(header)) = node.directive().map(|d| &d.args) else {
+            return Ok(None);
+        };
+        let body = &node.children;
+        let empty: &[syntax::Node] = empty_branch.map_or(&[], |b| &b.children);
+        let (item, index) = (header.item.as_str(), header.index.as_deref());
+        let list_src = header.list.raw.as_str();
         track_var_refs(list_src, &mut ctx.used_variables);
 
         // A list loaded from JSON, by name
@@ -788,13 +949,15 @@ impl Evaluator {
             (None, Some(name)) => {
                 let root = name.split('.').next().unwrap_or(name);
                 if !ctx.variables.contains_key(root) {
-                    ctx.diagnostics.push(Diagnostic {
-                        line: line_num,
-                        column: None,
-                        message: format!("undefined variable '${}'", name),
-                        severity: Severity::Warning,
-                        source_line: Some(format!("@each {}", header)),
-                    });
+                    ctx.diagnostics.push(
+                        Diagnostic::warning(
+                            code::UNDEFINED_VARIABLE,
+                            line_num,
+                            format!("undefined variable '${}'", name),
+                        )
+                        .source(node.source.clone())
+                        .subject(name),
+                    );
                 }
                 Vec::new()
             }
@@ -802,11 +965,11 @@ impl Evaluator {
         };
         let count = data_list.as_ref().map_or(text_items.len(), |(_, len)| *len);
 
-        if body.is_empty() {
-            return Ok(Vec::new());
+        if body.iter().all(syntax::Node::is_trivia) {
+            return Ok(Some(Vec::new()));
         }
         if count == 0 {
-            return Ok(self.eval_scoped(empty, ctx));
+            return Ok(Some(self.eval_scoped(empty, ctx)));
         }
         let saved_vars = ctx.variables.clone();
         let mut nodes = Vec::new();
@@ -824,29 +987,27 @@ impl Evaluator {
             nodes.extend(self.eval_block(body, ctx));
         }
         ctx.variables = saved_vars;
-        Ok(nodes)
+        Ok(Some(nodes))
     }
 
     fn define_function(
         &mut self,
         name: &str,
-        params: &[String],
-        defaults: &HashMap<String, String>,
-        body: &[Syntax],
+        params: &[syntax::Param],
+        body: &[syntax::Node],
         line_num: usize,
         ctx: &mut ParseContext,
     ) {
         // An @style block at the top of the body is scoped to the
         // function: its rules apply inside a `.hl-NAME` wrapper.
-        let (style, body): (Vec<&Syntax>, Vec<&Syntax>) = body
-            .iter()
-            .partition(|node| matches!(node, Syntax::Line { text, .. } if text == "@style"));
+        let (style, body): (Vec<&syntax::Node>, Vec<&syntax::Node>) =
+            body.iter().partition(|node| node.is_directive("style"));
         if !style.is_empty() {
             let css: String = style
                 .iter()
-                .filter_map(|node| match node {
-                    Syntax::Line { children, .. } => Some(block_text(children)),
-                    _ => None,
+                .map(|node| {
+                    ctx.visited.insert(node.id);
+                    verbatim_text(&node.children)
                 })
                 .collect();
             // Nested under the scope class, so any CSS works (multi-line
@@ -861,60 +1022,125 @@ impl Evaluator {
         ctx.functions.insert(
             name.to_string(),
             FnDef {
-                params: params.to_vec(),
-                defaults: defaults.clone(),
+                params: params.iter().map(|p| p.name.clone()).collect(),
+                defaults: params
+                    .iter()
+                    .filter_map(|p| Some((p.name.clone(), p.default.clone()?)))
+                    .collect(),
                 body: body.into_iter().cloned().collect(),
             },
         );
     }
 
+    /// An element line: a chain of elements and function calls, the last of
+    /// which gets the indented children.
+    fn eval_element(
+        &mut self,
+        node: &syntax::Node,
+        element: &syntax::ElementLine,
+        ctx: &mut ParseContext,
+    ) -> Result<Vec<Node>, ParseError> {
+        // An unclosed attribute list is a syntax error, already reported
+        if element
+            .chain
+            .iter()
+            .any(|h| h.attrs.as_ref().is_some_and(|a| !a.closed))
+        {
+            return Ok(Vec::new());
+        }
+        enum Link {
+            Element(Element),
+            Call {
+                name: String,
+                args: Vec<Attribute>,
+                text: Option<syntax::Text>,
+            },
+        }
+        let line_num = node.span.line;
+        let last = element.chain.len() - 1;
+        let mut links = Vec::new();
+        for (i, head) in element.chain.iter().enumerate() {
+            let text = if i == last {
+                element.text.as_ref()
+            } else {
+                None
+            };
+            if ctx.functions.contains_key(&head.name) {
+                ctx.used_functions.insert(head.name.clone());
+                let args = head.attrs.as_ref().map_or_else(Vec::new, |list| {
+                    parse_attr_list(&list.attrs, line_num, ctx, false)
+                });
+                links.push(Link::Call {
+                    name: head.name.clone(),
+                    args,
+                    text: text.cloned(),
+                });
+            } else {
+                links.push(Link::Element(parse_single_element(
+                    head, text, line_num, ctx,
+                )?));
+            }
+        }
+
+        // Children belong to the innermost element; build the chain
+        // right-to-left, each link wrapping the next.
+        let mut current = self.eval_block(&node.children, ctx);
+        for link in links.into_iter().rev() {
+            current = match link {
+                Link::Element(mut elem) => {
+                    elem.children.extend(current);
+                    vec![inline_svg(Node::Element(elem), line_num, ctx)]
+                }
+                Link::Call { name, args, text } => self.expand_fn_call(
+                    &name,
+                    args,
+                    text.as_ref(),
+                    current,
+                    line_num,
+                    &node.source,
+                    ctx,
+                )?,
+            };
+        }
+        Ok(current)
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn expand_fn_call(
         &mut self,
         name: &str,
-        content: &str,
-        children: &[Syntax],
+        args: Vec<Attribute>,
+        trailing_text: Option<&syntax::Text>,
+        all_caller_children: Vec<Node>,
         line_num: usize,
+        content: &str,
         ctx: &mut ParseContext,
     ) -> Result<Vec<Node>, ParseError> {
         // Recursive function cycle detection
         if ctx.fn_call_stack.contains(&name.to_string()) {
-            return Err(ParseError {
-                line: line_num,
-                message: format!(
+            return Err(Diagnostic::error(
+                code::RECURSIVE_CALL,
+                line_num,
+                format!(
                     "recursive function call to @{} (call stack: {})",
                     name,
                     ctx.fn_call_stack.join(" -> ")
                 ),
-            });
+            )
+            .subject(name));
         }
+
+        // Clone function definition (releases borrow on ctx)
+        let Some(fn_def) = ctx.functions.get(name).cloned() else {
+            return Err(Diagnostic::error(
+                code::INTERNAL,
+                line_num,
+                format!("undefined function @{}", name),
+            ));
+        };
         ctx.fn_call_stack.push(name.to_string());
 
-        // Parse [param value, ...] arguments
-        let rest = &content[1 + name.len()..];
-        let rest = rest.trim_start();
-
-        let (args, trailing_text) = if rest.starts_with('[') {
-            parse_attr_brackets_no_validate(rest, line_num, ctx)?
-        } else {
-            (Vec::new(), rest.to_string())
-        };
-
-        // Clone function definition (releases borrow on ctx). If the function is
-        // missing (shouldn't normally happen — callers check ctx.functions.contains_key
-        // first — but we avoid panicking on malformed state).
-        let fn_def = match ctx.functions.get(name) {
-            Some(def) => def.clone(),
-            None => {
-                ctx.fn_call_stack.pop();
-                return Err(ParseError {
-                    line: line_num,
-                    message: format!("undefined function @{}", name),
-                });
-            }
-        };
-
-        // Parse caller's children, separating named slots from default children
-        let all_caller_children = self.eval_block(children, ctx);
+        // Separate the caller's named slots from its other children
         let mut slot_contents: HashMap<String, Vec<Node>> = HashMap::new();
         let mut caller_children = Vec::new();
         for child in all_caller_children {
@@ -932,9 +1158,8 @@ impl Evaluator {
         }
         // Text after the call, as in `@card [color red] New`, is content:
         // it goes first among the caller's children.
-        let trailing_text = trailing_text.trim();
-        if !trailing_text.is_empty() {
-            caller_children.insert(0, Node::Text(parse_text_segments(trailing_text, ctx)));
+        if let Some(text) = trailing_text {
+            caller_children.insert(0, Node::Text(text_segments(text, ctx)));
         }
 
         // Save variable state, inject function parameters
@@ -1040,50 +1265,37 @@ impl Evaluator {
                 }
             }
             for message in problems {
-                ctx.diagnostics.push(Diagnostic {
-                    line: line_num,
-                    column: None,
-                    message,
-                    severity: Severity::Warning,
-                    source_line: Some(content.to_string()),
-                });
+                ctx.diagnostics.push(
+                    Diagnostic::warning(code::NO_SINGLE_ROOT, line_num, message)
+                        .source(content)
+                        .subject(name),
+                );
             }
         }
 
         Ok(result_nodes)
     }
+}
 
-    fn parse_element_line(
-        &mut self,
-        content: &str,
-        children: &[Syntax],
-        line_num: usize,
-        ctx: &mut ParseContext,
-    ) -> Result<Node, ParseError> {
-        let segments = split_chain(content);
-
-        // Parse each segment into an Element
-        let mut elements: Vec<Element> = Vec::new();
-        for seg in &segments {
-            let elem = parse_single_element(seg.trim(), line_num, ctx)?;
-            elements.push(elem);
-        }
-
-        // Parse indented children (belong to the innermost element)
-        let children = self.eval_block(children, ctx);
-
-        // Build chain right-to-left: rightmost gets children, each wraps the next
-        let mut current_children = children;
-        for mut elem in elements.into_iter().rev() {
-            elem.children.extend(current_children);
-            current_children = vec![Node::Element(elem)];
-        }
-
-        current_children.into_iter().next().ok_or(ParseError {
-            line: line_num,
-            message: "element chain produced no nodes (this is a parser bug)".to_string(),
-        })
+/// Define `$name` (and, for `--name`, the CSS custom property).
+fn set_variable(name: &str, value: String, line_num: usize, ctx: &mut ParseContext) {
+    if name.starts_with("--") {
+        ctx.css_vars.push((name.to_string(), value.clone()));
     }
+    ctx.variables.insert(name.to_string(), value);
+    ctx.let_lines.entry(name.to_string()).or_insert(line_num);
+}
+
+/// The text of a verbatim body (`@head`, `@style`, `@markdown`, `@raw`).
+fn verbatim_text(children: &[syntax::Node]) -> String {
+    let mut text = String::new();
+    for child in children {
+        if let NodeKind::Verbatim(body) = &child.kind {
+            text.push_str(&body.text);
+            text.push('\n');
+        }
+    }
+    text
 }
 
 // ---------------------------------------------------------------------------
@@ -1133,88 +1345,34 @@ fn replace_children_and_slots(
 // Element parsing
 // ---------------------------------------------------------------------------
 
-fn extract_element_name(content: &str) -> &str {
-    let without_at = &content[1..];
-    match without_at.find([' ', '[']) {
-        Some(i) => &without_at[..i],
-        None => without_at,
-    }
-}
-
+/// Build the element for `@name [attrs] text` (on its own line, in a chain,
+/// or inline in text).
 fn parse_single_element(
-    content: &str,
+    head: &syntax::Head,
+    text: Option<&syntax::Text>,
     line_num: usize,
     ctx: &mut ParseContext,
 ) -> Result<Element, ParseError> {
-    let (kind, rest) = if let Some(without_at) = content.strip_prefix('@') {
-        match without_at.find([' ', '[']) {
-            Some(i) => {
-                let kind_str = &without_at[..i];
-                let rest = if without_at.as_bytes()[i] == b'[' {
-                    without_at[i..].to_string()
-                } else {
-                    without_at[i + 1..].to_string()
-                };
-                match parse_element_kind(kind_str, line_num) {
-                    Ok(kind) => (kind, rest),
-                    Err(mut e) => {
-                        // Also suggest user-defined functions
-                        if let Some(fn_suggestion) = suggest_fn_name(kind_str, ctx) {
-                            e.message =
-                                format!("{}, or did you mean @{}?", e.message, fn_suggestion);
-                        }
-                        return Err(e);
-                    }
-                }
-            }
-            None => match parse_element_kind(without_at, line_num) {
-                Ok(kind) => (kind, String::new()),
-                Err(mut e) => {
-                    if let Some(fn_suggestion) = suggest_fn_name(without_at, ctx) {
-                        e.message = format!("{}, or did you mean @{}?", e.message, fn_suggestion);
-                    }
-                    return Err(e);
-                }
-            },
-        }
-    } else {
-        return Err(ParseError {
-            line: line_num,
-            message: format!("expected @element or [attrs], got: {}", content),
-        });
-    };
+    let kind = parse_element_kind(&head.name, line_num, ctx)?;
+    let attrs = head.attrs.as_ref().map_or_else(Vec::new, |list| {
+        parse_attr_list(&list.attrs, line_num, ctx, true)
+    });
 
-    // Parse optional [attrs]
-    let (attrs, rest) = if rest.starts_with('[') {
-        parse_attr_brackets(&rest, line_num, ctx)?
-    } else {
-        (Vec::new(), rest)
-    };
-
-    let rest = rest.trim().to_string();
-    track_var_refs(&rest, &mut ctx.used_variables);
-
-    // For @link, first token of rest is URL, remainder is inline text
+    // For @link, the first word is the URL and the rest is its text
     let mut children = Vec::new();
-    let argument = if rest.is_empty() {
-        None
-    } else if kind == ElementKind::Link {
-        let rest_sub = substitute_vars(&protect_escapes(&rest), &ctx.variables);
-        if let Some((url, text)) = rest_sub.split_once(' ') {
-            let text = text.trim();
-            if !text.is_empty() {
-                children.push(Node::Text(parse_text_segments(text, ctx)));
+    let argument = text.map(|text| {
+        track_var_refs(&text.raw, &mut ctx.used_variables);
+        let raw = if kind == ElementKind::Link {
+            let (url, rest) = text.split_first_word();
+            if let Some(rest) = rest {
+                children.push(Node::Text(text_segments(&rest, ctx)));
             }
-            Some(restore_escapes(url))
+            url
         } else {
-            Some(restore_escapes(&rest_sub))
-        }
-    } else {
-        Some(restore_escapes(&substitute_vars(
-            &protect_escapes(&rest),
-            &ctx.variables,
-        )))
-    };
+            text.raw.clone()
+        };
+        restore_escapes(&substitute_vars(&protect_escapes(&raw), &ctx.variables))
+    });
 
     // For @slot, the argument is the slot name
     let kind = if let ElementKind::Slot(_) = kind {
@@ -1225,12 +1383,14 @@ fn parse_single_element(
 
     // Every other element treats its argument as leading text content, as
     // in `@el [padding 8] Hello` or `@paragraph Read {@link /more more}`.
-    let argument = match argument {
-        Some(_) if !argument_is_special(&kind) && !renders_argument_as_text(&kind) => {
-            children.insert(0, Node::Text(parse_text_segments(&rest, ctx)));
+    let argument = match (argument, text) {
+        (Some(_), Some(text))
+            if !argument_is_special(&kind) && !renders_argument_as_text(&kind) =>
+        {
+            children.insert(0, Node::Text(text_segments(text, ctx)));
             None
         }
-        other => other,
+        (argument, _) => argument,
     };
 
     Ok(Element {
@@ -1253,32 +1413,31 @@ fn argument_is_special(kind: &ElementKind) -> bool {
         .is_some_and(|spec| matches!(spec.arg, TagArg::Attr(_)))
 }
 
-/// The directive names (without `@`) the parser recognizes, for tools such
-/// as the language server.
-pub fn known_directives() -> &'static [&'static str] {
-    KNOWN_DIRECTIVES
-}
-
-const KNOWN_DIRECTIVES: &[&str] = &[
-    "page", "let", "include", "raw", "if", "else", "each", "meta", "head", "style", "markdown",
-    "data",
-];
-
-fn parse_element_kind(s: &str, line_num: usize) -> Result<ElementKind, ParseError> {
-    if let Some(kind) = ElementKind::from_name(s) {
+/// The element named `name`, or an "unknown element" error that suggests
+/// the closest element, directive or function.
+fn parse_element_kind(
+    name: &str,
+    line_num: usize,
+    ctx: &ParseContext,
+) -> Result<ElementKind, ParseError> {
+    if let Some(kind) = ElementKind::from_name(name) {
         return Ok(kind);
     }
     let all_known: Vec<&str> = ElementKind::all_names()
-        .chain(KNOWN_DIRECTIVES.iter().copied())
+        .chain(DIRECTIVES.iter().map(|d| d.name))
         .collect();
-    let message = match suggest_closest(s, &all_known) {
-        Some(closest) => format!("unknown element @{}, did you mean @{}?", s, closest),
-        None => format!("unknown element @{}", s),
+    let closest = suggest_closest(name, &all_known);
+    let mut message = match closest {
+        Some(closest) => format!("unknown element @{}, did you mean @{}?", name, closest),
+        None => format!("unknown element @{}", name),
     };
-    Err(ParseError {
-        line: line_num,
-        message,
-    })
+    let function = suggest_fn_name(name, ctx);
+    if let Some(function) = &function {
+        message = format!("{}, or did you mean @{}?", message, function);
+    }
+    Err(Diagnostic::error(code::UNKNOWN_ELEMENT, line_num, message)
+        .subject(name)
+        .suggest(closest.map(str::to_string).or(function)))
 }
 
 /// Format include/import stack as a readable chain for error messages.
@@ -1349,25 +1508,24 @@ fn suggest_closest<'a>(input: &str, candidates: &[&'a str]) -> Option<&'a str> {
     best
 }
 
-/// Suggest the closest user-defined function name for typos.
+/// Suggest the closest user-defined function name for typos, from the
+/// functions defined so far and those defined anywhere in the file.
 fn suggest_fn_name(input: &str, ctx: &ParseContext) -> Option<String> {
     let input_chars: Vec<char> = input.chars().collect();
     let max_allowed = 2usize.min(input_chars.len().saturating_sub(1));
-    let mut best: Option<String> = None;
-    let mut best_dist = usize::MAX;
-    for name in ctx.functions.keys() {
+    let mut best: Option<(usize, &String)> = None;
+    for name in ctx.functions.keys().chain(ctx.namespace.iter()) {
         let nlen = name.chars().count();
         if nlen.abs_diff(input_chars.len()) > max_allowed {
             continue;
         }
         let name_chars: Vec<char> = name.chars().collect();
         let dist = levenshtein_bounded(&input_chars, &name_chars, max_allowed);
-        if dist < best_dist && dist <= max_allowed {
-            best_dist = dist;
-            best = Some(name.clone());
+        if dist <= max_allowed && best.is_none_or(|b| (dist, name) < b) {
+            best = Some((dist, name));
         }
     }
-    best
+    best.map(|(_, name)| name.clone())
 }
 
 /// Suggest the closest variable name for undefined `$var` references.
@@ -1430,16 +1588,21 @@ fn check_undefined_vars(
                 && !vars.contains_key(&name)
                 && let Some(closest) = suggest_var_name(&name, vars)
             {
-                warnings.push(Diagnostic {
-                    line: line_num,
-                    column: Some(indent + col),
-                    message: format!(
-                        "undefined variable '${}', did you mean '${}'?",
-                        name, closest
-                    ),
-                    severity: Severity::Warning,
-                    source_line: Some(format!("{}{}", " ".repeat(indent), input)),
-                });
+                warnings.push(
+                    Diagnostic::new(
+                        code::UNDEFINED_VARIABLE,
+                        Severity::Warning,
+                        line_num,
+                        format!(
+                            "undefined variable '${}', did you mean '${}'?",
+                            name, closest
+                        ),
+                    )
+                    .column(indent + col)
+                    .source(format!("{}{}", " ".repeat(indent), input))
+                    .subject(name.clone())
+                    .suggest(Some(closest)),
+                );
             }
             i = end;
         } else {
@@ -1503,16 +1666,15 @@ fn validate_attr_value(attr: &Attribute, line_num: usize, ctx: &mut ParseContext
             // All space-separated parts must be numeric or have a CSS unit
             for part in val.split_whitespace() {
                 if part.parse::<f64>().is_err() && !has_css_unit(part) {
-                    ctx.diagnostics.push(Diagnostic {
-                        line: line_num,
-                        column: None,
-                        message: format!(
+                    ctx.diagnostics.push(Diagnostic::new(
+                        code::INVALID_VALUE,
+                        Severity::Warning,
+                        line_num,
+                        format!(
                             "'{}' expects a numeric value (with optional unit), got '{}'",
                             attr.key, val
                         ),
-                        severity: Severity::Warning,
-                        source_line: None,
-                    });
+                    ));
                     return;
                 }
             }
@@ -1521,48 +1683,44 @@ fn validate_attr_value(attr: &Attribute, line_num: usize, ctx: &mut ParseContext
             let is_numeric = val.parse::<f64>().is_ok();
             let has_unit = has_css_unit(val);
             if !is_keyword && !is_numeric && !has_unit {
-                ctx.diagnostics.push(Diagnostic {
-                    line: line_num,
-                    column: None,
-                    message: format!(
+                ctx.diagnostics.push(Diagnostic::new(
+                    code::INVALID_VALUE,
+                    Severity::Warning,
+                    line_num,
+                    format!(
                         "'{}' expects a number or one of [{}], got '{}'",
                         attr.key,
                         SIZE_KEYWORDS.join(", "),
                         val
                     ),
-                    severity: Severity::Warning,
-                    source_line: None,
-                });
+                ));
             }
         } else if base_key == "opacity" {
             if let Ok(v) = val.parse::<f64>() {
                 if !(0.0..=1.0).contains(&v) {
-                    ctx.diagnostics.push(Diagnostic {
-                        line: line_num,
-                        column: None,
-                        message: format!("'opacity' should be between 0 and 1, got '{}'", val),
-                        severity: Severity::Warning,
-                        source_line: None,
-                    });
+                    ctx.diagnostics.push(Diagnostic::new(
+                        code::INVALID_VALUE,
+                        Severity::Warning,
+                        line_num,
+                        format!("'opacity' should be between 0 and 1, got '{}'", val),
+                    ));
                 }
             } else {
-                ctx.diagnostics.push(Diagnostic {
-                    line: line_num,
-                    column: None,
-                    message: format!("'opacity' expects a numeric value, got '{}'", val),
-                    severity: Severity::Warning,
-                    source_line: None,
-                });
+                ctx.diagnostics.push(Diagnostic::new(
+                    code::INVALID_VALUE,
+                    Severity::Warning,
+                    line_num,
+                    format!("'opacity' expects a numeric value, got '{}'", val),
+                ));
             }
         } else if base_key == "z-index" {
             if val.parse::<i32>().is_err() {
-                ctx.diagnostics.push(Diagnostic {
-                    line: line_num,
-                    column: None,
-                    message: format!("'z-index' expects an integer, got '{}'", val),
-                    severity: Severity::Warning,
-                    source_line: None,
-                });
+                ctx.diagnostics.push(Diagnostic::new(
+                    code::INVALID_VALUE,
+                    Severity::Warning,
+                    line_num,
+                    format!("'z-index' expects an integer, got '{}'", val),
+                ));
             }
         } else if base_key == "display" {
             const DISPLAY_VALUES: &[&str] = &[
@@ -1587,13 +1745,12 @@ fn validate_attr_value(attr: &Attribute, line_num: usize, ctx: &mut ParseContext
                     Some(s) => format!("unknown display value '{}', did you mean '{}'?", val, s),
                     None => format!("unknown display value '{}'", val),
                 };
-                ctx.diagnostics.push(Diagnostic {
-                    line: line_num,
-                    column: None,
-                    message: msg,
-                    severity: Severity::Warning,
-                    source_line: None,
-                });
+                ctx.diagnostics.push(Diagnostic::new(
+                    code::INVALID_VALUE,
+                    Severity::Warning,
+                    line_num,
+                    msg,
+                ));
             }
         } else if base_key == "position" {
             const POSITION_VALUES: &[&str] = &["static", "relative", "absolute", "fixed", "sticky"];
@@ -1603,13 +1760,12 @@ fn validate_attr_value(attr: &Attribute, line_num: usize, ctx: &mut ParseContext
                     Some(s) => format!("unknown position value '{}', did you mean '{}'?", val, s),
                     None => format!("unknown position value '{}'", val),
                 };
-                ctx.diagnostics.push(Diagnostic {
-                    line: line_num,
-                    column: None,
-                    message: msg,
-                    severity: Severity::Warning,
-                    source_line: None,
-                });
+                ctx.diagnostics.push(Diagnostic::new(
+                    code::INVALID_VALUE,
+                    Severity::Warning,
+                    line_num,
+                    msg,
+                ));
             }
         } else if base_key == "overflow" || base_key == "overflow-x" || base_key == "overflow-y" {
             const OVERFLOW_VALUES: &[&str] = &["visible", "hidden", "scroll", "auto", "clip"];
@@ -1619,13 +1775,12 @@ fn validate_attr_value(attr: &Attribute, line_num: usize, ctx: &mut ParseContext
                     Some(s) => format!("unknown overflow value '{}', did you mean '{}'?", val, s),
                     None => format!("unknown overflow value '{}'", val),
                 };
-                ctx.diagnostics.push(Diagnostic {
-                    line: line_num,
-                    column: None,
-                    message: msg,
-                    severity: Severity::Warning,
-                    source_line: None,
-                });
+                ctx.diagnostics.push(Diagnostic::new(
+                    code::INVALID_VALUE,
+                    Severity::Warning,
+                    line_num,
+                    msg,
+                ));
             }
         } else if base_key == "text-align" {
             const TEXT_ALIGN_VALUES: &[&str] =
@@ -1636,13 +1791,12 @@ fn validate_attr_value(attr: &Attribute, line_num: usize, ctx: &mut ParseContext
                     Some(s) => format!("unknown text-align value '{}', did you mean '{}'?", val, s),
                     None => format!("unknown text-align value '{}'", val),
                 };
-                ctx.diagnostics.push(Diagnostic {
-                    line: line_num,
-                    column: None,
-                    message: msg,
-                    severity: Severity::Warning,
-                    source_line: None,
-                });
+                ctx.diagnostics.push(Diagnostic::new(
+                    code::INVALID_VALUE,
+                    Severity::Warning,
+                    line_num,
+                    msg,
+                ));
             }
         } else if base_key == "cursor" {
             const CURSOR_VALUES: &[&str] = &[
@@ -1682,13 +1836,12 @@ fn validate_attr_value(attr: &Attribute, line_num: usize, ctx: &mut ParseContext
                     Some(s) => format!("unknown cursor value '{}', did you mean '{}'?", val, s),
                     None => format!("unknown cursor value '{}'", val),
                 };
-                ctx.diagnostics.push(Diagnostic {
-                    line: line_num,
-                    column: None,
-                    message: msg,
-                    severity: Severity::Warning,
-                    source_line: None,
-                });
+                ctx.diagnostics.push(Diagnostic::new(
+                    code::INVALID_VALUE,
+                    Severity::Warning,
+                    line_num,
+                    msg,
+                ));
             }
         } else if base_key == "font-weight" {
             const WEIGHT_VALUES: &[&str] = &[
@@ -1696,16 +1849,15 @@ fn validate_attr_value(attr: &Attribute, line_num: usize, ctx: &mut ParseContext
                 "700", "800", "900",
             ];
             if !WEIGHT_VALUES.contains(&val.as_str()) && !val.starts_with("var(") {
-                ctx.diagnostics.push(Diagnostic {
-                    line: line_num,
-                    column: None,
-                    message: format!(
+                ctx.diagnostics.push(Diagnostic::new(
+                    code::INVALID_VALUE,
+                    Severity::Warning,
+                    line_num,
+                    format!(
                         "'font-weight' expects a weight keyword or number 100-900, got '{}'",
                         val
                     ),
-                    severity: Severity::Warning,
-                    source_line: None,
-                });
+                ));
             }
         } else if base_key == "color" || base_key == "background" {
             // Validate named CSS colors (only if not hex, rgb, hsl, var, etc.)
@@ -1800,70 +1952,15 @@ fn validate_attr_value(attr: &Attribute, line_num: usize, ctx: &mut ParseContext
                         Some(s) => format!("unknown color '{}', did you mean '{}'?", val, s),
                         None => format!("unknown color '{}'", val),
                     };
-                    ctx.diagnostics.push(Diagnostic {
-                        line: line_num,
-                        column: None,
-                        message: msg,
-                        severity: Severity::Warning,
-                        source_line: None,
-                    });
+                    ctx.diagnostics.push(
+                        Diagnostic::warning(code::UNKNOWN_COLOR, line_num, msg)
+                            .subject(val.as_str())
+                            .suggest(suggestion),
+                    );
                 }
             }
         }
     }
-}
-
-fn parse_attr_brackets(
-    input: &str,
-    line_num: usize,
-    ctx: &mut ParseContext,
-) -> Result<(Vec<Attribute>, String), ParseError> {
-    parse_attr_brackets_inner(input, line_num, ctx, true)
-}
-
-fn parse_attr_brackets_no_validate(
-    input: &str,
-    line_num: usize,
-    ctx: &mut ParseContext,
-) -> Result<(Vec<Attribute>, String), ParseError> {
-    parse_attr_brackets_inner(input, line_num, ctx, false)
-}
-
-fn parse_attr_brackets_inner(
-    input: &str,
-    line_num: usize,
-    ctx: &mut ParseContext,
-    validate: bool,
-) -> Result<(Vec<Attribute>, String), ParseError> {
-    let mut depth = 0;
-    let mut end_pos = 0;
-
-    for (i, c) in input.char_indices() {
-        match c {
-            '[' => depth += 1,
-            ']' => {
-                depth -= 1;
-                if depth == 0 {
-                    end_pos = i;
-                    break;
-                }
-            }
-            _ => {}
-        }
-    }
-
-    if depth != 0 {
-        return Err(ParseError {
-            line: line_num,
-            message: "unclosed '[' in attribute list".to_string(),
-        });
-    }
-
-    let attrs_inner = &input[1..end_pos];
-    let remaining = input[end_pos + 1..].trim().to_string();
-    let attrs = parse_attr_list(attrs_inner, line_num, ctx, validate);
-
-    Ok((attrs, remaining))
 }
 
 fn is_valid_hex_color(s: &str) -> bool {
@@ -1874,8 +1971,11 @@ fn is_valid_hex_color(s: &str) -> bool {
     matches!(hex.len(), 3 | 4 | 6 | 8) && hex.chars().all(|c| c.is_ascii_hexdigit())
 }
 
+/// Evaluate the attributes of a list: bundles are spliced in, `if()`
+/// chooses, variables are substituted. With `validate`, unknown names and
+/// invalid values are reported.
 fn parse_attr_list(
-    input: &str,
+    tokens: &[syntax::Attr],
     line_num: usize,
     ctx: &mut ParseContext,
     validate: bool,
@@ -1883,8 +1983,8 @@ fn parse_attr_list(
     let mut attrs = Vec::new();
     let mut seen_keys: Vec<String> = Vec::new();
 
-    for part in split_commas(input) {
-        let part = part.trim();
+    for token in tokens {
+        let part = token.raw.as_str();
         // A whole attribute `if(cond, a, b)` is the chosen branch's text.
         let chosen;
         let part = match choose_if(part, ctx, line_num) {
@@ -1916,7 +2016,7 @@ fn parse_attr_list(
         };
         let part = substitute_vars(&part, &ctx.variables);
 
-        let attr = if let Some((key, value)) = split_html_attribute(&part) {
+        let attr = if let Some((key, value)) = syntax::split_html_attribute(&part) {
             Attribute {
                 key: key.to_string(),
                 value: Some(value.to_string()),
@@ -1941,13 +2041,12 @@ fn parse_attr_list(
         // variants like `border` and `hover:border` are not conflated)
         if validate {
             if seen_keys.contains(&attr.key) {
-                ctx.diagnostics.push(Diagnostic {
-                    line: line_num,
-                    column: None,
-                    message: format!("duplicate attribute '{}'", attr.key),
-                    severity: Severity::Warning,
-                    source_line: None,
-                });
+                ctx.diagnostics.push(Diagnostic::new(
+                    code::DUPLICATE_ATTRIBUTE,
+                    Severity::Warning,
+                    line_num,
+                    format!("duplicate attribute '{}'", attr.key),
+                ));
             } else {
                 seen_keys.push(attr.key.clone());
             }
@@ -1962,13 +2061,12 @@ fn parse_attr_list(
                 && val.starts_with('#')
                 && !is_valid_hex_color(val)
             {
-                ctx.diagnostics.push(Diagnostic {
-                    line: line_num,
-                    column: None,
-                    message: format!("invalid hex color '{}'", val),
-                    severity: Severity::Warning,
-                    source_line: None,
-                });
+                ctx.diagnostics.push(Diagnostic::new(
+                    code::INVALID_COLOR,
+                    Severity::Warning,
+                    line_num,
+                    format!("invalid hex color '{}'", val),
+                ));
             }
         }
 
@@ -1984,18 +2082,20 @@ fn parse_attr_list(
                 || base_key.starts_with("aria-")
                 || base_key.starts_with("data-")
             {
-                ctx.diagnostics.push(Diagnostic {
-                    line: line_num,
-                    column: None,
-                    message: format!(
-                        "'{}' is an HTML attribute: write `{}={}`",
-                        attr.key,
-                        attr.key,
-                        attr.value.as_deref().unwrap_or("")
-                    ),
-                    severity: Severity::Warning,
-                    source_line: None,
-                });
+                ctx.diagnostics.push(
+                    Diagnostic::new(
+                        code::HTML_ATTRIBUTE_FORM,
+                        Severity::Warning,
+                        line_num,
+                        format!(
+                            "'{}' is an HTML attribute: write `{}={}`",
+                            attr.key,
+                            attr.key,
+                            attr.value.as_deref().unwrap_or("")
+                        ),
+                    )
+                    .subject(attr.key.as_str()),
+                );
             } else {
                 let suggestion = suggest_closest(base_key, &crate::vocab::all_attributes());
                 let msg = match suggestion {
@@ -2007,13 +2107,11 @@ fn parse_attr_list(
                     }
                     None => format!("unknown attribute '{}'", attr.key),
                 };
-                ctx.diagnostics.push(Diagnostic {
-                    line: line_num,
-                    column: None,
-                    message: msg,
-                    severity: Severity::Warning,
-                    source_line: None,
-                });
+                ctx.diagnostics.push(
+                    Diagnostic::warning(code::UNKNOWN_ATTRIBUTE, line_num, msg)
+                        .subject(base_key)
+                        .suggest(suggestion),
+                );
             }
         }
 
@@ -2021,86 +2119,6 @@ fn parse_attr_list(
     }
 
     attrs
-}
-
-/// Split an HTML attribute written `key=value` (`alt=`, `type=email`,
-/// `aria-label=Close menu`). Returns `None` for style attributes.
-fn split_html_attribute(part: &str) -> Option<(&str, &str)> {
-    let first_token = part.split(char::is_whitespace).next()?;
-    let eq = first_token.find('=')?;
-    let key = &part[..eq];
-    let valid_key = key.starts_with(|c: char| c.is_ascii_alphabetic())
-        && key
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
-    valid_key.then(|| (key, part[eq + 1..].trim()))
-}
-
-fn split_commas(input: &str) -> Vec<&str> {
-    let mut parts = Vec::new();
-    let mut start = 0;
-    let mut depth = 0;
-    let mut in_quotes = false;
-
-    for (i, c) in input.char_indices() {
-        match c {
-            '"' => in_quotes = !in_quotes,
-            _ if in_quotes => {}
-            '[' | '(' => depth += 1,
-            ']' | ')' => depth -= 1,
-            ',' if depth == 0 => {
-                parts.push(&input[start..i]);
-                start = i + 1;
-            }
-            _ => {}
-        }
-    }
-    parts.push(&input[start..]);
-    parts
-}
-
-// ---------------------------------------------------------------------------
-// Chain splitting (the > operator)
-// ---------------------------------------------------------------------------
-
-fn split_chain(content: &str) -> Vec<String> {
-    let mut segments = Vec::new();
-    let mut current = String::new();
-    let chars: Vec<char> = content.chars().collect();
-    let mut i = 0;
-    let mut bracket_depth = 0;
-
-    while i < chars.len() {
-        if chars[i] == '[' {
-            bracket_depth += 1;
-        }
-        if chars[i] == ']' {
-            bracket_depth -= 1;
-        }
-
-        // Match " > @" outside brackets
-        if bracket_depth == 0
-            && i + 3 < chars.len()
-            && chars[i] == ' '
-            && chars[i + 1] == '>'
-            && chars[i + 2] == ' '
-            && chars[i + 3] == '@'
-        {
-            segments.push(current.trim().to_string());
-            current = String::new();
-            i += 3; // skip " > ", keep the "@"
-            continue;
-        }
-
-        current.push(chars[i]);
-        i += 1;
-    }
-
-    if !current.trim().is_empty() {
-        segments.push(current.trim().to_string());
-    }
-
-    segments
 }
 
 // ---------------------------------------------------------------------------
@@ -2137,77 +2155,49 @@ fn restore_escapes(text: &str) -> String {
     out
 }
 
-fn parse_text_segments(input: &str, ctx: &mut ParseContext) -> Vec<TextSegment> {
+/// Evaluate text: substitute variables in its plain runs and build its
+/// inline elements.
+fn text_segments(text: &syntax::Text, ctx: &mut ParseContext) -> Vec<TextSegment> {
     let mut segments = Vec::new();
-    let mut current_text = String::new();
-    let chars: Vec<char> = protect_escapes(input).chars().collect();
-    let mut i = 0;
-
-    while i < chars.len() {
-        if chars[i] == '{' && i + 1 < chars.len() && chars[i + 1] == '@' {
-            // Flush accumulated plain text
-            if !current_text.is_empty() {
-                segments.push(TextSegment::Plain(restore_escapes(&substitute_vars(
-                    &current_text,
-                    &ctx.variables,
-                ))));
-                current_text.clear();
-            }
-
-            // Find matching }
-            let mut depth = 0;
-            let start = i + 1; // after {
-            i += 1;
-            loop {
-                if i >= chars.len() {
-                    break;
-                }
-                if chars[i] == '{' {
-                    depth += 1;
-                } else if chars[i] == '}' {
-                    if depth == 0 {
-                        break;
+    let mut plain = String::new();
+    let flush = |plain: &mut String, segments: &mut Vec<TextSegment>, ctx: &ParseContext| {
+        if !plain.is_empty() {
+            let text = substitute_vars(&protect_escapes(plain), &ctx.variables);
+            segments.push(TextSegment::Plain(restore_escapes(&text)));
+            plain.clear();
+        }
+    };
+    for segment in &text.segments {
+        match segment {
+            Segment::Plain { raw, .. } => plain.push_str(raw),
+            Segment::Inline(inline) => {
+                match parse_single_element(
+                    &inline.head,
+                    inline.text.as_ref(),
+                    ctx.current_line,
+                    ctx,
+                ) {
+                    Ok(elem) => {
+                        flush(&mut plain, &mut segments, ctx);
+                        segments.push(TextSegment::Inline(elem));
                     }
-                    depth -= 1;
-                }
-                i += 1;
-            }
-
-            let inner: String = chars[start..i].iter().collect();
-            i += 1; // skip }
-
-            match parse_single_element(&inner, ctx.current_line, ctx) {
-                Ok(elem) => segments.push(TextSegment::Inline(elem)),
-                Err(e) => {
-                    // Keep the braces as literal text, but flag what looks
-                    // like a mistyped inline element.
-                    if inner.trim_start().starts_with('@') {
-                        ctx.diagnostics.push(Diagnostic {
-                            line: ctx.current_line,
-                            column: None,
-                            message: e.message,
-                            severity: Severity::Warning,
-                            source_line: Some(input.to_string()),
-                        });
+                    Err(mut e) => {
+                        // Keep the braces as literal text, but flag what
+                        // looks like a mistyped inline element.
+                        e.severity = Severity::Warning;
+                        e.source_line = Some(text.raw.as_str().into());
+                        ctx.diagnostics.push(e);
+                        plain.push('{');
+                        plain.push_str(&inline.raw);
+                        if inline.closed {
+                            plain.push('}');
+                        }
                     }
-                    current_text.push('{');
-                    current_text.push_str(&inner);
-                    current_text.push('}');
                 }
             }
-        } else {
-            current_text.push(chars[i]);
-            i += 1;
         }
     }
-
-    if !current_text.is_empty() {
-        segments.push(TextSegment::Plain(restore_escapes(&substitute_vars(
-            &current_text,
-            &ctx.variables,
-        ))));
-    }
-
+    flush(&mut plain, &mut segments, ctx);
     segments
 }
 
@@ -2381,29 +2371,29 @@ pub fn lint(nodes: &[Node]) -> Vec<Diagnostic> {
     fn walk(nodes: &[Node], depth: usize, out: &mut Vec<Diagnostic>) {
         for node in nodes {
             let Node::Element(elem) = node else { continue };
-            let mut warn = |message: String| {
-                out.push(Diagnostic {
-                    line: elem.line_num,
-                    column: None,
-                    message,
-                    severity: Severity::Warning,
-                    source_line: None,
-                })
+            let mut warn = |code: &'static str, message: String| {
+                out.push(Diagnostic::warning(code, elem.line_num, message))
             };
             if depth > 10 {
-                warn(format!(
-                    "deeply nested element ({} levels): consider simplifying",
-                    depth
-                ));
+                warn(
+                    code::DEEP_NESTING,
+                    format!(
+                        "deeply nested element ({} levels): consider simplifying",
+                        depth
+                    ),
+                );
             }
             if matches!(elem.kind, ElementKind::Row | ElementKind::El) && elem.children.is_empty() {
-                warn(format!(
-                    "empty container (@{}) has no children",
-                    elem.kind.name()
-                ));
+                warn(
+                    code::EMPTY_CONTAINER,
+                    format!("empty container (@{}) has no children", elem.kind.name()),
+                );
             }
             if elem.kind.is_tag("button") && !elem.attrs.iter().any(|a| a.key == "type") {
-                warn("@button missing 'type' attribute (defaults to submit)".to_string());
+                warn(
+                    code::MISSING_BUTTON_TYPE,
+                    "@button missing 'type' attribute (defaults to submit)".to_string(),
+                );
             }
             walk(&elem.children, depth + 1, out);
         }
@@ -2426,87 +2416,79 @@ fn validate_tree(
                     && attr.value.as_deref() == Some("fill")
                     && !matches!(parent_kind, Some(ElementKind::Row))
                 {
-                    diagnostics.push(Diagnostic {
-                        line: elem.line_num,
-                        column: None,
-                        message: "'width fill' works best inside @row; using 100% as fallback"
-                            .to_string(),
-                        severity: Severity::Warning,
-                        source_line: None,
-                    });
+                    diagnostics.push(Diagnostic::new(
+                        code::FILL_FALLBACK,
+                        Severity::Warning,
+                        elem.line_num,
+                        "'width fill' works best inside @row; using 100% as fallback".to_string(),
+                    ));
                 }
                 if base == "height"
                     && attr.value.as_deref() == Some("fill")
                     && !parent_kind.is_some_and(ElementKind::is_column)
                 {
-                    diagnostics.push(Diagnostic {
-                        line: elem.line_num,
-                        column: None,
-                        message: "'height fill' works best inside @el; using 100% as fallback"
-                            .to_string(),
-                        severity: Severity::Warning,
-                        source_line: None,
-                    });
+                    diagnostics.push(Diagnostic::new(
+                        code::FILL_FALLBACK,
+                        Severity::Warning,
+                        elem.line_num,
+                        "'height fill' works best inside @el; using 100% as fallback".to_string(),
+                    ));
                 }
 
                 // Container-only attributes on non-container elements
                 if CONTAINER_ONLY_ATTRS.contains(&base) && !is_container(&elem.kind) {
-                    diagnostics.push(Diagnostic {
-                        line: elem.line_num,
-                        column: None,
-                        message: format!(
+                    diagnostics.push(Diagnostic::new(
+                        code::NO_EFFECT,
+                        Severity::Warning,
+                        elem.line_num,
+                        format!(
                             "'{}' has no effect on {} (only works on @row, @el, @el)",
                             base,
                             element_kind_name(&elem.kind)
                         ),
-                        severity: Severity::Warning,
-                        source_line: None,
-                    });
+                    ));
                 }
 
                 // Form-specific: placeholder only on @input/@textarea
                 if base == "placeholder"
                     && !(elem.kind.is_tag("input") || elem.kind.is_tag("textarea"))
                 {
-                    diagnostics.push(Diagnostic {
-                        line: elem.line_num,
-                        column: None,
-                        message: format!(
+                    diagnostics.push(Diagnostic::new(
+                        code::NO_EFFECT,
+                        Severity::Warning,
+                        elem.line_num,
+                        format!(
                             "'placeholder' has no effect on {} (only works on @input, @textarea)",
                             element_kind_name(&elem.kind)
                         ),
-                        severity: Severity::Warning,
-                        source_line: None,
-                    });
+                    ));
                 }
 
                 // 'for' only on @label
                 if base == "for" && !elem.kind.is_tag("label") {
-                    diagnostics.push(Diagnostic {
-                        line: elem.line_num,
-                        column: None,
-                        message: format!(
+                    diagnostics.push(Diagnostic::new(
+                        code::NO_EFFECT,
+                        Severity::Warning,
+                        elem.line_num,
+                        format!(
                             "'for' has no effect on {} (only works on @label)",
                             element_kind_name(&elem.kind)
                         ),
-                        severity: Severity::Warning,
-                        source_line: None,
-                    });
+                    ));
                 }
 
                 // 'rows'/'cols' only on @textarea
                 if (base == "rows" || base == "cols") && !elem.kind.is_tag("textarea") {
-                    diagnostics.push(Diagnostic {
-                        line: elem.line_num,
-                        column: None,
-                        message: format!(
+                    diagnostics.push(Diagnostic::new(
+                        code::NO_EFFECT,
+                        Severity::Warning,
+                        elem.line_num,
+                        format!(
                             "'{}' has no effect on {} (only works on @textarea)",
                             base,
                             element_kind_name(&elem.kind)
                         ),
-                        severity: Severity::Warning,
-                        source_line: None,
-                    });
+                    ));
                 }
 
                 // Media-specific attributes only on @video/@audio
@@ -2521,38 +2503,35 @@ fn validate_tree(
                         | "preload"
                 ) && !matches!(elem.kind.name(), "video" | "audio")
                 {
-                    diagnostics.push(Diagnostic {
-                        line: elem.line_num,
-                        column: None,
-                        message: format!(
+                    diagnostics.push(Diagnostic::new(
+                        code::NO_EFFECT,
+                        Severity::Warning,
+                        elem.line_num,
+                        format!(
                             "'{}' has no effect on {} (only works on @video, @audio)",
                             base,
                             element_kind_name(&elem.kind)
                         ),
-                        severity: Severity::Warning,
-                        source_line: None,
-                    });
+                    ));
                 }
             }
             // Missing alt text on @image
             if matches!(elem.kind, ElementKind::Image) && !elem.attrs.iter().any(|a| a.key == "alt")
             {
-                diagnostics.push(Diagnostic {
-                    line: elem.line_num,
-                    column: None,
-                    message: "@image missing 'alt' attribute (accessibility)".to_string(),
-                    severity: Severity::Warning,
-                    source_line: None,
-                });
+                diagnostics.push(Diagnostic::new(
+                    code::MISSING_ALT,
+                    Severity::Warning,
+                    elem.line_num,
+                    "@image missing 'alt' attribute (accessibility)".to_string(),
+                ));
             }
             if elem.kind.is_tag("input") && !elem.attrs.iter().any(|a| a.key == "type") {
-                diagnostics.push(Diagnostic {
-                    line: elem.line_num,
-                    column: None,
-                    message: "@input missing 'type' attribute (defaults to 'text')".to_string(),
-                    severity: Severity::Warning,
-                    source_line: None,
-                });
+                diagnostics.push(Diagnostic::new(
+                    code::MISSING_INPUT_TYPE,
+                    Severity::Warning,
+                    elem.line_num,
+                    "@input missing 'type' attribute (defaults to 'text')".to_string(),
+                ));
             }
             if matches!(elem.kind, ElementKind::Link) {
                 // For @link, argument is the URL, not text content
@@ -2563,14 +2542,12 @@ fn validate_tree(
                         .iter()
                         .any(|a| a.key == "aria-label" || a.key == "title")
                 {
-                    diagnostics.push(Diagnostic {
-                        line: elem.line_num,
-                        column: None,
-                        message: "@link has no visible text or aria-label (accessibility)"
-                            .to_string(),
-                        severity: Severity::Warning,
-                        source_line: None,
-                    });
+                    diagnostics.push(Diagnostic::new(
+                        code::MISSING_LINK_TEXT,
+                        Severity::Warning,
+                        elem.line_num,
+                        "@link has no visible text or aria-label (accessibility)".to_string(),
+                    ));
                 }
             }
 
@@ -2594,16 +2571,10 @@ fn validate_tree(
                 {
                     let ratio = contrast_ratio(bg_rgb, fg_rgb);
                     if ratio < 4.5 {
-                        diagnostics.push(Diagnostic {
-                                line: elem.line_num,
-                                column: None,
-                                message: format!(
+                        diagnostics.push(Diagnostic::new(code::LOW_CONTRAST, Severity::Warning, elem.line_num, format!(
                                     "low contrast ratio {:.1}:1 between '{}' and '{}' (WCAG AA requires 4.5:1)",
                                     ratio, fg, bg
-                                ),
-                                severity: Severity::Warning,
-                                source_line: None,
-                            });
+                                )));
                     }
                 }
             }
@@ -2618,28 +2589,21 @@ fn validate_tree(
                 let has_title = elem.attrs.iter().any(|a| a.key == "title");
                 let in_label = parent_kind.is_some_and(|k| k.is_tag("label"));
                 if !has_id && !has_aria_label && !has_title && !in_label {
-                    diagnostics.push(Diagnostic {
-                        line: elem.line_num,
-                        column: None,
-                        message: format!(
+                    diagnostics.push(Diagnostic::new(code::MISSING_LABEL, Severity::Warning, elem.line_num, format!(
                             "{} should have an 'id' (with matching @label[for]), 'aria-label', or be wrapped in @label (accessibility)",
                             element_kind_name(&elem.kind)
-                        ),
-                        severity: Severity::Warning,
-                        source_line: None,
-                    });
+                        )));
                 }
             }
 
             // @iframe should have title attribute
             if elem.kind.is_tag("iframe") && !elem.attrs.iter().any(|a| a.key == "title") {
-                diagnostics.push(Diagnostic {
-                    line: elem.line_num,
-                    column: None,
-                    message: "@iframe missing 'title' attribute (accessibility)".to_string(),
-                    severity: Severity::Warning,
-                    source_line: None,
-                });
+                diagnostics.push(Diagnostic::new(
+                    code::MISSING_TITLE,
+                    Severity::Warning,
+                    elem.line_num,
+                    "@iframe missing 'title' attribute (accessibility)".to_string(),
+                ));
             }
 
             // @button should have accessible text
@@ -2647,14 +2611,12 @@ fn validate_tree(
                 let has_text = elem.argument.is_some() || !elem.children.is_empty();
                 let has_aria = elem.attrs.iter().any(|a| a.key == "aria-label");
                 if !has_text && !has_aria {
-                    diagnostics.push(Diagnostic {
-                        line: elem.line_num,
-                        column: None,
-                        message: "@button has no text content or aria-label (accessibility)"
-                            .to_string(),
-                        severity: Severity::Warning,
-                        source_line: None,
-                    });
+                    diagnostics.push(Diagnostic::new(
+                        code::MISSING_BUTTON_TEXT,
+                        Severity::Warning,
+                        elem.line_num,
+                        "@button has no text content or aria-label (accessibility)".to_string(),
+                    ));
                 }
             }
 
@@ -2669,14 +2631,12 @@ fn validate_tree(
                     .iter()
                     .any(|c| matches!(c, Node::Element(e) if e.kind.is_tag("source")));
                 if !has_aria && !has_track {
-                    diagnostics.push(Diagnostic {
-                        line: elem.line_num,
-                        column: None,
-                        message: "@video should have aria-label or captions for accessibility"
-                            .to_string(),
-                        severity: Severity::Warning,
-                        source_line: None,
-                    });
+                    diagnostics.push(Diagnostic::new(
+                        code::MISSING_CAPTIONS,
+                        Severity::Warning,
+                        elem.line_num,
+                        "@video should have aria-label or captions for accessibility".to_string(),
+                    ));
                 }
             }
 
@@ -2686,13 +2646,7 @@ fn validate_tree(
                 && let Ok(n) = val.parse::<i32>()
                 && n > 0
             {
-                diagnostics.push(Diagnostic {
-                                line: elem.line_num,
-                                column: None,
-                                message: format!("tabindex {} is positive — avoid positive tabindex values as they disrupt natural tab order", n),
-                                severity: Severity::Warning,
-                                source_line: None,
-                            });
+                diagnostics.push(Diagnostic::new(code::POSITIVE_TABINDEX, Severity::Warning, elem.line_num, format!("tabindex {} is positive — avoid positive tabindex values as they disrupt natural tab order", n)));
             }
 
             validate_tree(&elem.children, Some(&elem.kind), diagnostics);
@@ -2791,13 +2745,12 @@ fn inline_svg(node: Node, line_num: usize, ctx: &mut ParseContext) -> Node {
     let mut svg = match std::fs::read_to_string(&resolved) {
         Ok(text) => text.trim().to_string(),
         Err(e) => {
-            ctx.diagnostics.push(Diagnostic {
-                line: line_num,
-                column: None,
-                message: format!("cannot load SVG '{}': {}", filename, e),
-                severity: Severity::Error,
-                source_line: None,
-            });
+            ctx.diagnostics.push(Diagnostic::new(
+                code::UNREADABLE_FILE,
+                Severity::Error,
+                line_num,
+                format!("cannot load SVG '{}': {}", filename, e),
+            ));
             return node;
         }
     };
@@ -2880,42 +2833,48 @@ fn check_unused(ctx: &mut ParseContext) {
             continue; // CSS vars are always used
         }
         if !ctx.used_variables.contains(name) {
-            ctx.diagnostics.push(Diagnostic {
-                line,
-                column: None,
-                message: format!("unused variable '${}' (defined but never referenced)", name),
-                severity: Severity::Warning,
-                source_line: None,
-            });
+            ctx.diagnostics.push(
+                Diagnostic::new(
+                    code::UNUSED_VARIABLE,
+                    Severity::Warning,
+                    line,
+                    format!("unused variable '${}' (defined but never referenced)", name),
+                )
+                .subject(name.as_str()),
+            );
         }
     }
 
     // Check unused attribute bundles (@let name [...])
     for (name, &line) in &ctx.define_lines {
         if !ctx.used_defines.contains(name) {
-            ctx.diagnostics.push(Diagnostic {
-                line,
-                column: None,
-                message: format!(
-                    "unused attribute bundle '${}' (defined but never referenced)",
-                    name
-                ),
-                severity: Severity::Warning,
-                source_line: None,
-            });
+            ctx.diagnostics.push(
+                Diagnostic::new(
+                    code::UNUSED_BUNDLE,
+                    Severity::Warning,
+                    line,
+                    format!(
+                        "unused attribute bundle '${}' (defined but never referenced)",
+                        name
+                    ),
+                )
+                .subject(name.as_str()),
+            );
         }
     }
 
     // Check unused functions (@let name ... with body)
     for (name, &line) in &ctx.fn_lines {
         if !ctx.used_functions.contains(name) {
-            ctx.diagnostics.push(Diagnostic {
-                line,
-                column: None,
-                message: format!("unused function '@{}' (defined but never called)", name),
-                severity: Severity::Warning,
-                source_line: None,
-            });
+            ctx.diagnostics.push(
+                Diagnostic::new(
+                    code::UNUSED_FUNCTION,
+                    Severity::Warning,
+                    line,
+                    format!("unused function '@{}' (defined but never called)", name),
+                )
+                .subject(name.as_str()),
+            );
         }
     }
 }
@@ -2999,34 +2958,6 @@ fn parse_json_with_error(input: &str) -> Result<JsonValue, String> {
             ))
         }
     }
-}
-
-/// Visit the lines of a block in source order, children after their line.
-fn for_each_line<'a>(block: &'a [Syntax], f: &mut impl FnMut(&'a Syntax)) {
-    for node in block {
-        f(node);
-        if let Syntax::Line { children, .. } = node {
-            for_each_line(children, f);
-        }
-    }
-}
-
-/// The text of a block whose lines are content, not htmlang (`@head`,
-/// `@style`, `@markdown`): each line trimmed, verbatim text as is.
-fn block_text(block: &[Syntax]) -> String {
-    let mut text = String::new();
-    for_each_line(block, &mut |node| match node {
-        Syntax::Line { text: line, .. } => {
-            text.push_str(line.trim());
-            text.push('\n');
-        }
-        Syntax::Raw { text: raw, .. } => {
-            text.push_str(raw);
-            text.push('\n');
-        }
-        _ => {}
-    });
-    text
 }
 
 fn parse_json_value(chars: &[char], mut pos: usize) -> Option<(JsonValue, usize)> {

@@ -71,6 +71,14 @@ An attribute can take one of three forms:
 A comma inside `(...)` or `"..."` doesn't split attributes, so a font stack
 is written `font-family "Inter, sans-serif"`.
 
+The attribute list belongs to the element name right before it. Anywhere
+else, `[` is an ordinary character, so a line of text can contain one:
+
+```
+@text Use [ to open a list
+@paragraph Arrays look like [1, 2, 3].
+```
+
 ### Text
 
 A line that doesn't start with `@` is text. Text after an element's
@@ -112,7 +120,8 @@ because `--` later in a line is ordinary text.
 ### Chains
 
 `>` puts elements that have one child each on one line. The last element in
-the chain gets the indented children.
+the chain gets the indented children. A `>` is a chain only between two
+elements (`@name [attributes]`); in text it is just a character.
 
 ```
 @el [padding 16, background blue, border-radius 8] > @link https://example.com
@@ -133,6 +142,40 @@ htmlang, and a `--` line in them is not a comment.
     <span>Hand-written HTML</span>
   </div>
 ```
+
+### Directives
+
+A directive is a built-in word that isn't an element. Each one takes a
+fixed kind of argument and a fixed kind of body:
+
+| Directive | Argument | Body |
+|---|---|---|
+| `@page` | attributes and a title | none |
+| `@let` | a name and a value, bundle or parameters | a function's body |
+| `@include` | a file | none |
+| `@data` | a variable and a source | none |
+| `@meta` | a name and a value | none |
+| `@if`, `@else`, `@each` | a condition or a loop | htmlang |
+| `@style`, `@head` | none | verbatim |
+| `@raw`, `@markdown` | the rest of the line (or a file, for `@markdown`) | verbatim, instead of the argument |
+
+An indented line under a directive that takes no body is an error, because
+it would otherwise silently become a sibling.
+
+### Diagnostics
+
+The compiler checks the whole file, including code that doesn't run: the
+branch of an `@if` that isn't taken, the body of a function that is never
+called and the body of a loop over an empty list. Unknown elements,
+functions and attributes are reported there too. A function may be called
+before the line that defines it, and functions from included files count.
+Only a name that depends on data, such as a variable a loop fills in, is
+checked just where the code runs.
+
+Every diagnostic has a stable code, such as `unknown-element` or
+`unused-variable`. The command line prints it as `error[unknown-element]`,
+`--format json` has it in a `code` field, and the editor's quick fixes are
+keyed on it.
 
 ## Layout
 

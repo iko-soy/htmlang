@@ -2,8 +2,11 @@ use std::collections::HashMap;
 
 use tower_lsp::lsp_types::*;
 
+use htmlang::syntax::DefinitionKind;
+
 use crate::hover::{is_word_byte, word_at};
 use crate::state::WorkspaceIndex;
+use crate::tree;
 
 // ---------------------------------------------------------------------------
 // Go to definition
@@ -17,101 +20,56 @@ pub(crate) fn definition_at(
     let lines: Vec<&str> = text.lines().collect();
     let line = lines.get(position.line as usize)?;
 
-    // Check for @include file path navigation
-    let trimmed = line.trim();
-    if let Some(filename) = trimmed.strip_prefix("@include ") {
-        let filename = filename.trim();
-        if !filename.is_empty() {
-            let file_path = uri.to_file_path().ok()?;
-            let dir = file_path.parent()?;
-            let target = dir.join(filename);
-            if target.exists() {
-                let target_uri = Url::from_file_path(&target).ok()?;
-                return Some(GotoDefinitionResponse::Scalar(Location {
-                    uri: target_uri,
-                    range: Range::new(Position::new(0, 0), Position::new(0, 0)),
-                }));
-            }
+    // The file named by `@include`, `@markdown` or `@data`
+    let tree = htmlang::syntax::parse(text);
+    if let Some(node) = tree::node_at(&tree, position.line)
+        && let Some((filename, _)) = tree::file_argument(node)
+    {
+        let file_path = uri.to_file_path().ok()?;
+        let target = file_path.parent()?.join(filename);
+        if target.exists() {
+            let target_uri = Url::from_file_path(&target).ok()?;
+            return Some(GotoDefinitionResponse::Scalar(Location {
+                uri: target_uri,
+                range: Range::new(Position::new(0, 0), Position::new(0, 0)),
+            }));
         }
     }
 
     let col = (position.character as usize).min(line.len());
     let word = word_at(line, col)?;
-
-    // Find definition location
-    let (def_line, def_col, def_len) = if let Some(name) = word.strip_prefix('$') {
+    let range = if let Some(name) = word.strip_prefix('$') {
         find_definition(text, name)?
     } else {
         find_fn_definition(text, word.strip_prefix('@')?)?
     };
-
     Some(GotoDefinitionResponse::Scalar(Location {
         uri: uri.clone(),
-        range: Range::new(
-            Position::new(def_line, def_col),
-            Position::new(def_line, def_col + def_len),
-        ),
+        range,
     }))
 }
 
-/// Find @let definition for a $name reference (variable, attribute bundle, or function param).
-pub(crate) fn find_definition(text: &str, name: &str) -> Option<(u32, u32, u32)> {
-    for (i, line) in text.lines().enumerate() {
-        let trimmed = line.trim();
-        let offset = (line.len() - trimmed.len()) as u32;
-
-        if let Some(rest) = trimmed.strip_prefix("@let ") {
-            let rest_trimmed = rest.trim();
-            // Match variable or attribute bundle: @let name value / @let name [...]
-            if let Some((n, _)) = rest_trimmed.split_once(' ') {
-                if n == name {
-                    let col = offset + "@let ".len() as u32;
-                    return Some((i as u32, col, n.len() as u32));
-                }
-                // Check function parameters
-                let parts: Vec<&str> = rest_trimmed.split_whitespace().collect();
-                for param in &parts[1..] {
-                    let p = param.strip_prefix('$').unwrap_or(param);
-                    let p = p.split('=').next().unwrap_or(p);
-                    if p == name
-                        && let Some(pos) = line.find(param)
-                    {
-                        return Some((i as u32, pos as u32, param.len() as u32));
-                    }
-                }
-            } else if rest_trimmed == name {
-                // @let name (no value, function with no params)
-                let col = offset + "@let ".len() as u32;
-                return Some((i as u32, col, name.len() as u32));
-            }
-        }
-    }
-    None
+/// Where the `$name` a reference uses is defined: a value, an attribute
+/// bundle, or a function's parameter.
+pub(crate) fn find_definition(text: &str, name: &str) -> Option<Range> {
+    let defs = tree::definitions(text);
+    defs.iter()
+        .find(|d| d.kind != DefinitionKind::Function && d.name == name)
+        .map(|d| d.name_range)
+        .or_else(|| {
+            defs.iter()
+                .flat_map(|d| &d.params)
+                .find(|p| p.name == name)
+                .map(|p| p.name_range)
+        })
 }
 
-/// Find @let function definition for an @name function call.
-pub(crate) fn find_fn_definition(text: &str, name: &str) -> Option<(u32, u32, u32)> {
-    let lines: Vec<&str> = text.lines().collect();
-    for (i, line) in lines.iter().enumerate() {
-        let trimmed = line.trim();
-        let offset = (line.len() - trimmed.len()) as u32;
-
-        if let Some(rest) = trimmed.strip_prefix("@let ") {
-            let parts: Vec<&str> = rest.split_whitespace().collect();
-            if parts.first() == Some(&name) {
-                // Verify it's a function (has body or params)
-                let has_body = lines
-                    .get(i + 1)
-                    .map(|l| l.starts_with("  ") || l.starts_with('\t'))
-                    .unwrap_or(false);
-                if has_body {
-                    let col = offset + "@let ".len() as u32;
-                    return Some((i as u32, col, name.len() as u32));
-                }
-            }
-        }
-    }
-    None
+/// Where the function an `@name` call uses is defined.
+pub(crate) fn find_fn_definition(text: &str, name: &str) -> Option<Range> {
+    tree::definitions(text)
+        .into_iter()
+        .find(|d| d.kind == DefinitionKind::Function && d.name == name)
+        .map(|d| d.name_range)
 }
 
 // ---------------------------------------------------------------------------
@@ -176,135 +134,52 @@ pub(crate) fn rename_at(
         .unwrap_or(new_name);
 
     let mut edits = Vec::new();
+    let edit = |range: Range, new_text: String| TextEdit { range, new_text };
 
+    // The definitions, where the name is written without its sigil
+    for def in tree::definitions(text) {
+        if is_var {
+            if def.kind != DefinitionKind::Function && def.name == name {
+                edits.push(edit(def.name_range, new_base.to_string()));
+            }
+            for param in def.params.iter().filter(|p| p.name == name) {
+                edits.push(edit(param.name_range, new_base.to_string()));
+            }
+        } else if def.kind == DefinitionKind::Function && def.name == name {
+            edits.push(edit(def.name_range, new_base.to_string()));
+        }
+    }
+
+    // The references: `$name` or `@name`, outside verbatim bodies
+    let verbatim = tree::verbatim_lines(&htmlang::syntax::parse(text));
+    let sigil = if is_var { '$' } else { '@' };
+    let search = format!("{}{}", sigil, name);
+    let replace = format!("{}{}", sigil, new_base);
     for (i, line) in text.lines().enumerate() {
         let line_num = i as u32;
-        let trimmed = line.trim();
-
-        if is_var {
-            // Rename @let definition
-            if let Some(rest) = trimmed.strip_prefix("@let ")
-                && let Some((n, _)) = rest.trim().split_once(' ')
-                && n == name
-                && let Some(pos) = line.find(n)
-            {
-                edits.push(TextEdit {
-                    range: Range::new(
-                        Position::new(line_num, pos as u32),
-                        Position::new(line_num, (pos + n.len()) as u32),
-                    ),
-                    new_text: new_base.to_string(),
-                });
-            }
-
-            // Rename @let attribute bundle or parameter definitions
-            if let Some(rest) = trimmed.strip_prefix("@let ") {
-                let rest_trimmed = rest.trim();
-                // Attribute bundle: @let name [...]
-                if let Some(bracket) = rest_trimmed.find('[') {
-                    let n = rest_trimmed[..bracket].trim();
-                    if n == name
-                        && let Some(pos) = line.find(n)
-                    {
-                        edits.push(TextEdit {
-                            range: Range::new(
-                                Position::new(line_num, pos as u32),
-                                Position::new(line_num, (pos + n.len()) as u32),
-                            ),
-                            new_text: new_base.to_string(),
-                        });
-                        continue; // Don't also match $ references on this line
-                    }
-                }
-                // Function parameter definitions
-                let parts: Vec<&str> = rest_trimmed.split_whitespace().collect();
-                for param in &parts[1..] {
-                    let p = param.strip_prefix('$').unwrap_or(param);
-                    let p = p.split('=').next().unwrap_or(p);
-                    if p == name
-                        && let Some(pos) = line.find(param)
-                    {
-                        let prefix = if param.starts_with('$') { "$" } else { "" };
-                        edits.push(TextEdit {
-                            range: Range::new(
-                                Position::new(line_num, pos as u32),
-                                Position::new(line_num, (pos + param.len()) as u32),
-                            ),
-                            new_text: format!("{}{}", prefix, new_base),
-                        });
-                    }
+        if verbatim.contains(&line_num) {
+            continue;
+        }
+        let mut offset = 0;
+        while let Some(pos) = line[offset..].find(&search) {
+            let abs_pos = offset + pos;
+            let after = abs_pos + search.len();
+            // Not part of a longer name
+            let is_end = line[after..]
+                .chars()
+                .next()
+                .is_none_or(|c| !(c.is_alphanumeric() || c == '-' || c == '_'));
+            if is_end {
+                let range = Range::new(
+                    Position::new(line_num, abs_pos as u32),
+                    Position::new(line_num, after as u32),
+                );
+                // A parameter's `$` belongs to the edit above
+                if !edits.iter().any(|e| overlaps(&e.range, &range)) {
+                    edits.push(edit(range, replace.clone()));
                 }
             }
-
-            // Rename all $name references
-            let search = format!("${}", name);
-            let replace = format!("${}", new_base);
-            let mut offset = 0;
-            while let Some(pos) = line[offset..].find(&search) {
-                let abs_pos = offset + pos;
-                // Check it's not part of a longer identifier
-                let after = abs_pos + search.len();
-                let is_end = after >= line.len()
-                    || !line.as_bytes()[after].is_ascii_alphanumeric()
-                        && line.as_bytes()[after] != b'-'
-                        && line.as_bytes()[after] != b'_';
-                if is_end {
-                    edits.push(TextEdit {
-                        range: Range::new(
-                            Position::new(line_num, abs_pos as u32),
-                            Position::new(line_num, (abs_pos + search.len()) as u32),
-                        ),
-                        new_text: replace.clone(),
-                    });
-                }
-                offset = abs_pos + search.len();
-            }
-        } else {
-            // Rename @let function definition
-            if let Some(rest) = trimmed.strip_prefix("@let ") {
-                let parts: Vec<&str> = rest.split_whitespace().collect();
-                if parts.first() == Some(&name)
-                    && let Some(pos) = line.find(&format!("@let {}", name))
-                {
-                    let start = pos + 5; // skip "@let "
-                    edits.push(TextEdit {
-                        range: Range::new(
-                            Position::new(line_num, start as u32),
-                            Position::new(line_num, (start + name.len()) as u32),
-                        ),
-                        new_text: new_base.to_string(),
-                    });
-                }
-            }
-
-            // Rename @name function calls
-            let search = format!("@{}", name);
-            let replace = format!("@{}", new_base);
-            let mut offset = 0;
-            while let Some(pos) = line[offset..].find(&search) {
-                let abs_pos = offset + pos;
-                // Don't match @let definition (handled above)
-                if trimmed.starts_with("@let ") {
-                    offset = abs_pos + search.len();
-                    continue;
-                }
-                // Check it's not part of a longer identifier
-                let after = abs_pos + search.len();
-                let is_end = after >= line.len()
-                    || !line.as_bytes()[after].is_ascii_alphanumeric()
-                        && line.as_bytes()[after] != b'-'
-                        && line.as_bytes()[after] != b'_';
-                if is_end {
-                    edits.push(TextEdit {
-                        range: Range::new(
-                            Position::new(line_num, abs_pos as u32),
-                            Position::new(line_num, (abs_pos + search.len()) as u32),
-                        ),
-                        new_text: replace.clone(),
-                    });
-                }
-                offset = abs_pos + search.len();
-            }
+            offset = after;
         }
     }
 
@@ -319,6 +194,12 @@ pub(crate) fn rename_at(
         changes: Some(changes),
         ..Default::default()
     })
+}
+
+fn overlaps(a: &Range, b: &Range) -> bool {
+    a.start.line == b.start.line
+        && a.start.character < b.end.character
+        && b.start.character < a.end.character
 }
 
 // ---------------------------------------------------------------------------
@@ -557,4 +438,35 @@ pub(crate) fn find_references(text: &str, position: Position, uri: &Url) -> Vec<
     }
 
     locations
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rename_edits_definitions_and_references_once() {
+        let text = "@let card $title $tone=info\n  @el [color $tone] $title\n@style\n  .x { content: \"$title\" }\n@card [title Hi]\n";
+        let uri = Url::parse("file:///tmp/none/page.hl").unwrap();
+        let edit = rename_at(text, Position::new(1, 22), "heading", &uri).expect("rename");
+        let edits = edit.changes.unwrap().remove(&uri).unwrap();
+        let mut at: Vec<(u32, u32, &str)> = edits
+            .iter()
+            .map(|e| {
+                (
+                    e.range.start.line,
+                    e.range.start.character,
+                    e.new_text.as_str(),
+                )
+            })
+            .collect();
+        at.sort_unstable();
+        // The parameter (name only) and the reference; not the CSS body
+        assert_eq!(at, [(0, 11, "heading"), (1, 20, "$heading")]);
+
+        let found = find_fn_definition(text, "card").expect("definition");
+        assert_eq!(found.start, Position::new(0, 5));
+        let found = find_definition(text, "tone").expect("parameter");
+        assert_eq!(found.start, Position::new(0, 18));
+    }
 }
