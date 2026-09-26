@@ -61,7 +61,7 @@ to its absolute path. `htmlang.server.args` passes extra arguments to it.
 ## Snippets
 
 Snippets cover common patterns: `@page`, `@let-fn`, `@let-slots`,
-`@let-tokens`, `@navbar`, `@hero`, `@form`, `@grid`, `@each`, `@if`,
+`@let-tokens`, `@navbar`, `@hero`, `@form`, `@grid`, `@table`, `@each`, `@if`,
 `if(` (attributes chosen by a condition), `@layout` and more. Type a prefix and press `Tab` to expand it.
 
 ## Development

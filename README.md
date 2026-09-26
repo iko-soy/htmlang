@@ -55,9 +55,11 @@ unless you write some, and nothing is added that you didn't ask for.
   parameter or slot is an error. A CSS property htmlang doesn't know is
   passed through with a "did you mean" warning, and values go to the CSS as
   written. Nothing you write is left out of the page without an error.
-- **HTML stays HTML.** Elements have their HTML names (`@nav`, `@ul`, `@form`,
-  `@details`), and HTML attributes are written `key=value` (`id=main`,
-  `type=email`) or bare (`required`).
+- **HTML stays HTML.** An element that isn't about layout or text has its
+  HTML name (`@nav`, `@ul`, `@form`, `@details`, `@strong`, `@em`, `@br`,
+  `@caption`), from a fixed list, so a typo is an error rather than a new
+  tag. HTML attributes are written `key=value` (`id=main`, `type=email`) or
+  bare (`required`).
 - **`@let` defines everything.** It defines values, computed values,
   attribute bundles and functions. A function's body puts a call's content
   where `@children` is and fills `@slot NAME` from the call's `@slot NAME`

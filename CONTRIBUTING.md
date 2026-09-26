@@ -35,7 +35,10 @@ Linux, macOS, and Windows. Your change should pass all three.
     which decides its text lines, `spacing` and its children's layout
     words) and whether its text is shown as written (`literal`: `@code`,
     `@textarea`), and every directive one row in `DIRECTIVES` (its argument, its
-    kind of body, and whether it takes the rest of the line).
+    kind of body, and whether it takes the rest of the line). The list of
+    elements is fixed; `HTML_NAMES_WRITTEN_OTHERWISE` maps HTML's `a`, `img`,
+    `span`, `p` and `div` to htmlang's own names for the unknown-element
+    suggestion only.
   - `vocab.rs` — the attribute vocabulary (htmlang attributes, CSS properties,
     HTML attributes) and the state/media prefixes.
   - `expr.rs` — the expression language for conditions, computed values and

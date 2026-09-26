@@ -585,7 +585,7 @@ fn untaken_branches_are_checked() {
 #[test]
 fn uncalled_functions_and_empty_loops_are_checked() {
     // A function body can call a function defined later in the file
-    let src = "@let @a\n  @b\n  @nosuch\n@let @b\n  @text hi\n@b\n";
+    let src = "@let @a\n  @later\n  @nosuch\n@let @later\n  @text hi\n@later\n";
     let found = codes(src);
     assert!(has_code(src, 3, "unknown-element"), "{:?}", found);
     assert!(!found.iter().any(|(l, _, _)| *l == 2), "{:?}", found);
@@ -735,14 +735,14 @@ fn directives_that_need_their_argument_say_so() {
 
 #[test]
 fn a_known_name_in_the_wrong_place_is_not_its_own_suggestion() {
-    // Called before its `@let` has run: no "did you mean @b?", and `@b`
-    // isn't reported unused
-    let result = parser::parse("@let @a\n  @el\n    @b\n@a\n@let @b\n  @text hi\n");
+    // Called before its `@let` has run: no "did you mean @later?", and
+    // `@later` isn't reported unused
+    let result = parser::parse("@let @a\n  @el\n    @later\n@a\n@let @later\n  @text hi\n");
     let unknown = result
         .diagnostics
         .iter()
         .find(|d| d.code == "unknown-element")
-        .expect("@b is not defined when @a runs");
+        .expect("@later is not defined when @a runs");
     assert!(
         unknown.message.contains("isn't visible here"),
         "{}",
@@ -1610,4 +1610,13 @@ fn a_fragment_s_lines_were_glued_to_the_lines_around_it() {
         "{}",
         out
     );
+}
+
+#[test]
+fn a_video_s_captions_are_its_track_not_its_source() {
+    // A <source> is another encoding of the video, not captions
+    let src = "@video [controls] a.mp4\n  @source b.webm\n";
+    assert!(has_code(src, 1, "missing-captions"), "{:?}", codes(src));
+    let src = "@video [controls] a.mp4\n  @track [kind=captions, srclang=en] a.vtt\n";
+    assert!(!has_code(src, 1, "missing-captions"), "{:?}", codes(src));
 }

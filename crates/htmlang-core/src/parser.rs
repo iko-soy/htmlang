@@ -3191,10 +3191,19 @@ fn parse_element_kind(
     let all_known: Vec<&str> = ElementKind::all_names()
         .chain(DIRECTIVES.iter().map(|d| d.name))
         .collect();
-    let closest = suggest_closest(name, &all_known);
-    let mut message = match closest {
-        Some(closest) => format!("unknown element @{}, did you mean @{}?", name, closest),
-        None => format!("unknown element @{}", name),
+    // An HTML element htmlang writes under its own name (`@a` is `@link`).
+    let written_otherwise = crate::ast::HTML_NAMES_WRITTEN_OTHERWISE
+        .iter()
+        .find(|(html, _)| *html == name)
+        .map(|(_, htmlang)| *htmlang);
+    let closest = written_otherwise.or_else(|| suggest_closest(name, &all_known));
+    let mut message = match (closest, written_otherwise) {
+        (Some(closest), Some(_)) => format!(
+            "unknown element @{}, did you mean @{}? (@{} writes <{}>)",
+            name, closest, closest, name
+        ),
+        (Some(closest), None) => format!("unknown element @{}, did you mean @{}?", name, closest),
+        (None, _) => format!("unknown element @{}", name),
     };
     let function = suggest_fn_name(name, ctx);
     if let Some(function) = &function {
@@ -4350,8 +4359,8 @@ fn element_kind_name(kind: &ElementKind) -> String {
 const ENDS_A_PARAGRAPH: &[&str] = &[
     "address", "article", "aside", "blockquote", "dd", "details", "dialog", "dl", "dt",
     "fieldset", "figcaption", "figure", "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6",
-    "header", "hr", "li", "main", "nav", "ol", "p", "pre", "search", "section", "summary",
-    "table", "ul",
+    "header", "hgroup", "hr", "li", "main", "menu", "nav", "ol", "p", "pre", "search",
+    "section", "summary", "table", "ul",
 ];
 
 /// The HTML element `kind` is written as, if the browser would take it out
@@ -4649,13 +4658,14 @@ fn validate_tree(
                 let has_track = elem
                     .children
                     .iter()
-                    .any(|c| matches!(c, Node::Element(e) if e.kind.is_tag("source")));
+                    .any(|c| matches!(c, Node::Element(e) if e.kind.is_tag("track")));
                 if !has_aria && !has_track {
                     diagnostics.push(Diagnostic::new(
                         code::MISSING_CAPTIONS,
                         Severity::Warning,
                         elem.line_num,
-                        "@video should have aria-label or captions for accessibility".to_string(),
+                        "@video should have aria-label or a captions @track for accessibility"
+                            .to_string(),
                     ));
                 }
             }

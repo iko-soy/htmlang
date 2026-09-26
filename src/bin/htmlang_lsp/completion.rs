@@ -602,6 +602,18 @@ fn element_specific_attrs(element: &str) -> &'static [&'static str] {
         "label" => &["for"],
         "picture" | "source" => &["src", "srcset", "sizes", "media", "type"],
         "meta" => &["name", "content", "charset"],
+        "blockquote" | "q" => &["cite"],
+        "ins" | "del" => &["cite", "datetime"],
+        "bdo" => &["dir"],
+        "col" | "colgroup" => &["span"],
+        "optgroup" => &["label", "disabled"],
+        "track" => &["src", "kind", "srclang", "label", "default"],
+        "embed" => &["src", "type", "width", "height"],
+        "object" => &["data", "type", "name", "width", "height"],
+        "map" => &["name"],
+        "area" => &[
+            "href", "alt", "shape", "coords", "target", "rel", "download",
+        ],
         _ => &[],
     }
 }

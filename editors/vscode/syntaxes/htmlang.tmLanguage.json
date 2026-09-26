@@ -141,7 +141,7 @@
     },
     "element": {
       "name": "entity.name.tag.htmlang",
-      "match": "@(?:row|el|text|paragraph|image|link|children|slot|fragment|script|nav|header|footer|main|section|article|aside|address|search|form|details|summary|dialog|figure|figcaption|blockquote|cite|fieldset|legend|noscript|datalist|ul|ol|li|dl|dt|dd|table|thead|tbody|tr|td|th|select|picture|progress|meter|output|canvas|button|label|option|textarea|time|mark|abbr|code|kbd|pre|h1|h2|h3|h4|h5|h6|input|hr|source|video|audio|iframe|grid|in-front|behind)(?![a-zA-Z0-9_-])"
+      "match": "@(?:row|el|text|paragraph|image|link|children|slot|fragment|script|nav|header|footer|main|section|article|aside|address|search|form|details|summary|dialog|figure|figcaption|blockquote|cite|fieldset|legend|noscript|datalist|ul|ol|li|dl|dt|dd|table|thead|tbody|tr|td|th|select|picture|progress|meter|output|canvas|button|label|option|textarea|time|mark|abbr|code|kbd|pre|h1|h2|h3|h4|h5|h6|input|hr|source|video|audio|iframe|hgroup|menu|b|i|strong|em|small|s|u|sub|sup|q|var|samp|dfn|bdi|bdo|ins|del|br|wbr|caption|colgroup|col|tfoot|optgroup|ruby|rt|rp|track|embed|object|map|area|grid|in-front|behind)(?![a-zA-Z0-9_-])"
     },
     "function-call": {
       "name": "entity.name.function.htmlang",

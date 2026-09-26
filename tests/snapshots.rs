@@ -5011,7 +5011,7 @@ fn a_default_is_filled_in_at_the_call() {
 
 #[test]
 fn a_quoted_default_keeps_its_quotes_in_css() {
-    let out = compile("@let @q [mark \"→ \"]\n  @el [before:content $mark] $mark|\n@q\n");
+    let out = compile("@let @quote [mark \"→ \"]\n  @el [before:content $mark] $mark|\n@quote\n");
     assert!(out.contains("content:\"→ \""), "{}", out);
     assert!(out.contains("→ |"), "{}", out);
 }
@@ -5307,7 +5307,7 @@ fn a_warning_about_a_body_is_reported_at_the_call_once() {
         low[0].message
     );
     // A problem in the text of a body stays on its own line, once
-    let diags = parse_diagnostics("@let @b\n  @el [paddin 4]\n@b\n@b\n@b\n");
+    let diags = parse_diagnostics("@let @box\n  @el [paddin 4]\n@box\n@box\n@box\n");
     let unknown = coded(&diags, "unknown-attribute");
     assert_eq!(unknown.len(), 1, "{:?}", diags);
     assert_eq!(unknown[0].line, 2);
@@ -6542,4 +6542,154 @@ fn lines_of_text_at_the_top_of_the_page_are_separate_lines() {
     assert!(out.ends_with("</style>Read\nmore"), "{}", out);
     let out = compile("Read\n@text x\nmore\n");
     assert!(out.ends_with("</style>Read<span>x</span>more"), "{}", out);
+}
+
+#[test]
+fn snapshot_html_elements() {
+    snapshot_test("html_elements");
+}
+
+#[test]
+fn text_level_elements_are_text_with_no_css_of_their_own() {
+    let out =
+        compile("@paragraph\n  {@b a}, {@i b}, {@strong c}{@br}\n  {@small d} and H{@sub 2}O\n");
+    assert!(
+        out.contains(
+            "<b>a</b>, <i>b</i>, <strong>c</strong><br> <small>d</small> and H<sub>2</sub>O</p>"
+        ),
+        "{}",
+        out
+    );
+    // On a line of its own, with the lines under it flowing
+    let out = compile("@strong Read\n  this\n");
+    assert!(out.ends_with("<strong>Read this</strong>"), "{}", out);
+    // Styles still work, and give it a class
+    let out = compile("@em [color red] x\n");
+    assert!(out.contains("{color:red;}"), "{}", out);
+    assert!(out.contains("<em class=\"a\">x</em>"), "{}", out);
+    // Text has no gap: `spacing` is an error
+    let diags = parse_diagnostics("@strong [spacing 4] x\n");
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.code == "no-effect" && d.severity == htmlang::parser::Severity::Error),
+        "{:?}",
+        diags
+    );
+}
+
+#[test]
+fn table_parts_and_option_groups_keep_html_s_layout() {
+    let out = compile(
+        "@table\n  @caption Team\n  @colgroup\n    @col [span=2]\n  @tfoot\n    @tr\n      @td Total\n",
+    );
+    assert!(
+        out.contains("<table><caption>Team</caption><colgroup><col span=\"2\"></colgroup><tfoot><tr><td>Total</td></tr></tfoot></table>"),
+        "{}",
+        out
+    );
+    // @optgroup's argument is its label
+    let out = compile("@select [aria-label=f]\n  @optgroup Citrus\n    @option Lemon\n");
+    assert!(
+        out.contains("<optgroup label=\"Citrus\"><option>Lemon</option></optgroup>"),
+        "{}",
+        out
+    );
+    // The void ones take no content
+    for src in ["@br x\n", "@col\n  x\n", "@wbr\n  @text x\n"] {
+        let diags = parse_diagnostics(src);
+        assert!(
+            diags.iter().any(|d| d.code == "unexpected-content"),
+            "{}: {:?}",
+            src,
+            diags
+        );
+    }
+}
+
+#[test]
+fn new_flow_containers_are_columns() {
+    let out = compile("@menu [spacing 4]\n  @li One\n@hgroup\n  @h1 A\n  B\n");
+    assert!(
+        out.contains(
+            "display:flex;flex-direction:column;margin:0;padding-left:0;list-style:none;gap:4px;"
+        ),
+        "{}",
+        out
+    );
+    assert!(
+        out.contains("<hgroup class=\"b\"><h1 class=\"c\">A</h1><span>B</span></hgroup>"),
+        "{}",
+        out
+    );
+    // Their HTML ends a <p>
+    let diags = parse_diagnostics("@paragraph\n  Text\n  @menu\n    @li x\n");
+    assert!(
+        diags.iter().any(|d| d.code == "block-in-paragraph"),
+        "{:?}",
+        diags
+    );
+}
+
+#[test]
+fn html_names_of_htmlang_s_own_elements_are_unknown_and_suggest_them() {
+    for (html, htmlang) in [
+        ("a", "link"),
+        ("img", "image"),
+        ("span", "text"),
+        ("p", "paragraph"),
+        ("div", "el"),
+    ] {
+        for src in [format!("@{} x\n", html), format!("Read {{@{} x}}\n", html)] {
+            let diags = parse_diagnostics(&src);
+            let d = diags
+                .iter()
+                .find(|d| d.code == "unknown-element")
+                .unwrap_or_else(|| panic!("{}: {:?}", src, diags));
+            assert_eq!(d.severity, htmlang::parser::Severity::Error);
+            assert!(
+                d.message.contains(&format!(
+                    "did you mean @{}? (@{} writes <{}>)",
+                    htmlang, htmlang, html
+                )),
+                "{}",
+                d.message
+            );
+            assert_eq!(d.suggestion.as_deref(), Some(htmlang), "{}", src);
+        }
+    }
+    // A name that isn't on the list is unknown, not a new tag (`@data`
+    // on a line of its own is the directive)
+    for src in ["@el\n  @template x\n", "@blink x\n", "Read {@data x}\n"] {
+        let diags = parse_diagnostics(src);
+        assert!(
+            diags.iter().any(|d| d.code == "unknown-element"),
+            "{}: {:?}",
+            src,
+            diags
+        );
+    }
+    // Ordinary typos of the new names are suggested like any other
+    let diags = parse_diagnostics("@stong x\n");
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("did you mean @strong?")),
+        "{:?}",
+        diags
+    );
+}
+
+#[test]
+fn a_function_named_like_a_new_element_shadows_it() {
+    let result =
+        htmlang::parser::parse("@let @em\n  @text [font-style italic]\n    @children\n@em x\n");
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "shadows-built-in"),
+        "{:?}",
+        result.diagnostics
+    );
 }

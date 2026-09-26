@@ -294,6 +294,21 @@
     ],
     "description": "An inline script"
   },
+  "Table": {
+    "prefix": "@table",
+    "body": [
+      "@table",
+      "  @caption ${1:Title}",
+      "  @thead",
+      "    @tr",
+      "      @th ${2:Name}",
+      "  @tbody",
+      "    @tr",
+      "      @td ${3:Value}",
+      "$0"
+    ],
+    "description": "A table with a caption, a header row and a body"
+  },
   "External script": {
     "prefix": "@script-src",
     "body": [

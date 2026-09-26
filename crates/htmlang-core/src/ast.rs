@@ -330,9 +330,58 @@ pub static TAGS: &[TagSpec] = &[
     TagSpec { name: "video", html: "video", arg: TagArg::Attr("src"), layout: Layout::Native, ..TagSpec::DEFAULT },
     TagSpec { name: "audio", html: "audio", arg: TagArg::Attr("src"), layout: Layout::Native, ..TagSpec::DEFAULT },
     TagSpec { name: "iframe", html: "iframe", arg: TagArg::Attr("src"), layout: Layout::Native, ..TagSpec::DEFAULT },
+    // Flow containers
+    TagSpec { name: "hgroup", html: "hgroup", layout: Layout::Column, ..TagSpec::DEFAULT },
+    TagSpec { name: "menu", html: "menu", css: "margin:0;padding-left:0;list-style:none;", layout: Layout::Column, ..TagSpec::DEFAULT },
+    // Phrasing: text with the browser's own style, and no CSS of htmlang's
+    TagSpec { name: "b", html: "b", layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "i", html: "i", layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "strong", html: "strong", layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "em", html: "em", layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "small", html: "small", layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "s", html: "s", layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "u", html: "u", layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "sub", html: "sub", layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "sup", html: "sup", layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "q", html: "q", layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "var", html: "var", layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "samp", html: "samp", layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "dfn", html: "dfn", layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "bdi", html: "bdi", layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "bdo", html: "bdo", layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "ins", html: "ins", layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "del", html: "del", layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "br", html: "br", layout: Layout::Void, ..TagSpec::DEFAULT },
+    TagSpec { name: "wbr", html: "wbr", layout: Layout::Void, ..TagSpec::DEFAULT },
+    // HTML's own display: table parts, option groups, ruby, embedded content
+    TagSpec { name: "caption", html: "caption", layout: Layout::Native, ..TagSpec::DEFAULT },
+    TagSpec { name: "colgroup", html: "colgroup", layout: Layout::Native, ..TagSpec::DEFAULT },
+    TagSpec { name: "col", html: "col", layout: Layout::Void, ..TagSpec::DEFAULT },
+    TagSpec { name: "tfoot", html: "tfoot", layout: Layout::Native, ..TagSpec::DEFAULT },
+    TagSpec { name: "optgroup", html: "optgroup", arg: TagArg::Attr("label"), layout: Layout::Native, ..TagSpec::DEFAULT },
+    TagSpec { name: "ruby", html: "ruby", layout: Layout::Native, ..TagSpec::DEFAULT },
+    TagSpec { name: "rt", html: "rt", layout: Layout::Native, ..TagSpec::DEFAULT },
+    TagSpec { name: "rp", html: "rp", layout: Layout::Native, ..TagSpec::DEFAULT },
+    TagSpec { name: "track", html: "track", arg: TagArg::Attr("src"), layout: Layout::Void, ..TagSpec::DEFAULT },
+    TagSpec { name: "embed", html: "embed", arg: TagArg::Attr("src"), layout: Layout::Void, ..TagSpec::DEFAULT },
+    TagSpec { name: "object", html: "object", arg: TagArg::Attr("data"), layout: Layout::Native, ..TagSpec::DEFAULT },
+    TagSpec { name: "map", html: "map", layout: Layout::Native, ..TagSpec::DEFAULT },
+    TagSpec { name: "area", html: "area", arg: TagArg::Attr("href"), layout: Layout::Void, ..TagSpec::DEFAULT },
+    // htmlang's own
     TagSpec { name: "grid", html: "div", layout: Layout::Grid, ..TagSpec::DEFAULT },
     TagSpec { name: "in-front", html: "div", css: "position:absolute;inset:0;", layout: Layout::Column, ..TagSpec::DEFAULT },
     TagSpec { name: "behind", html: "div", css: "position:absolute;inset:0;z-index:-1;", layout: Layout::Column, ..TagSpec::DEFAULT },
+];
+
+/// HTML elements htmlang writes under another name. The HTML name isn't an
+/// element: the unknown-element error for `@a` suggests `@link`. (Not a
+/// second spelling: only the suggestion reads this.)
+pub const HTML_NAMES_WRITTEN_OTHERWISE: &[(&str, &str)] = &[
+    ("a", "link"),
+    ("img", "image"),
+    ("span", "text"),
+    ("p", "paragraph"),
+    ("div", "el"),
 ];
 
 /// Whether the element named `name` (without the `@`) shows its text as
@@ -459,13 +508,22 @@ mod tests {
             "mark",
             "abbr",
             "time",
+            "b",
+            "i",
+            "strong",
+            "em",
+            "small",
+            "sub",
+            "sup",
+            "q",
+            "del",
         ];
         for name in text {
             assert_eq!(layout(name), Layout::Text, "@{}", name);
         }
         let columns = [
             "el", "li", "dd", "ul", "ol", "dl", "search", "address", "noscript", "section", "form",
-            "in-front", "behind",
+            "in-front", "behind", "hgroup", "menu",
         ];
         for name in columns {
             assert_eq!(layout(name), Layout::Column, "@{}", name);
@@ -473,12 +531,41 @@ mod tests {
         assert_eq!(layout("row"), Layout::Row);
         assert_eq!(layout("grid"), Layout::Grid);
         for name in [
-            "table", "tr", "select", "option", "picture", "video", "pre", "canvas",
+            "table", "tr", "select", "option", "picture", "video", "pre", "canvas", "caption",
+            "colgroup", "tfoot", "optgroup", "ruby", "rt", "object",
         ] {
             assert_eq!(layout(name), Layout::Native, "@{}", name);
         }
-        for name in ["image", "input", "hr", "source"] {
+        for name in [
+            "image", "input", "hr", "source", "br", "wbr", "col", "track", "embed", "area",
+        ] {
             assert_eq!(layout(name), Layout::Void, "@{}", name);
+        }
+    }
+
+    #[test]
+    fn html_names_written_otherwise_are_not_elements() {
+        for (html, htmlang) in super::HTML_NAMES_WRITTEN_OTHERWISE {
+            assert!(ElementKind::from_name(html).is_none(), "@{}", html);
+            let kind = ElementKind::from_name(htmlang).unwrap();
+            let written = match kind {
+                ElementKind::El => "div",
+                ElementKind::Text => "span",
+                ElementKind::Paragraph => "p",
+                ElementKind::Link => "a",
+                ElementKind::Image => "img",
+                _ => panic!("@{} is not one of htmlang's own", htmlang),
+            };
+            assert_eq!(written, *html);
+        }
+        // No two rows share a name, and none is a directive's
+        let mut names: Vec<&str> = ElementKind::all_names().collect();
+        let count = names.len();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), count, "an element name is listed twice");
+        for name in names {
+            assert!(super::directive(name).is_none(), "@{}", name);
         }
     }
 

@@ -87,6 +87,20 @@ pub(crate) const ELEMENTS: &[Doc] = &[
     doc("iframe", "Embedded page; the argument is its `src`.", "@iframe [sandbox] https://example.com"),
     doc("video", "Video; the argument is its `src`.", "@video [controls] movie.mp4"),
     doc("audio", "Audio; the argument is its `src`.", "@audio [controls] song.mp3"),
+    doc("strong", "Important text (`<strong>`), bold in the browser's own style.", "@paragraph\n  {@strong Note:} save your work first."),
+    doc("em", "Stressed text (`<em>`), italic in the browser's own style.", "@paragraph\n  I {@em did} say so."),
+    doc("b", "Text set apart in bold without extra importance (`<b>`): a name, a keyword.", "@paragraph\n  Built with {@b htmlang}."),
+    doc("i", "Text in another voice (`<i>`), italic: a term, a title, a foreign phrase.", "@paragraph\n  The {@i Titanic} sank in 1912."),
+    doc("small", "Fine print and side comments (`<small>`).", "@small Prices include tax."),
+    doc("br", "Line break (`<br>`), inside text.", "@paragraph\n  First line{@br}\n  second line"),
+    doc("sub", "Subscript (`<sub>`).", "@paragraph\n  H{@sub 2}O"),
+    doc("sup", "Superscript (`<sup>`).", "@paragraph\n  E = mc{@sup 2}"),
+    doc("hgroup", "A heading and its subtitle (`<hgroup>`).", "@hgroup\n  @h1 htmlang\n  @paragraph A layout language"),
+    doc("menu", "List of commands (`<menu>`), shown without markers like `@ul`.", "@menu [spacing 4]\n  @li > @button Copy"),
+    doc("caption", "Table title (`<caption>`), the first child of `@table`.", "@table\n  @caption Team\n  @tr\n    @td Ada"),
+    doc("tfoot", "Table footer rows (`<tfoot>`).", "@tfoot\n  @tr\n    @td Total"),
+    doc("optgroup", "Group of options in a `@select`; the argument is its `label`.", "@select [aria-label=Fruit]\n  @optgroup Citrus\n    @option Lemon"),
+    doc("track", "Captions or subtitles for `@video`; the argument is its `src`.", "@track [kind=captions, srclang=en] captions.vtt"),
 ];
 
 /// Directives (names without `@`).
@@ -390,6 +404,12 @@ mod tests {
         assert!(says("@button", "Layout: text"));
         assert!(says("@table", "HTML's own"));
         assert!(says("@hr", "takes no content"));
+        assert!(says("@strong", "Layout: text"));
+        assert!(says("@sub", "Layout: text"));
+        assert!(says("@caption", "HTML's own"));
+        assert!(says("@br", "takes no content"));
+        assert!(says("@menu", "Layout: column"));
+        assert!(says("@optgroup", "`label`"));
         assert!(!says("@fragment", "Layout"));
     }
 

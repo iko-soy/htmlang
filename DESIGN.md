@@ -8,7 +8,7 @@ tree of elements written one per line, with indentation for nesting:
 @el [max-width 640, center-x, padding 40, spacing 16]
   @h1 Hello
   @paragraph
-    This page was written in {@text [font-weight bold] htmlang}.
+    This page was written in {@b htmlang}.
 ```
 
 Every example block in this file is compiled by the test suite
@@ -24,9 +24,9 @@ Every example block in this file is compiled by the test suite
   `align-right`). The layout attributes are the only styling words htmlang
   adds.
 - **Everything else is CSS or HTML, under its own name.** A style is any CSS
-  property with a CSS value. An element that isn't about layout has its HTML
-  name, and an HTML attribute is written `key=value`. Nothing is renamed or
-  abbreviated.
+  property with a CSS value. An element that isn't about layout or text has
+  its HTML name, and an HTML attribute is written `key=value`. Nothing is
+  renamed or abbreviated.
 - **Each thing is done one way.** `@let` defines every reusable piece, `@data`
   loads data, `@include` brings in a file, and `if()` makes an attribute
   conditional. A layout is an ordinary function.
@@ -98,7 +98,7 @@ other. Inside a line of text, `{...}` holds an inline element, and
 
 ```
 @paragraph
-  This is {@text [font-weight bold] important}, and this is {@link https://example.com a link}.
+  This is {@strong important}, and this is {@link https://example.com a link}.
 @text [font-weight bold, font-size 24, color #333] Hello world
 @h2 Welcome to {@text [color #3b82f6] htmlang}
 @ul
@@ -257,9 +257,9 @@ flow.**
 | column | `@el`, and the containers: `@section`, `@nav`, `@form`, `@ul`, `@li`, ... | Each line of text is a child of its own, and the children are laid out top to bottom |
 | row | `@row` | The same, side by side |
 | grid | `@grid` | Each line of text is a cell |
-| text | `@paragraph`, `@text`, `@link`, `@h1` … `@h6`, `@button`, `@label`, `@td`, ... | The argument, the lines and the children flow as one run of text, joined with spaces |
-| native | `@table`, `@select`, `@pre`, `@textarea`, `@video`, ... | HTML's own layout, which htmlang leaves alone |
-| void | `@input`, `@hr`, `@image`, `@source` | Nothing: it takes no content |
+| text | `@paragraph`, `@text`, `@link`, `@h1` … `@h6`, `@button`, `@label`, `@td`, `@strong`, `@em`, ... | The argument, the lines and the children flow as one run of text, joined with spaces |
+| native | `@table`, `@caption`, `@select`, `@pre`, `@textarea`, `@video`, ... | HTML's own layout, which htmlang leaves alone |
+| void | `@input`, `@hr`, `@br`, `@image`, `@source` | Nothing: it takes no content |
 
 The table under [Elements](#elements) gives every element's layout.
 
@@ -471,7 +471,9 @@ browser decides, and it is passed through like any CSS function:
 ### Elements
 
 The layout and text elements have elm-ui's names. Every other element has
-its HTML name.
+its HTML name: `@strong`, `@em`, `@small`, `@br`, `@sub`, `@caption`,
+`@tfoot`, `@optgroup`, `@hgroup` and the others in the table of layouts
+below.
 
 | Element | Output | Purpose |
 |---|---|---|
@@ -489,28 +491,65 @@ Every element has one [layout](#rows-columns-and-text):
 
 | Layout | Elements |
 |---|---|
-| column | `@el`, `@in-front`, `@behind`, `@nav`, `@header`, `@footer`, `@main`, `@section`, `@article`, `@aside`, `@address`, `@search`, `@noscript`, `@form`, `@details`, `@dialog`, `@figure`, `@blockquote`, `@fieldset`, `@ul`, `@ol`, `@li`, `@dl`, `@dd` |
+| column | `@el`, `@in-front`, `@behind`, `@nav`, `@header`, `@footer`, `@main`, `@section`, `@article`, `@aside`, `@address`, `@search`, `@noscript`, `@form`, `@details`, `@dialog`, `@figure`, `@blockquote`, `@fieldset`, `@hgroup`, `@ul`, `@ol`, `@menu`, `@li`, `@dl`, `@dd` |
 | row | `@row` |
 | grid | `@grid` |
-| text | `@text`, `@paragraph`, `@link`, `@h1`, `@h2`, `@h3`, `@h4`, `@h5`, `@h6`, `@button`, `@label`, `@legend`, `@summary`, `@figcaption`, `@cite`, `@dt`, `@td`, `@th`, `@code`, `@kbd`, `@mark`, `@abbr`, `@time` |
-| native | `@table`, `@thead`, `@tbody`, `@tr`, `@select`, `@option`, `@datalist`, `@textarea`, `@progress`, `@meter`, `@output`, `@pre`, `@picture`, `@video`, `@audio`, `@iframe`, `@canvas`, `@script` |
-| void | `@image`, `@input`, `@hr`, `@source` |
+| text | `@text`, `@paragraph`, `@link`, `@h1`, `@h2`, `@h3`, `@h4`, `@h5`, `@h6`, `@button`, `@label`, `@legend`, `@summary`, `@figcaption`, `@cite`, `@dt`, `@td`, `@th`, `@code`, `@kbd`, `@mark`, `@abbr`, `@time`, `@b`, `@i`, `@strong`, `@em`, `@small`, `@s`, `@u`, `@sub`, `@sup`, `@q`, `@var`, `@samp`, `@dfn`, `@bdi`, `@bdo`, `@ins`, `@del` |
+| native | `@table`, `@caption`, `@colgroup`, `@thead`, `@tbody`, `@tfoot`, `@tr`, `@select`, `@optgroup`, `@option`, `@datalist`, `@textarea`, `@progress`, `@meter`, `@output`, `@pre`, `@ruby`, `@rt`, `@rp`, `@picture`, `@video`, `@audio`, `@iframe`, `@object`, `@map`, `@canvas`, `@script` |
+| void | `@image`, `@input`, `@hr`, `@br`, `@wbr`, `@col`, `@source`, `@track`, `@embed`, `@area` |
 
 `@fragment`, `@children` and `@slot` have no element of their own: what
 they hold takes the layout of the element they are in. For `@form URL`, the
-URL is the form's `action`; for `@video`, `@audio`, `@iframe` and `@source`,
-the argument is the `src`. In a native element, and at the top of the
-page, lines of text are separated by a line break, which HTML shows as a
-space except where whitespace is kept, as in `@pre` and `@textarea`.
+URL is the form's `action`; for `@video`, `@audio`, `@iframe`, `@source`,
+`@track` and `@embed`, the argument is the `src`; `@object`'s is its `data`,
+`@area`'s its `href`, and `@optgroup`'s its `label`. In a native element,
+and at the top of the page, lines of text are separated by a line break,
+which HTML shows as a space except where whitespace is kept, as in `@pre`
+and `@textarea`.
+
+The text-level elements (`@strong`, `@em`, `@b`, `@i`, `@small`, `@sub`,
+`@q`, `@del`, ...) are text with the browser's own style and no CSS of
+htmlang's, so they work inside a line like any inline element. Table parts,
+`@optgroup` and `@ruby` keep HTML's own layout:
+
+```
+@paragraph
+  {@strong Note:} water is H{@sub 2}O,{@br}
+  and {@em this} is {@small fine print}.
+@table
+  @caption Team
+  @thead
+    @tr
+      @th Name
+  @tbody
+    @tr
+      @td Ada
+  @tfoot
+    @tr
+      @td One person
+@select [aria-label=Fruit]
+  @optgroup Citrus
+    @option Lemon
+```
+
+The list of elements is fixed: a name that isn't in it is an unknown
+element, not a new HTML tag, since a function is called with the same `@`
+and a misspelled one would otherwise become a tag. HTML's `<div>`, `<span>`,
+`<p>`, `<a>` and `<img>` are htmlang's own `@el`, `@text`, `@paragraph`,
+`@link` and `@image`, so `@a` is an unknown element whose error suggests
+`@link`. The head's elements (`<meta>`, `<style>`, `<title>`, `<link>`) are
+written with [directives](#page-and-head). `<data>` and `<slot>` share their
+names with `@data` and `@slot`, and `<template>` holds content that only a
+script uses; these, and `<svg>` and `<math>`, are written with `@raw`.
 
 `@script` takes HTML attributes (`@script [src=app.js, defer]`) and its code
 as a verbatim body; it isn't shown, so a style on it is an error. An element
-without a closing tag (`@input`, `@hr`, `@image`, `@source`) takes no
-content.
+without a closing tag (`@input`, `@hr`, `@br`, `@image`, `@source`, ...)
+takes no content.
 
 Browser default margins on headings, paragraphs, lists and figures are reset
-to 0, so `spacing` controls the gaps. Lists and list items are columns like
-other containers, so `spacing` on a list is the gap between its items, and
+to 0, so `spacing` controls the gaps. Lists (`@ul`, `@ol`, `@menu`) and list
+items are columns like other containers, so `spacing` on a list is the gap between its items, and
 a list shows no markers. To bring them back, write
 `[list-style disc, padding-inline-start 20, children:display list-item]` on
 the list.
@@ -825,7 +864,7 @@ holds multi-line content, and a small function works inside a sentence:
 ```
 @let @intro
   htmlang is a layout language.
-  It compiles to {@text [font-weight bold] static HTML}.
+  It compiles to {@strong static HTML}.
 @let @key
   @kbd [padding 1 6, border 1 solid #d1d5db, border-radius 4]
     @children

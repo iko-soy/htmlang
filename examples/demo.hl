@@ -91,7 +91,7 @@
   @chapter [title Text, number 2]
     @paragraph [max-width 640]
       Lines without an {@code @} are text. Braces put elements inside a line:
-      {@text [font-weight 700] bold}, {@text [font-style italic] italic},
+      {@b bold}, {@i italic}, {@strong important}, H{@sub 2}O,
       {@mark highlighted}, {@link [color var(--brand), text-decoration underline] https://example.com a link},
       and {@kbd [padding 1 6, border 1 solid var(--line), border-radius 4] Ctrl+K}.
     @paragraph
@@ -147,7 +147,7 @@
       $text
 
   @let @pitch
-    Functions are {@text [font-weight 700] @let @name} with a body. Their
+    Functions are {@code @let @name} with a body. Their
     parameters are listed and passed like attributes, a name alone passes
     true, and a body can be text like this one.
 

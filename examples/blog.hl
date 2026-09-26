@@ -58,7 +58,7 @@
 -- Multi-line content: a function whose body is text
 @let @about
   I write about building for the web with as little machinery as possible:
-  plain HTML, a little CSS, and tools that {@text [font-style italic] stay out of the way}.
+  plain HTML, a little CSS, and tools that {@em stay out of the way}.
 
 @site
   @slot tagline
