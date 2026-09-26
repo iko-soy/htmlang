@@ -323,7 +323,9 @@ and suggests the closest known name, in case it is a typo. Custom
 properties (`--gap`) and vendor-prefixed ones (`-webkit-tap-highlight-color`)
 pass without a warning. The value of a property htmlang doesn't know is
 written exactly as it is, without pixels added. A style needs a value:
-`[padding]` is an error.
+`[padding]` is an error. In a list that spans lines, a line that starts with
+`--` is a comment, so a custom property goes after another attribute on its
+line.
 
 ```
 @el [--gap 12px, gap var(--gap), -webkit-tap-highlight-color transparent]
@@ -332,9 +334,9 @@ written exactly as it is, without pixels added. A style needs a value:
 
 A value is checked only for what is wrong in any CSS. A `;`, `{` or `}`
 (outside a quoted string, and for `;` outside parentheses, as in CSS's own
-`if()`) or an unclosed quote or parenthesis would break out of the rule, so
-it is an error, including in a value that comes from a variable or from
-`@data`. A hex color that doesn't have 3, 4, 6 or 8 digits is a warning. A
+`if()`) or an unclosed quote or parenthesis would break out of the rule, and
+a `</style` (even quoted) would end the page's style element, so each is an
+error, including in a value that comes from a variable or from `@data`. A hex color that doesn't have 3, 4, 6 or 8 digits is a warning. A
 style whose value comes out empty, such as a field that a record doesn't
 have, is left out.
 
@@ -887,7 +889,7 @@ the content to show when the list is empty.
 | `@data $name env:NAME [default]` | An environment variable |
 | `@include file.hl` | Insert another file: its content and its definitions. A file that holds only `@let`s outputs nothing |
 | `@markdown` / `@markdown file.md` | Markdown (an indented body or a file), converted to HTML |
-| `@image [inline] file.svg` | Put the file inside the page: SVG as markup (`width`, `height`, `color`, `class=` and `id=` apply to it), other images as base64 |
+| `@image [inline] file.svg` | Put the file inside the page: SVG as markup (`width`, `height`, `color`, `class=` and `id=` apply to it), other images as base64. `inline` goes only on `@image`, without a prefix |
 
 Records keep their values whole, even when a value contains spaces or
 commas:

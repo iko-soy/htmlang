@@ -1449,3 +1449,63 @@ fn a_duplicate_width_across_forms_is_not_reported() {
     let d = parser::parse("@image [width=800, width 200, alt=A] a.png\n").diagnostics;
     assert!(d.is_empty(), "{:?}", d);
 }
+
+#[test]
+fn a_quoted_semicolon_survives_a_duplicate_property() {
+    // The later `content` replaced the earlier one by splitting the rule at
+    // every `;`, so the quoted `;` cut `content:"a;b"` in two and `b"` was
+    // left in the CSS
+    let html = compile("@el [content \"a;b\", color red, content \"c;d\"] x\n");
+    assert!(html.contains("color:red;content:\"c;d\";"), "{}", html);
+    assert!(!html.contains("b\""), "{}", html);
+}
+
+#[test]
+fn a_value_cannot_end_the_style_element() {
+    let result = parser::parse(
+        "@data $d {\"c\": \"</style><script>alert(1)</script>\"}\n@el [color $d.c, content \"</STYLE>\"] x\n@let --x </style>\n",
+    );
+    let errors: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == "invalid-value" && d.severity == Severity::Error)
+        .collect();
+    assert_eq!(errors.len(), 3, "{:?}", result.diagnostics);
+    let html = codegen::generate(&result.document);
+    assert!(!html.contains("<script>"), "{}", html);
+}
+
+#[test]
+fn inline_is_only_for_an_image_without_a_prefix() {
+    // Both were ignored by codegen without a word
+    let d = parser::parse("@el [inline] x\n").diagnostics;
+    assert!(
+        d.iter()
+            .any(|d| d.code == "unexpected-argument" && d.severity == Severity::Error),
+        "{:?}",
+        d
+    );
+    let d = parser::parse("@image [md:inline, alt=A] a.png\n").diagnostics;
+    assert!(
+        d.iter()
+            .any(|d| d.code == "invalid-prefix" && d.severity == Severity::Error),
+        "{:?}",
+        d
+    );
+}
+
+#[test]
+fn a_misspelled_parameter_in_a_bundle_is_an_error_at_the_call() {
+    // Written directly it was an error, but from a bundle it went to the
+    // root element's CSS with a warning
+    let src = "@let @card [tone]\n  @el $tone\n@let b [tnoe red]\n@card [$b, tone blue]\n";
+    let d = parser::parse(src).diagnostics;
+    assert!(
+        d.iter().any(|d| d.severity == Severity::Error
+            && d.line == 4
+            && d.message
+                .contains("unknown parameter 'tnoe', did you mean 'tone'?")),
+        "{:?}",
+        d
+    );
+}

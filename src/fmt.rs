@@ -276,7 +276,10 @@ fn print_header(header: Header, node: &Node, level: usize, out: &mut String) {
         // Wrap when too long; a list that was already wrapped stays wrapped
         // above the lower threshold (hysteresis).
         let wrap = len > MAX_LINE_WIDTH || (was_wrapped && len > WRAP_MIN_WIDTH);
-        if wrap && attrs.len() > 1 {
+        // A line of a list that starts with `--` is a comment, so a custom
+        // property (`--gap 12`) can't start one: such a list stays on its line
+        let custom = attrs.iter().any(|a| a.starts_with("--"));
+        if wrap && attrs.len() > 1 && !custom {
             out.push_str(&indent);
             out.push_str(&header.text[..*start]);
             out.push_str("[\n");
@@ -345,6 +348,18 @@ mod tests {
         // A misshapen if() is kept as written
         let src = "@el [if($on, [padding 4] junk), if($on)]\n  a\n";
         assert_eq!(format(src), src);
+    }
+
+    #[test]
+    fn a_list_with_a_custom_property_is_not_wrapped() {
+        // Wrapped, `--gap 12px,` would start a line and become a comment
+        let input = format!(
+            "@el [padding 4, --gap 12px, {}]\n  x\n",
+            vec!["color red"; 12].join(", ")
+        );
+        let output = format(&input);
+        assert_eq!(output, input);
+        assert!(output.lines().all(|l| !l.trim_start().starts_with("--")));
     }
 
     #[test]

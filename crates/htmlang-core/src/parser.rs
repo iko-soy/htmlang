@@ -3386,8 +3386,12 @@ fn not_css_if(value: &str) -> Option<&str> {
 /// `{` or a `}` would end the declaration or the rule, and an unclosed
 /// quote or parenthesis would run on into the rules after it. Quoted
 /// strings are text, and a backslash escapes the character after it, as
-/// in CSS.
+/// in CSS. A `</style` anywhere, even in a string, would end the page's
+/// `<style>` element and start HTML.
 fn css_breakout(value: &str) -> Option<&'static str> {
+    if value.to_ascii_lowercase().contains("</style") {
+        return Some("a `</style`, which would end the page's style element");
+    }
     let mut quote = None;
     let mut depth = 0usize;
     let mut chars = value.chars();
@@ -3657,6 +3661,20 @@ fn check_attribute(
     };
 
     let Some(value) = &attr.value else {
+        // `inline` puts a file into the page as it compiles, which no
+        // state or media condition can undo
+        if base == "inline" && prefixed {
+            return fail(
+                ctx,
+                code::INVALID_PREFIX,
+                format!(
+                    "'{}': `inline` puts the image's file into the page, which can't depend \
+                     on a prefix",
+                    attr.key
+                ),
+                &attr.key,
+            );
+        }
         if vocab::HTMLANG_FLAGS.contains(&base) {
             return true;
         }
@@ -3753,6 +3771,38 @@ fn could_be_parameter(attr: &Attribute) -> bool {
             .all(|c| c.is_alphanumeric() || matches!(c, '-' | '_'))
 }
 
+/// At a call, a name close to one of the function's parameters is a
+/// misspelled parameter, not an attribute for its root: report it, and
+/// return true (it is left out).
+fn misspelled_parameter(
+    attr: &Attribute,
+    text_keys: &[String],
+    line: usize,
+    column: Option<usize>,
+    ctx: &mut ParseContext,
+) -> bool {
+    if text_keys.is_empty() || !could_be_parameter(attr) {
+        return false;
+    }
+    let params: Vec<&str> = text_keys.iter().map(String::as_str).collect();
+    let Some(closest) = suggest_closest(&attr.key, &params) else {
+        return false;
+    };
+    let diagnostic = Diagnostic::error(
+        code::UNKNOWN_ATTRIBUTE,
+        line,
+        format!(
+            "unknown parameter '{}', did you mean '{}'?",
+            attr.key, closest
+        ),
+    )
+    .subject(attr.key.as_str())
+    .suggest(Some(closest));
+    let diagnostic = at_attribute(diagnostic, column, ctx);
+    ctx.diagnostics.push(diagnostic);
+    true
+}
+
 /// An attribute name htmlang doesn't know. A style whose name CSS could
 /// have goes to the CSS as written, with a warning; anything else (a flag,
 /// a name that isn't a word) is an error. Returns whether it is kept.
@@ -3789,7 +3839,10 @@ fn unknown_attribute(
     let rest_of_a_value = !base.starts_with(|c: char| c.is_ascii_alphabetic() || c == '-')
         || (suggestion.is_none() && attr.value.is_none() && after_another);
     if rest_of_a_value && error {
-        message.push_str(". A comma separates attributes: to keep one in a value, write `\\,`");
+        if !message.ends_with('?') {
+            message.push('.');
+        }
+        message.push_str(" A comma separates attributes: to keep one in a value, write `\\,`");
     }
     let severity = if error {
         Severity::Error
@@ -3864,7 +3917,8 @@ fn parse_attrs(
                         && could_be_parameter(attr)
                         && !text_keys.contains(&attr.key);
                     if checked_here
-                        && !check_attribute(attr, line, column(0), !attrs.is_empty(), ctx)
+                        && (misspelled_parameter(attr, text_keys, line, column(0), ctx)
+                            || !check_attribute(attr, line, column(0), !attrs.is_empty(), ctx))
                     {
                         continue;
                     }
@@ -3957,25 +4011,8 @@ fn parse_attrs(
             }
         }
 
-        // At a call, a name close to one of the function's parameters is
-        // a misspelled parameter, not an attribute for its root
-        if validate && !text_keys.is_empty() && could_be_parameter(&attr) {
-            let params: Vec<&str> = text_keys.iter().map(String::as_str).collect();
-            if let Some(closest) = suggest_closest(&attr.key, &params) {
-                let diagnostic = Diagnostic::error(
-                    code::UNKNOWN_ATTRIBUTE,
-                    line,
-                    format!(
-                        "unknown parameter '{}', did you mean '{}'?",
-                        attr.key, closest
-                    ),
-                )
-                .subject(attr.key.as_str())
-                .suggest(Some(closest));
-                let diagnostic = at_attribute(diagnostic, column(0), ctx);
-                ctx.diagnostics.push(diagnostic);
-                continue;
-            }
+        if validate && misspelled_parameter(&attr, text_keys, line, column(0), ctx) {
+            continue;
         }
 
         // A style or a flag: its name is checked, and what can't be
@@ -4400,7 +4437,7 @@ fn validate_tree(
                         Severity::Warning,
                         elem.line_num,
                         format!(
-                            "'{}' has no effect on {} (only works on @row, @el, @el)",
+                            "'{}' has no effect on {} (only works on a container, such as @el, @row or @grid)",
                             base,
                             element_kind_name(&elem.kind)
                         ),
@@ -4664,6 +4701,16 @@ fn dropped_by_the_element(elem: &Element, diagnostics: &mut Vec<Diagnostic>) {
                 ),
             );
         }
+    }
+    if elem.kind != ElementKind::Image && elem.attrs.iter().any(|a| !a.html && a.key == "inline") {
+        error(
+            code::UNEXPECTED_ARGUMENT,
+            format!(
+                "`inline` puts an image's file into the page, and @{} has none: it only \
+                 works on @image",
+                name
+            ),
+        );
     }
     let void = elem.kind == ElementKind::Image || elem.kind.spec().is_some_and(|spec| spec.void);
     if void && !elem.children.is_empty() {

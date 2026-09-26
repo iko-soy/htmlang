@@ -1360,8 +1360,9 @@ fn compute_class(
 
 /// Dedupe CSS declarations within a single rule body: for any property
 /// declared more than once, keep only the last occurrence. Unparseable
-/// segments (no `:`) are preserved as-is. Semicolons inside parentheses are
-/// treated as part of a value, not as declaration separators.
+/// segments (no `:`) are preserved as-is. Semicolons inside parentheses or
+/// quoted strings are treated as part of a value, not as declaration
+/// separators.
 fn dedupe_declarations(css: &str) -> String {
     if css.is_empty() {
         return String::new();
@@ -1376,8 +1377,26 @@ fn dedupe_declarations(css: &str) -> String {
     let mut decls: Vec<(Option<String>, String)> = Vec::new();
     let mut current = String::new();
     let mut depth: i32 = 0;
+    // A quoted string's `;` (`content "a;b"`) is text; a backslash escapes
+    // the character after it
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
     for ch in css.chars() {
-        if ch == '(' {
+        if escaped {
+            escaped = false;
+            current.push(ch);
+        } else if ch == '\\' {
+            escaped = true;
+            current.push(ch);
+        } else if let Some(q) = quote {
+            if ch == q {
+                quote = None;
+            }
+            current.push(ch);
+        } else if ch == '"' || ch == '\'' {
+            quote = Some(ch);
+            current.push(ch);
+        } else if ch == '(' {
             depth += 1;
             current.push(ch);
         } else if ch == ')' {
