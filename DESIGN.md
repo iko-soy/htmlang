@@ -53,6 +53,16 @@ attributes is its content, and `{...}` puts elements inside a line of text:
 @section [padding 8] Text after the attributes is content too.
 ```
 
+A backslash makes the next character literal: `\@` and `\--` let a text line
+start with `@` or `--`, `\$` shows a `$` that isn't a variable, `\{` a brace
+that isn't an inline element, and `\\` a backslash.
+
+```
+\@htmlang on social media
+@let price 5
+@text \$price is $price dollars
+```
+
 ### Comments
 
 `--` at the start of a line begins a comment. Comments must be on their own

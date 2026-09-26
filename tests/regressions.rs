@@ -440,3 +440,14 @@ fn style_aliases_point_to_css() {
     assert!(out.contains("border:1px solid red"), "{}", out);
     assert!(out.contains("border-radius:4px 4px 0 0"), "{}", out);
 }
+
+#[test]
+fn backslash_escapes_in_text() {
+    let out = compile(
+        "@let price 9\n\\@user says\n\\-- not a comment\n@text \\$price is $price, \\{@b} \\\\\n@paragraph\n  Now {@text \\$5} only\n",
+    );
+    assert!(out.contains("@user says"), "{}", out);
+    assert!(out.contains("-- not a comment"), "{}", out);
+    assert!(out.contains("$price is 9, {@b} \\<"), "{}", out);
+    assert!(out.contains(">$5</span> only"), "{}", out);
+}

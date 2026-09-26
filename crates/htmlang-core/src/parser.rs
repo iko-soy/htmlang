@@ -798,8 +798,12 @@ impl Evaluator {
             });
         }
 
-        let var_warnings =
-            check_undefined_vars(&content, &ctx.variables, line_num, current_indent);
+        let var_warnings = check_undefined_vars(
+            &protect_escapes(&content),
+            &ctx.variables,
+            line_num,
+            current_indent,
+        );
         ctx.diagnostics.extend(var_warnings);
         track_var_refs(&content, &mut ctx.used_variables);
         let segments = parse_text_segments(&content, ctx);
@@ -1356,18 +1360,18 @@ fn parse_single_element(
     let argument = if rest.is_empty() {
         None
     } else if kind == ElementKind::Link {
-        let rest_sub = substitute_vars(&rest, &ctx.variables);
+        let rest_sub = substitute_vars(&protect_escapes(&rest), &ctx.variables);
         if let Some((url, text)) = rest_sub.split_once(' ') {
             let text = text.trim();
             if !text.is_empty() {
                 children.push(Node::Text(parse_text_segments(text, ctx)));
             }
-            Some(url.to_string())
+            Some(restore_escapes(url))
         } else {
-            Some(rest_sub)
+            Some(restore_escapes(&rest_sub))
         }
     } else {
-        Some(substitute_vars(&rest, &ctx.variables))
+        Some(restore_escapes(&substitute_vars(&protect_escapes(&rest), &ctx.variables)))
     };
 
     // For @slot, the argument is the slot name
@@ -2433,20 +2437,50 @@ fn split_chain(content: &str) -> Vec<String> {
 // Text segment parsing (inline {...} elements)
 // ---------------------------------------------------------------------------
 
+/// Escapes in text: `\@`, `\$`, `\{`, `\--` and `\\` stand for the
+/// character(s) themselves. While a text is processed, each is a private-use
+/// placeholder, so it can't start a variable, an inline element or a line.
+const ESCAPES: &[(&str, char, &str)] = &[
+    ("\\\\", '\u{E000}', "\\"),
+    ("\\$", '\u{E001}', "$"),
+    ("\\{", '\u{E002}', "{"),
+    ("\\@", '\u{E003}', "@"),
+    ("\\--", '\u{E004}', "--"),
+];
+
+fn protect_escapes(text: &str) -> String {
+    if !text.contains('\\') {
+        return text.to_string();
+    }
+    let mut out = text.to_string();
+    for (escape, placeholder, _) in ESCAPES {
+        out = out.replace(escape, &placeholder.to_string());
+    }
+    out
+}
+
+fn restore_escapes(text: &str) -> String {
+    let mut out = text.to_string();
+    for (_, placeholder, literal) in ESCAPES {
+        out = out.replace(*placeholder, literal);
+    }
+    out
+}
+
 fn parse_text_segments(input: &str, ctx: &mut ParseContext) -> Vec<TextSegment> {
     let mut segments = Vec::new();
     let mut current_text = String::new();
-    let chars: Vec<char> = input.chars().collect();
+    let chars: Vec<char> = protect_escapes(input).chars().collect();
     let mut i = 0;
 
     while i < chars.len() {
         if chars[i] == '{' && i + 1 < chars.len() && chars[i + 1] == '@' {
             // Flush accumulated plain text
             if !current_text.is_empty() {
-                segments.push(TextSegment::Plain(substitute_vars(
+                segments.push(TextSegment::Plain(restore_escapes(&substitute_vars(
                     &current_text,
                     &ctx.variables,
-                )));
+                ))));
                 current_text.clear();
             }
 
@@ -2498,25 +2532,15 @@ fn parse_text_segments(input: &str, ctx: &mut ParseContext) -> Vec<TextSegment> 
     }
 
     if !current_text.is_empty() {
-        segments.push(TextSegment::Plain(substitute_vars(
+        segments.push(TextSegment::Plain(restore_escapes(&substitute_vars(
             &current_text,
             &ctx.variables,
-        )));
+        ))));
     }
 
     segments
 }
 
-// ---------------------------------------------------------------------------
-// Variable substitution
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Condition evaluation for @if
-// ---------------------------------------------------------------------------
-
-/// Inclusive integer range from `start` to `end` (counting down when
-/// `start > end`), stepping by `step`. Stops instead of overflowing.
 /// The items of a text list: a range `A..B [step N]`, or comma-separated.
 fn text_list_items(list: &str) -> Vec<String> {
     if let Some((start, rest)) = list.split_once("..") {
@@ -2552,6 +2576,8 @@ fn bind_item(vars: &mut HashMap<String, String>, source: &str, target: &str) {
     vars.entry(target.to_string()).or_default();
 }
 
+/// Inclusive integer range from `start` to `end` (counting down when
+/// `start > end`), stepping by `step`. Stops instead of overflowing.
 fn numeric_range(start: i64, end: i64, step: i64) -> Vec<String> {
     let mut items = Vec::new();
     let mut n = start;
