@@ -103,6 +103,27 @@ fn grammar_literal_elements_are_the_compilers() {
 }
 
 #[test]
+fn grammar_one_line_verbatim_bodies_are_the_compilers() {
+    let grammar = grammar();
+    // Every directive with a verbatim body takes its line as a one-line
+    // body, except @markdown, whose line is a file (read like a path)
+    let compiled: BTreeSet<String> = DIRECTIVES
+        .iter()
+        .filter(|d| d.body == htmlang::ast::BodyKind::Verbatim && d.name != "markdown")
+        .map(|d| d.name.to_string())
+        .collect();
+    let begin = grammar["repository"]["verbatim-line"]["begin"]
+        .as_str()
+        .expect("the grammar has no `verbatim-line` rule");
+    let names = &begin[begin.find("@(?:").expect("a directive name") + 1..];
+    assert_eq!(
+        alternatives(names),
+        compiled,
+        "update the `verbatim-line` rule of the TextMate grammar"
+    );
+}
+
+#[test]
 fn grammar_leading_arguments_are_the_compilers() {
     let grammar = grammar();
     let compiled: BTreeSet<String> = ElementKind::all_names()

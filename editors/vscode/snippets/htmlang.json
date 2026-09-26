@@ -16,8 +16,7 @@
       "@page [lang ${1:en}, favicon ${2:favicon.png}] ${3:My Page}",
       "@meta description ${4:Page description}",
       "@meta og:title $3",
-      "@head",
-      "  <link rel=\"canonical\" href=\"${5:https://example.com/}\">",
+      "@head <link rel=\"canonical\" href=\"${5:https://example.com/}\">",
       "$0"
     ],
     "description": "A page with a description, Open Graph tags and a canonical link"
@@ -259,8 +258,7 @@
   "Font face": {
     "prefix": "@font-face",
     "body": [
-      "@style",
-      "  @font-face { font-family: '${1:Inter}'; src: url('${2:fonts/inter.woff2}') format('woff2'); font-display: swap; }",
+      "@style @font-face { font-family: '${1:Inter}'; src: url('${2:fonts/inter.woff2}') format('woff2'); font-display: swap; }",
       "$0"
     ],
     "description": "A custom font in @style"
@@ -314,5 +312,13 @@
       "$0"
     ],
     "description": "A script loaded from a file"
+  },
+  "Code sample": {
+    "prefix": "@code-sample",
+    "body": [
+      "@pre [padding ${1:16}, background ${2:#f8fafc}, overflow-x auto] > @code",
+      "  $0"
+    ],
+    "description": "A code sample: the lines under @code are shown as written, HTML-escaped"
   }
 }

@@ -112,18 +112,30 @@ flow. Text that `@if`, `@each`, `@fragment` or a function writes counts as
 lines written in its place, so in a text element it flows with the rest,
 joined with a space, and in a native element it is on lines of its own.
 
-The text of `@code` and `@textarea` is shown as written: a `{@...}` in it is
-text, on its line, in the lines under it and inline, so a page can show
-htmlang source. Escapes and `$names` still work in it, and the lines of a
-`@textarea` keep their line breaks.
+The text of `@code` and `@textarea` is shown as written. On its line and
+inline, a `{@...}` in it is text, while escapes and `$names` still work.
+The lines indented under it are a [verbatim](#verbatim-bodies) sample:
+nothing in them is htmlang (`@`, `$`, `{`, `\` and `--` are text), and
+they are HTML-escaped with their line breaks and indentation kept. This
+is how a page shows code, htmlang included. `@pre` is an ordinary element,
+so `@pre > @code` is HTML's `<pre><code>`, and a function can wrap `@pre`
+around a sample. A sample is text on the line or lines in the block, not
+both.
 
 ```
 @paragraph
   Write {@code {@link /docs docs}} for a link.
+@pre [padding 16] > @code
+  @el [padding 40]
+    <b>shown as text</b>
 @textarea [aria-label=Notes]
   First line
-  Second line
+    Second line, indented
 ```
+
+A sample in the block has no `$names`, so a version number in it can't
+come from a variable; a one-line sample on `@code`'s own line can
+(`@code cargo install htmlang@$version`).
 
 ### Escapes
 
@@ -179,10 +191,20 @@ function call can be a link of a chain, like any element.
 
 ### Verbatim bodies
 
-`@raw` writes HTML into the output exactly as given, either the rest of its
-line or its indented block. The bodies of `@style`, `@head`, `@script` and
-`@markdown` are also kept exactly as written: nothing in them is parsed as
-htmlang, and a `--` line in them is not a comment.
+The bodies of `@raw`, `@style`, `@head`, `@markdown`, `@script`, `@code`
+and `@textarea` are foreign text, kept exactly as written: nothing in them
+is parsed as htmlang, and a `--` line in them is not a comment. `@raw`
+writes its HTML into the page, `@style` its CSS and `@head` its HTML into
+the `<head>`; `@code` and `@textarea` show theirs as text. Which lines are
+verbatim is decided by the element or directive on the line, also at the
+end of a chain (`@pre > @code`, `@el > @script`).
+
+The header's line follows one rule. For `@raw`, `@style` and `@head`, text
+on the line is a one-line body; for `@markdown` it is the file and for
+`@script` the `src`. Text on the line and an indented body together are an
+error. Only `@script` takes attributes: an attribute list on `@raw`,
+`@style`, `@head` or `@markdown` is an error, so content that starts with
+`[` (a CSS attribute selector) goes in the indented block.
 
 ```
 @raw <hr class="fancy">
@@ -190,6 +212,7 @@ htmlang, and a `--` line in them is not a comment.
   <div class="custom-widget">
     <span>Hand-written HTML</span>
   </div>
+@style .note { color: gray; }
 ```
 
 ### Directives
@@ -205,8 +228,8 @@ fixed kind of argument and a fixed kind of body:
 | `@data` | a variable and a source | none |
 | `@meta` | a name and a value | none |
 | `@if`, `@else`, `@each` | a condition or a loop | htmlang |
-| `@style`, `@head` | none | verbatim |
-| `@raw`, `@markdown` | the rest of the line (or a file, for `@markdown`) | verbatim, instead of the argument |
+| `@raw`, `@style`, `@head` | the rest of the line: a one-line body | verbatim, instead of the line |
+| `@markdown` | a file | verbatim Markdown, instead of the file |
 
 An indented line under a directive that takes no body is an error, because
 it would otherwise silently become a sibling.
@@ -1149,14 +1172,16 @@ it.
 is a fragment. The attributes of `@page` set `lang`, and `favicon` (the file
 is embedded in the page); any other is an error. `@meta NAME VALUE` adds a meta tag, and names that
 start with `og:` become Open Graph `property` tags. `@head` holds any other
-raw HTML for the `<head>`, such as a font link, a canonical URL or JSON-LD.
+raw HTML for the `<head>`, such as a font link, a canonical URL or JSON-LD,
+on its line or in its indented block.
 
 ```
 @page [lang en, favicon favicon.png] My Site
 @meta description A small site
 @meta og:title My Site
+@head <link rel="canonical" href="https://example.com/">
 @head
-  <link rel="canonical" href="https://example.com/">
+  <script type="application/ld+json">{"@type": "WebSite"}</script>
 ```
 
 Translations are a JSON file per locale: `@data $t locales/$lang.json`
@@ -1165,7 +1190,8 @@ loads `locales/fr.json` when `$lang` is `fr`.
 ## CSS
 
 `@style` holds raw CSS, including at-rules such as `@keyframes`,
-`@font-face`, `@property` and `@starting-style`:
+`@font-face`, `@property` and `@starting-style`, in its indented block or,
+for a single rule, on its line:
 
 ```
 @style
@@ -1174,6 +1200,7 @@ loads `locales/fr.json` when `$lang` is `fr`.
     to { opacity: 1; }
   }
   .note { color: gray; }
+@style .quiet { opacity: 0.6; }
 @el [animation fade-in 0.3s ease, class=note] Fades in
 ```
 

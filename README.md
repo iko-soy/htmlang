@@ -35,7 +35,11 @@ unless you write some, and nothing is added that you didn't ask for.
   elements. Text after an element's attributes is its content, read like
   any line of text, and `{...}` puts an element inside a line of text
   (`@h1 Hello {@text [color red] world}`). The text of `@code` and
-  `@textarea` is shown as written. An element that points at a URL or a
+  `@textarea` is shown as written, and the lines indented under them are
+  verbatim, HTML-escaped with their line breaks kept, so `@pre > @code`
+  over an indented block shows a code sample. `@raw`, `@style` and `@head`
+  take the rest of their line or an indented block, kept as written
+  (`@style .note { color: gray; }`). An element that points at a URL or a
   file takes it as its first word, and the rest is its content: `@link
   /about About us`, `@image logo.png`, `@form /subscribe`, `@script app.js`.
 - **Layout comes from elm-ui.** Every element has one layout. `@el` and the

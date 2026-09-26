@@ -25,7 +25,7 @@
   ]}
 ]
 
--- Code samples: @raw keeps the lines exactly as written, @ and all
+-- Code samples: the lines under @code are shown exactly as written, @ and all
 @let @code-block
   @pre [padding 16, background var(--code-bg), border-radius 8, font-size 14, line-height 1.5, overflow-x auto]
     @children
@@ -79,14 +79,14 @@
 
       @h2 [id=install, font-size 24, margin-block-start 16] Install
       @code-block
-        @raw
+        @code
           cargo install --path .
 
       @h2 [id=first-page, font-size 24, margin-block-start 16] Your first page
       @paragraph
         Create a file called {@code hello.hl}:
       @code-block
-        @raw
+        @code
           @page Hello
           @el [padding 40, spacing 16]
             @h1 Hi there
@@ -96,7 +96,7 @@
         Then start the dev server and open the page. It recompiles and reloads
         whenever you save; press {@kbd [padding 1 6, border 1 solid var(--line), border-radius 4, font-size 14] Ctrl+C} to stop it.
       @code-block
-        @raw
+        @code
           htmlang serve .
 
       @callout [kind Tip]

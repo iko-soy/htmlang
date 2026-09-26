@@ -218,7 +218,6 @@ impl Directive {
 /// A directive's arguments, read by its [`ArgGrammar`].
 #[derive(Clone, Debug)]
 pub enum DirectiveArgs {
-    None,
     Text(Option<Arg>),
     Page {
         attrs: Option<AttrList>,
@@ -300,6 +299,10 @@ pub struct Loop {
 pub struct Verbatim {
     /// The body's lines without their common indentation.
     pub text: String,
+    /// Shown on the page as text, HTML-escaped: the body of `@code` and
+    /// `@textarea`. Otherwise it goes into the page as it is (`@raw`,
+    /// `@script`) or is read by its directive (`@style`, `@markdown`).
+    pub escaped: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -756,13 +759,14 @@ fn scan(
         }
         diagnostics.extend(problems);
         let end = lines[last].0 + lines[last].1.len();
-        let body = match &kind {
-            NodeKind::Directive(d) => d.spec.body,
-            NodeKind::Element(line) => line
-                .chain
-                .last()
-                .map_or(BodyKind::Htmlang, |h| ast::body_kind(&h.name)),
-            _ => BodyKind::Htmlang,
+        // What the lines under it are is decided by the directive, or by
+        // the last element of a chain (`@pre > @code`)
+        let (body, escaped) = match &kind {
+            NodeKind::Directive(d) => (d.spec.body, false),
+            NodeKind::Element(line) => line.chain.last().map_or((BodyKind::Htmlang, false), |h| {
+                (ast::body_kind(&h.name), ast::has_literal_text(&h.name))
+            }),
+            _ => (BodyKind::Htmlang, false),
         };
         entries.push(Entry {
             indent,
@@ -809,6 +813,7 @@ fn scan(
                     source: String::new(),
                     kind: NodeKind::Verbatim(Verbatim {
                         text: text.join("\n"),
+                        escaped,
                     }),
                 });
                 i = body_end;
@@ -879,9 +884,11 @@ fn build_from(
     nodes
 }
 
-/// Make the text of `@code` and `@textarea` literal, on their line, in the
-/// lines under them and inline (`{@code {@link /x y}}`): a `{@...}` in it is
-/// text. `inside` says that `nodes` are in such an element.
+/// Make the text of `@code` and `@textarea` literal, on their line, inline
+/// (`{@code {@link /x y}}`) and in the lines under a chain they are in the
+/// middle of (`@code > @b`): a `{@...}` in it is text. (The lines under
+/// `@code` itself are a verbatim body, see `scan`.) `inside` says that
+/// `nodes` are in such an element.
 fn literal_text(nodes: &mut [Node], inside: bool) {
     for node in nodes {
         let mut literal = inside;
@@ -976,6 +983,26 @@ fn check_body(node: &mut Node, diagnostics: &mut Vec<Diagnostic>) {
         .iter()
         .any(|c| matches!(c.kind, NodeKind::Verbatim(_)));
     let (line, source) = (node.span.line, node.source.clone());
+    // `@code` and `@textarea` (also at the end of a chain) take their text
+    // on their line or as a verbatim block, like a verbatim directive
+    if let NodeKind::Element(element) = &node.kind
+        && element.text.is_some()
+        && has_verbatim
+        && let Some(head) = element.chain.last()
+        && ast::has_literal_text(&head.name)
+    {
+        diagnostics.push(
+            Diagnostic::error(
+                code::UNEXPECTED_BODY,
+                line,
+                format!(
+                    "@{} takes its text either on its own line or in an indented block, not both",
+                    head.name
+                ),
+            )
+            .source(source.clone()),
+        );
+    }
     let NodeKind::Directive(directive) = &mut node.kind else {
         return;
     };
@@ -1663,25 +1690,48 @@ impl Reader<'_> {
         problems: &mut Vec<Diagnostic>,
     ) -> (DirectiveArgs, bool) {
         let len = self.text.len();
-        let rest = self.text[name_end..].trim();
         let name = spec.name;
+        // A verbatim directive takes no attributes: `[` right after its name
+        // opens a list, as after any name, and the list is an error
+        let mut name_end = name_end;
+        let bracket = self.skip_ws(name_end, len);
+        if spec.body == BodyKind::Verbatim && self.text[bracket..].starts_with('[') {
+            let (list, end) = self.attr_list(bracket, len);
+            let reason = match name {
+                "raw" => "its HTML goes into the page as written, so put them in the HTML",
+                "head" => "its HTML goes into the <head> as written, so put them in the HTML",
+                "markdown" => {
+                    "to style the Markdown, put @markdown in an element that has them \
+                     (`@el [padding 8]` with @markdown indented under it)"
+                }
+                _ => "its CSS goes into the page as written",
+            };
+            let hint = match name {
+                "markdown" => String::new(),
+                _ => format!(
+                    ". Content that starts with `[` goes in an indented block under @{}",
+                    name
+                ),
+            };
+            problems.push(
+                self.error(
+                    code::UNEXPECTED_ARGUMENT,
+                    format!("@{} takes no attributes: {}{}", name, reason, hint),
+                )
+                .subject(self.text[bracket..end].to_string())
+                .column(list.span.column),
+            );
+            if !list.closed {
+                return (DirectiveArgs::Invalid, true);
+            }
+            name_end = end;
+        }
+        let rest = self.text[name_end..].trim();
         let mut missing = |what: &str| {
             problems.push(self.error(code::MISSING_ARGUMENT, format!("@{} needs {}", name, what)));
             (DirectiveArgs::Invalid, false)
         };
         match spec.args {
-            ArgGrammar::None => {
-                if !rest.is_empty() {
-                    problems.push(self.error(
-                        code::UNEXPECTED_ARGUMENT,
-                        format!(
-                            "@{} takes nothing on its line: its content is the indented block under it",
-                            name
-                        ),
-                    ));
-                }
-                (DirectiveArgs::None, false)
-            }
             ArgGrammar::Text => match self.arg(name_end, len) {
                 // Without a body, the line is all the directive has
                 None if spec.body == BodyKind::None => missing(match name {
@@ -2260,18 +2310,35 @@ mod tests {
         let plain = |text: &Text| {
             text.segments.len() == 1 && matches!(text.segments[0], Segment::Plain { .. })
         };
-        // On the element's line, in a chain and in the lines under it
-        let tree = parse("@code {@link /x y}\n@pre > @code {@b x}\n@textarea\n  {@b x}\n");
+        // On the element's line and in a chain
+        let tree = parse("@code {@link /x y}\n@pre > @code {@b x}\n");
         for node in &tree.nodes[..2] {
             let NodeKind::Element(line) = &node.kind else {
                 panic!()
             };
             assert!(plain(line.text.as_ref().unwrap()), "{:?}", line.text);
         }
-        let NodeKind::Text(text) = &tree.nodes[2].children[0].kind else {
-            panic!()
-        };
-        assert!(plain(text), "{:?}", text);
+        // The lines under it are a verbatim body, shown as text, also at
+        // the end of a chain; @pre's own lines are htmlang
+        let tree = parse("@textarea\n  {@b x}\n@pre > @code\n  @b y\n    -- z\n@pre\n  @b w\n");
+        for (node, text) in [(0, "{@b x}"), (1, "@b y\n  -- z")] {
+            let NodeKind::Verbatim(body) = &tree.nodes[node].children[0].kind else {
+                panic!("{:?}", tree.nodes[node].children)
+            };
+            assert!(body.escaped);
+            assert_eq!(body.text, text);
+        }
+        assert!(matches!(
+            tree.nodes[2].children[0].kind,
+            NodeKind::Element(_)
+        ));
+        assert!(tree.diagnostics.is_empty(), "{:?}", tree.diagnostics);
+        // Its line and a body together are an error
+        assert_eq!(codes(&parse("@code x\n  y\n")), [code::UNEXPECTED_BODY]);
+        assert_eq!(
+            codes(&parse("@pre > @code x\n  y\n")),
+            [code::UNEXPECTED_BODY]
+        );
         // Inline: `{@code ...}`'s text is literal, the line around it isn't
         let tree = parse("@h2 Write {@code {@link /x y}} or {@b {@code {@i z}}}\n");
         let NodeKind::Element(line) = &tree.nodes[0].kind else {
@@ -2437,7 +2504,49 @@ mod tests {
         let tree = parse("@raw <hr>\n  <br>\n");
         assert_eq!(codes(&tree), [code::UNEXPECTED_BODY]);
         let tree = parse("@style x\n  a {}\n");
-        assert_eq!(codes(&tree), [code::UNEXPECTED_ARGUMENT]);
+        assert_eq!(codes(&tree), [code::UNEXPECTED_BODY]);
+    }
+
+    #[test]
+    fn verbatim_directives_take_their_line_and_no_attributes() {
+        // The rest of the line is the one-line body (or @markdown's file)
+        for src in [
+            "@style .a { color: red }\n",
+            "@head <meta name=x>\n",
+            "@raw <hr>\n",
+            "@markdown notes.md\n",
+        ] {
+            let tree = parse(src);
+            assert!(
+                tree.diagnostics.is_empty(),
+                "{}: {:?}",
+                src,
+                tree.diagnostics
+            );
+            let Some(DirectiveArgs::Text(Some(arg))) = tree.nodes[0].directive().map(|d| &d.args)
+            else {
+                panic!("{}", src)
+            };
+            assert_eq!(arg.raw, src.split_once(' ').unwrap().1.trim_end());
+        }
+        // `[` right after the name is an attribute list, which is an error;
+        // the text after it is still the line's content
+        for name in ["style", "head", "raw", "markdown"] {
+            let tree = parse(&format!("@{} [id=x] rest\n", name));
+            assert_eq!(codes(&tree), [code::UNEXPECTED_ARGUMENT], "@{}", name);
+            assert_eq!(tree.diagnostics[0].column, Some(name.len() + 2));
+            let Some(DirectiveArgs::Text(Some(arg))) = tree.nodes[0].directive().map(|d| &d.args)
+            else {
+                panic!("@{}", name)
+            };
+            assert_eq!(arg.raw, "rest");
+        }
+        // In the indented block, `[` is content
+        assert!(
+            parse("@style\n  [hidden] { display: none }\n")
+                .diagnostics
+                .is_empty()
+        );
     }
 
     #[test]

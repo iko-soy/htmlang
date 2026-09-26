@@ -1,0 +1,28 @@
+@page Code samples
+-- The lines under @code are shown as written: HTML-escaped, with their
+-- line breaks and indentation, and nothing in them is htmlang
+@pre [padding 16]
+  @code
+    @el [padding 40]
+      <b>shown as text</b> for $5, {@b not bold}
+      -- not a comment
+
+-- @pre is an ordinary element, so a function can wrap a sample
+@let @code-block
+  @pre [padding 16, background #f8fafc]
+    @children
+@code-block
+  @code
+    cargo install --path .
+@pre > @code
+  one
+    two
+
+-- The text on the line of a verbatim directive is its one-line body
+@raw <hr class="fancy">
+@style .note { color: gray; }
+@head <meta name="generator" content="htmlang">
+
+@textarea [aria-label=Notes, rows=3]
+  First line
+    indented & kept

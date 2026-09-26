@@ -120,10 +120,10 @@ pub(crate) const DIRECTIVES: &[Doc] = &[
         "@let primary #3b82f6\n@let arrow \"→ \"\n@let gap = 8 * 2\n@let card [padding 20]\n@let @cta [label]\n  @el [$card] $label",
     ),
     doc("include", "Inserts another `.hl` file here, with its definitions.", "@include header.hl"),
-    doc("raw", "Pastes HTML into the output verbatim: the rest of the line, or an indented block.", "@raw\n  <div class=\"widget\"></div>"),
-    doc("markdown", "Markdown (indented body or file), converted to HTML.", "@markdown\n  # Title"),
-    doc("style", "Raw CSS; overrides generated styles.", "@style\n  .note { color: gray; }"),
-    doc("head", "Raw HTML added to `<head>`.", "@head\n  <link rel=\"icon\" href=\"f.ico\">"),
+    doc("raw", "Pastes HTML into the output verbatim: the rest of the line, or an indented block (not both). It takes no attributes.", "@raw <hr class=\"fancy\">\n@raw\n  <div class=\"widget\"></div>"),
+    doc("markdown", "Markdown, converted to HTML: a file named on its line, or an indented block kept verbatim (not both). It takes no attributes.", "@markdown notes.md\n@markdown\n  # Title"),
+    doc("style", "Raw CSS, which overrides generated styles: the rest of the line, or an indented block kept verbatim (not both). It takes no attributes.", "@style .note { color: gray; }\n@style\n  @keyframes fade { from { opacity: 0; } }"),
+    doc("head", "Raw HTML added to `<head>`: the rest of the line, or an indented block kept verbatim (not both). It takes no attributes.", "@head <link rel=\"icon\" href=\"f.ico\">"),
     doc("meta", "A `<meta>` tag; `og:` names become Open Graph tags.", "@meta description A small site"),
     doc("if", "Renders its body when the condition holds; `@else if` / `@else` follow.", "@if $count > 2 and not $hidden\n  @text Many"),
     doc("else", "Fallback branch of `@if` or `@each`.", "@else\n  @text None"),
@@ -238,7 +238,9 @@ pub(crate) fn element_summary(name: &str) -> Option<String> {
                  elsewhere.",
             ),
             TagArg::Child if spec.literal => summary.push_str(
-                " Text after it is its content, shown as written: a `{@...}` in it is text.",
+                " Text after it is its content, shown as written: a `{@...}` in it is text. \
+                 Or its content is the indented block under it, verbatim: shown HTML-escaped \
+                 with its lines and indentation, and nothing in it is htmlang.",
             ),
             TagArg::Child => summary.push_str(" Text after it is its content."),
         }
@@ -435,6 +437,7 @@ mod tests {
         let says = |name: &str, text: &str| hover(name).is_some_and(|h| h.contains(text));
         assert!(says("@code", "shown as written"));
         assert!(says("@textarea", "shown as written"));
+        assert!(says("@code", "indented block under it, verbatim"));
         assert!(!says("@kbd", "shown as written"));
         assert!(says("@kbd", "Text after it is its content"));
     }

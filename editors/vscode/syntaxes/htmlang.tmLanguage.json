@@ -19,6 +19,9 @@
       "include": "#each-directive"
     },
     {
+      "include": "#verbatim-line"
+    },
+    {
       "include": "#directive"
     },
     {
@@ -115,6 +118,17 @@
           "name": "keyword.control.in.htmlang"
         }
       }
+    },
+    "verbatim-line": {
+      "comment": "@raw, @style and @head: the rest of the line is a one-line body, kept as written (no variables, escapes or inline elements)",
+      "begin": "^\\s*(@(?:raw|style|head))(?![a-zA-Z0-9_-])",
+      "end": "$",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.control.directive.htmlang"
+        }
+      },
+      "contentName": "markup.raw.htmlang"
     },
     "directive": {
       "name": "keyword.control.directive.htmlang",

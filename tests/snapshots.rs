@@ -6498,7 +6498,7 @@ fn code_and_textarea_show_their_text_as_written() {
     let out = compile("@code {@b x}\n");
     assert!(out.contains(">{@b x}</code>"), "{}", out);
     let out = compile("@code\n  {@b x}\n  {@i y}\n");
-    assert!(out.contains(">{@b x} {@i y}</code>"), "{}", out);
+    assert!(out.contains(">{@b x}\n{@i y}</code>"), "{}", out);
     let out = compile("@pre > @code {@b x}\n");
     assert!(out.contains(">{@b x}</code></pre>"), "{}", out);
     // Its misspellings aren't elements, so they aren't reported
@@ -6514,8 +6514,13 @@ fn code_and_textarea_show_their_text_as_written() {
     // A textarea keeps its lines, and shows braces as written
     let out = compile("@textarea [aria-label=a]\n  {@b one}\n  two\n");
     assert!(out.contains(">{@b one}\ntwo</textarea>"), "{}", out);
-    let out = compile("@textarea [aria-label=a] {@b one}\n  two\n");
-    assert!(out.contains(">{@b one}\ntwo</textarea>"), "{}", out);
+    // Its text is on its line or in the block under it, not both
+    let diagnostics = parse_diagnostics("@textarea [aria-label=a] {@b one}\n  two\n");
+    assert!(
+        diagnostics.iter().any(|d| d.code == "unexpected-body"),
+        "{:?}",
+        diagnostics
+    );
 }
 
 #[test]
@@ -7236,4 +7241,52 @@ fn an_element_under_script_is_not_dropped_silently() {
     assert!(found[0].message.contains("@b would go nowhere"), "{:?}", d);
     // Its code under it is fine
     assert!(parse_diagnostics("@script\n  @b(1)\n").is_empty());
+}
+
+#[test]
+fn snapshot_code_samples() {
+    snapshot_test("code_samples");
+}
+
+#[test]
+fn the_lines_under_code_are_a_verbatim_sample() {
+    // HTML-escaped, line breaks and indentation kept; `@`, `$`, `{@`,
+    // backslashes and `--` are text
+    let out = compile("@let v 2\n@pre > @code\n  @b $v \\$v {@i x}\n    -- <tag> & \\\\\n");
+    assert!(
+        out.contains(
+            "><code class=\"b\">@b $v \\$v {@i x}\n  -- &lt;tag&gt; &amp; \\\\</code></pre>"
+        ),
+        "{}",
+        out
+    );
+    // Nothing in it is checked: no unknown element, no undefined variable
+    let diagnostics = parse_diagnostics("@code\n  @nosuch $undefined {@lnk x}\n");
+    assert!(diagnostics.is_empty(), "{:?}", diagnostics);
+    // A function that wraps @children in @pre shows the caller's sample
+    let out = compile("@let @sample\n  @pre\n    @children\n@sample\n  @code\n    a <b>\n");
+    assert!(
+        out.contains("<pre class=\"a\"><code class=\"b\">a &lt;b&gt;</code></pre>"),
+        "{}",
+        out
+    );
+    // The text on @code's line is still text with $names (a one-line
+    // sample can be templated), and the block is the same element
+    let out = compile("@let v 2\n@code cargo install htmlang@$v\n");
+    assert!(out.contains(">cargo install htmlang@2</code>"), "{}", out);
+}
+
+#[test]
+fn readable_output_adds_no_whitespace_inside_pre_and_textarea() {
+    let doc = htmlang::parser::parse(
+        "@el\n  @pre > @code\n    a\n      b\n  @textarea [aria-label=x]\n    c\n",
+    )
+    .document;
+    let out = htmlang::codegen::generate_dev(&doc);
+    assert!(
+        out.contains("><code class=\"c\">a\n  b</code></pre>\n"),
+        "{}",
+        out
+    );
+    assert!(out.contains(">c</textarea>\n"), "{}", out);
 }

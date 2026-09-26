@@ -1242,6 +1242,11 @@ fn generate_element(
     }
 
     out.push('>');
+    // In `<pre>` and `<textarea>` every space and line break shows, so
+    // readable (dev) output adds none there: a code sample's lines stay
+    // exactly as written
+    let outer_dev = ctx.dev;
+    ctx.dev &= !matches!(tag, "pre" | "textarea");
     out.push_str(ctx.nl());
 
     let layout = elem.kind.layout();
@@ -1257,6 +1262,7 @@ fn generate_element(
     ctx.depth -= 1;
 
     out.push_str(&ctx.indent());
+    ctx.dev = outer_dev;
     out.push_str("</");
     out.push_str(tag);
     out.push('>');

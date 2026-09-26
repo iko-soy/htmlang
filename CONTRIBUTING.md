@@ -38,11 +38,13 @@ Linux, macOS, and Windows. Your change should pass all three.
     `TAGS` with its one `Layout` (column, row, grid, text, native or void,
     which decides its text lines, `spacing` and its children's layout
     words), whether its text is shown as written (`literal`: `@code`,
-    `@textarea`), the one HTML attribute its first word fills (`arg`: `src`,
-    `action`, ...; `ElementKind::arg` gives `@link`'s and `@image`'s too)
-    and whether its body is kept as written (`verbatim`: `@script`), and
-    every directive one row in `DIRECTIVES` (its argument, its
-    kind of body, and whether it takes the rest of the line). The list of
+    `@textarea`, whose indented body is verbatim text, HTML-escaped), the
+    one HTML attribute its first word fills (`arg`: `src`, `action`, ...;
+    `ElementKind::arg` gives `@link`'s and `@image`'s too) and whether its
+    body is foreign text written into the page as it is (`verbatim`:
+    `@script`), and every directive one row in `DIRECTIVES` (its argument
+    and its kind of body; a verbatim directive's line is its one-line body
+    or file, and it takes no attributes). The list of
     elements is fixed; `HTML_NAMES_WRITTEN_OTHERWISE` maps HTML's `a`, `img`,
     `span`, `p` and `div` to htmlang's own names for the unknown-element
     suggestion only.

@@ -685,8 +685,32 @@ fn indented_lines_under_a_directive_without_a_body_are_errors() {
 fn verbatim_directives_take_a_line_or_a_body() {
     let src = "@raw <hr>\n  <br>\n";
     assert!(has_code(src, 1, "unexpected-body"), "{:?}", codes(src));
-    let src = "@style .a { color: red; }\n";
-    assert!(has_code(src, 1, "unexpected-argument"), "{:?}", codes(src));
+    let src = "@style .a { color: red; }\n  .b {}\n";
+    assert!(has_code(src, 1, "unexpected-body"), "{:?}", codes(src));
+    // The line is a one-line body: `@style X` was "unknown element @style,
+    // did you mean @style?", `@head X` was dropped
+    let src =
+        "@page T\n@style .a { color: red; }\n@head <meta name=\"x\" content=\"y\">\n@text z\n";
+    assert!(codes(src).is_empty(), "{:?}", codes(src));
+    let out = compile(src);
+    assert!(out.contains(".a { color: red; }</style>"), "{}", out);
+    assert!(out.contains("<meta name=\"x\" content=\"y\">"), "{}", out);
+    // Attributes on a verbatim directive were text (`@raw [id=x]` wrote
+    // "[id=x]"), a file name (`@markdown [padding 8]`) or dropped
+    // (`@head [id=x]`): now an error
+    for src in [
+        "@raw [id=x] <hr>\n",
+        "@markdown [padding 8]\n",
+        "@head [id=x]\n  <meta name=x>\n",
+        "@style [media=print]\n  a {}\n",
+    ] {
+        assert!(
+            has_code(src, 1, "unexpected-argument"),
+            "{}: {:?}",
+            src,
+            codes(src)
+        );
+    }
 }
 
 #[test]

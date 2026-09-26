@@ -9,7 +9,8 @@ Syntax highlighting, snippets, and language server support for
   `[attribute]` lists with state and media prefixes, `if(...)` and its
   `[groups]`, `key=value` HTML attributes, the leading argument of
   `@link`, `@image`, `@script` and the other elements that take one, quoted text, escapes (`\,`, `\$`, `\]`), `{@inline}` elements
-  (shown as text in `@code` and `@textarea`),
+  (shown as text in `@code` and `@textarea`), the one-line body of `@raw`,
+  `@style` and `@head` as raw text,
   `@each $item in` headers and ranges (`1..5`), colors, numbers and `-- comments`.
 - **Diagnostics**: the compiler's own, each with its code: parse errors,
   unknown elements, prefixes and CSS properties with "did you mean"
@@ -65,7 +66,8 @@ to its absolute path. `htmlang.server.args` passes extra arguments to it.
 
 Snippets cover common patterns: `@page`, `@let-fn`, `@let-slots`,
 `@let-tokens`, `@navbar`, `@hero`, `@form`, `@grid`, `@table`, `@each`, `@if`,
-`if(` (attributes chosen by a condition), `@layout` and more. Type a prefix and press `Tab` to expand it.
+`if(` (attributes chosen by a condition), `@code-sample` (`@pre > @code`
+over a block shown as written), `@layout` and more. Type a prefix and press `Tab` to expand it.
 
 ## Development
 

@@ -1116,6 +1116,12 @@ impl Evaluator {
         ctx.enter(node);
         match &node.kind {
             NodeKind::Blank | NodeKind::Comment => Ok(None),
+            // `@code` and `@textarea` show their body as text; `@script`'s
+            // goes into the page as it is
+            NodeKind::Verbatim(body) if body.escaped => {
+                let text = body.text.trim_matches('\n').to_string();
+                Ok(Some(vec![Node::Text(vec![TextSegment::Plain(text)])]))
+            }
             NodeKind::Verbatim(body) => Ok(Some(vec![Node::Raw(body.text.clone())])),
             NodeKind::Directive(directive) => {
                 let mut nodes = self.eval_directive(node, directive, ctx)?;
@@ -1255,7 +1261,7 @@ impl Evaluator {
             }
 
             ("head", _) => {
-                let text = verbatim_text(&node.children);
+                let text = verbatim_content(node);
                 if !text.trim().is_empty() {
                     ctx.head_blocks.push(text.trim().to_string());
                 }
@@ -1264,7 +1270,7 @@ impl Evaluator {
 
             // @style: raw CSS
             ("style", _) => {
-                let text = verbatim_text(&node.children);
+                let text = verbatim_content(node);
                 if !text.trim().is_empty() {
                     ctx.custom_css.push(text.trim().to_string());
                 }
@@ -1311,9 +1317,8 @@ impl Evaluator {
             }
 
             // @raw: the rest of its line, or its indented body, verbatim
-            ("raw", DirectiveArgs::Text(Some(text))) => Ok(Some(vec![Node::Raw(text.raw.clone())])),
             ("raw", _) => {
-                let text = verbatim_text(&node.children);
+                let text = verbatim_content(node);
                 let text = text.trim_end_matches('\n');
                 Ok((!text.is_empty()).then(|| vec![Node::Raw(text.to_string())]))
             }
@@ -1691,7 +1696,7 @@ impl Evaluator {
                 .iter()
                 .map(|node| {
                     ctx.visited.insert(node.id);
-                    verbatim_text(&node.children)
+                    verbatim_content(node)
                 })
                 .collect();
             // Nested under the scope class, so any CSS works (multi-line
@@ -2400,6 +2405,17 @@ fn with_field(
             value.describe(),
             value
         )),
+    }
+}
+
+/// What a verbatim directive holds (`@head`, `@style`, `@raw`): the rest
+/// of its line (`@style .a { color: red }`), or else its indented block.
+/// The two together are a syntax error, reported by the tree; the line
+/// wins.
+fn verbatim_content(node: &syntax::Node) -> String {
+    match node.directive().map(|d| &d.args) {
+        Some(DirectiveArgs::Text(Some(line))) => format!("{}\n", line.raw),
+        _ => verbatim_text(&node.children),
     }
 }
 

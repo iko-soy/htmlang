@@ -15,6 +15,13 @@ pub(crate) fn completions(text: &str, position: Position) -> Vec<CompletionItem>
     let col = (position.character as usize).min(line.len());
     let before = &line[..col];
 
+    // Nothing in a verbatim body (CSS, JavaScript, HTML, a code sample
+    // under `@code`) is htmlang, so there is nothing to offer
+    let tree = htmlang::syntax::parse(text);
+    if crate::tree::verbatim_lines(&tree).contains(&position.line) {
+        return vec![];
+    }
+
     let word_start = find_word_start(before);
     let edit_range = Range::new(Position::new(position.line, word_start as u32), position);
 
@@ -1579,6 +1586,9 @@ mod tests {
             "@code Write {@l",
             "@paragraph Write {@code {@l",
             "@code\n  Write {@l",
+            // The lines under `@code` are a verbatim sample: `@` is text
+            "@pre > @code\n  @",
+            "@style\n  @",
         ] {
             let line = text.lines().count() as u32 - 1;
             let column = text.lines().last().unwrap().len() as u32;

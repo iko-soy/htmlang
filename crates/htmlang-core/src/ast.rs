@@ -152,7 +152,9 @@ impl ElementKind {
         self.arg().attribute(in_picture)
     }
 
-    /// Whether its indented body is kept exactly as written (`@script`).
+    /// Whether its indented body is foreign text written into the page as
+    /// it is (`@script`). (`@code` and `@textarea` also have a verbatim
+    /// body, shown as text: see [`TagSpec::literal`].)
     pub fn is_verbatim(&self) -> bool {
         self.spec().is_some_and(|spec| spec.verbatim)
     }
@@ -297,11 +299,13 @@ pub struct TagSpec {
     pub arg: TagArg,
     /// How it lays out its content.
     pub layout: Layout,
-    /// Its text is shown as written (`@code`, `@textarea`): a `{@...}` in
-    /// it is text, not an inline element. Escapes and `$names` still work.
+    /// Its text is shown as written (`@code`, `@textarea`). On its line and
+    /// inline, a `{@...}` is text, not an inline element (escapes and
+    /// `$names` still work). Its indented body is verbatim: nothing in it is
+    /// parsed, and it is shown HTML-escaped, its lines and indentation kept.
     pub literal: bool,
-    /// Its indented body is foreign text, kept exactly as written
-    /// (`@script`'s JavaScript): nothing in it is parsed as htmlang.
+    /// Its indented body is foreign text written into the page exactly as
+    /// it is (`@script`'s JavaScript): nothing in it is parsed as htmlang.
     pub verbatim: bool,
 }
 
@@ -437,8 +441,9 @@ pub const HTML_NAMES_WRITTEN_OTHERWISE: &[(&str, &str)] = &[
 ];
 
 /// Whether the element named `name` (without the `@`) shows its text as
-/// written: `{@code {@link /x y}}` prints the braces. The syntax tree
-/// reads this, so every tool agrees on it.
+/// written: `{@code {@link /x y}}` prints the braces, and its indented body
+/// is verbatim text, HTML-escaped. The syntax tree reads this, so every
+/// tool agrees on it.
 pub fn has_literal_text(name: &str) -> bool {
     ElementKind::from_name(name)
         .and_then(|kind| kind.spec())
@@ -448,9 +453,10 @@ pub fn has_literal_text(name: &str) -> bool {
 /// How a directive reads the rest of its line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArgGrammar {
-    /// Nothing may follow the name (`@style`).
-    None,
     /// Free text, taken as written (`@include file.hl`, `@meta name value`).
+    /// For a directive with a verbatim body it is the one-line form of the
+    /// body (`@raw <hr>`, `@style .a { color: red }`) or, for `@markdown`,
+    /// the file.
     Text,
     /// An optional `[attributes]` list, then text (`@page [lang en] Title`).
     AttrsText,
@@ -474,8 +480,12 @@ pub enum BodyKind {
     None,
     /// htmlang: elements, text and directives.
     Htmlang,
-    /// Foreign text (CSS, HTML, JavaScript, Markdown), kept exactly as
-    /// written: nothing in it is parsed, and `--` is not a comment.
+    /// Foreign text (CSS, HTML, JavaScript, Markdown, a code sample), kept
+    /// exactly as written: nothing in it is parsed, and `--` is not a
+    /// comment. The text on the header's line is its one-line form (or a
+    /// file or URL: `@markdown notes.md`, `@script app.js`); the line and a
+    /// body together are an error. A verbatim directive takes no
+    /// attributes.
     Verbatim,
 }
 
@@ -488,26 +498,23 @@ pub struct DirectiveSpec {
     pub name: &'static str,
     pub args: ArgGrammar,
     pub body: BodyKind,
-    /// A verbatim directive may give its content as the rest of its line
-    /// instead of an indented body (`@raw <hr>`, `@markdown file.md`).
-    pub one_line: bool,
 }
 
 /// Every directive.
 #[rustfmt::skip]
 pub static DIRECTIVES: &[DirectiveSpec] = &[
-    DirectiveSpec { name: "page", args: ArgGrammar::AttrsText, body: BodyKind::None, one_line: false },
-    DirectiveSpec { name: "let", args: ArgGrammar::Definition, body: BodyKind::Htmlang, one_line: false },
-    DirectiveSpec { name: "include", args: ArgGrammar::Text, body: BodyKind::None, one_line: false },
-    DirectiveSpec { name: "data", args: ArgGrammar::Data, body: BodyKind::None, one_line: false },
-    DirectiveSpec { name: "meta", args: ArgGrammar::Text, body: BodyKind::None, one_line: false },
-    DirectiveSpec { name: "if", args: ArgGrammar::Expression, body: BodyKind::Htmlang, one_line: false },
-    DirectiveSpec { name: "else", args: ArgGrammar::Else, body: BodyKind::Htmlang, one_line: false },
-    DirectiveSpec { name: "each", args: ArgGrammar::Loop, body: BodyKind::Htmlang, one_line: false },
-    DirectiveSpec { name: "style", args: ArgGrammar::None, body: BodyKind::Verbatim, one_line: false },
-    DirectiveSpec { name: "head", args: ArgGrammar::None, body: BodyKind::Verbatim, one_line: false },
-    DirectiveSpec { name: "raw", args: ArgGrammar::Text, body: BodyKind::Verbatim, one_line: true },
-    DirectiveSpec { name: "markdown", args: ArgGrammar::Text, body: BodyKind::Verbatim, one_line: true },
+    DirectiveSpec { name: "page", args: ArgGrammar::AttrsText, body: BodyKind::None },
+    DirectiveSpec { name: "let", args: ArgGrammar::Definition, body: BodyKind::Htmlang },
+    DirectiveSpec { name: "include", args: ArgGrammar::Text, body: BodyKind::None },
+    DirectiveSpec { name: "data", args: ArgGrammar::Data, body: BodyKind::None },
+    DirectiveSpec { name: "meta", args: ArgGrammar::Text, body: BodyKind::None },
+    DirectiveSpec { name: "if", args: ArgGrammar::Expression, body: BodyKind::Htmlang },
+    DirectiveSpec { name: "else", args: ArgGrammar::Else, body: BodyKind::Htmlang },
+    DirectiveSpec { name: "each", args: ArgGrammar::Loop, body: BodyKind::Htmlang },
+    DirectiveSpec { name: "style", args: ArgGrammar::Text, body: BodyKind::Verbatim },
+    DirectiveSpec { name: "head", args: ArgGrammar::Text, body: BodyKind::Verbatim },
+    DirectiveSpec { name: "raw", args: ArgGrammar::Text, body: BodyKind::Verbatim },
+    DirectiveSpec { name: "markdown", args: ArgGrammar::Text, body: BodyKind::Verbatim },
 ];
 
 /// The directive named `name` (without the `@`).
@@ -516,12 +523,17 @@ pub fn directive(name: &str) -> Option<&'static DirectiveSpec> {
 }
 
 /// What the lines indented under `@name` are: the directive's body kind,
-/// or an element's (verbatim for a row that says so, `@script`; htmlang
-/// for every other element).
+/// or an element's (verbatim for a row that says so: `@script`, and
+/// `@code` and `@textarea`, whose text is literal; htmlang for every other
+/// element).
 pub fn body_kind(name: &str) -> BodyKind {
+    let verbatim = |spec: &TagSpec| spec.verbatim || spec.literal;
     match directive(name) {
         Some(spec) => spec.body,
-        None if ElementKind::from_name(name).is_some_and(|kind| kind.is_verbatim()) => {
+        None if ElementKind::from_name(name)
+            .and_then(|kind| kind.spec())
+            .is_some_and(verbatim) =>
+        {
             BodyKind::Verbatim
         }
         None => BodyKind::Htmlang,
@@ -657,6 +669,24 @@ mod tests {
         assert!(script.is_verbatim() && script.spec().is_some());
         assert_eq!(super::body_kind("script"), super::BodyKind::Verbatim);
         assert_eq!(super::body_kind("el"), super::BodyKind::Htmlang);
+        // @code and @textarea: a verbatim body, shown as text; @pre is an
+        // ordinary element, so `@pre > @code` and wrapper functions work
+        for name in ["code", "textarea"] {
+            assert_eq!(
+                super::body_kind(name),
+                super::BodyKind::Verbatim,
+                "@{}",
+                name
+            );
+            assert!(super::has_literal_text(name), "@{}", name);
+        }
+        assert_eq!(super::body_kind("pre"), super::BodyKind::Htmlang);
+        // Every verbatim directive takes its line as its one-line body or file
+        for spec in super::DIRECTIVES {
+            if spec.body == super::BodyKind::Verbatim {
+                assert_eq!(spec.args, super::ArgGrammar::Text, "@{}", spec.name);
+            }
+        }
     }
 
     #[test]
