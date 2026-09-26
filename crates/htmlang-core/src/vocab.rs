@@ -174,17 +174,17 @@ pub const HTML_ATTRIBUTES: &[&str] = &[
 /// or `border-image-width 2` stay numbers. Sorted, for the binary search.
 #[rustfmt::skip]
 pub const LENGTH_PROPERTIES: &[&str] = &[
-    "background-position", "background-position-x", "background-position-y",
-    "background-size", "block-size", "border", "border-block", "border-block-end",
-    "border-block-end-width", "border-block-start", "border-block-start-width",
-    "border-block-width", "border-bottom", "border-bottom-left-radius",
-    "border-bottom-right-radius", "border-bottom-width", "border-end-end-radius",
-    "border-end-start-radius", "border-inline", "border-inline-end", "border-inline-end-width",
-    "border-inline-start", "border-inline-start-width", "border-inline-width", "border-left",
-    "border-left-width", "border-radius", "border-right", "border-right-width",
-    "border-spacing", "border-start-end-radius", "border-start-start-radius", "border-top",
-    "border-top-left-radius", "border-top-right-radius", "border-top-width", "border-width",
-    "bottom", "box-shadow", "column-gap", "column-rule", "column-rule-width", "column-width",
+    "background-position", "background-position-x", "background-position-y", "background-size",
+    "block-size", "border", "border-block", "border-block-end", "border-block-end-width",
+    "border-block-start", "border-block-start-width", "border-block-width", "border-bottom",
+    "border-bottom-left-radius", "border-bottom-right-radius", "border-bottom-width",
+    "border-end-end-radius", "border-end-start-radius", "border-inline", "border-inline-end",
+    "border-inline-end-width", "border-inline-start", "border-inline-start-width",
+    "border-inline-width", "border-left", "border-left-width", "border-radius", "border-right",
+    "border-right-width", "border-spacing", "border-start-end-radius",
+    "border-start-start-radius", "border-top", "border-top-left-radius",
+    "border-top-right-radius", "border-top-width", "border-width", "bottom", "box-shadow",
+    "column-gap", "column-rule", "column-rule-width", "column-width",
     "contain-intrinsic-block-size", "contain-intrinsic-height", "contain-intrinsic-inline-size",
     "contain-intrinsic-size", "contain-intrinsic-width", "flex-basis", "font-size", "gap",
     "grid-auto-columns", "grid-auto-rows", "grid-template-columns", "grid-template-rows",
@@ -194,7 +194,8 @@ pub const LENGTH_PROPERTIES: &[&str] = &[
     "margin-inline", "margin-inline-end", "margin-inline-start", "margin-left", "margin-right",
     "margin-top", "mask-position", "mask-size", "max-block-size", "max-height",
     "max-inline-size", "max-width", "min-block-size", "min-height", "min-inline-size",
-    "min-width", "object-position", "outline", "outline-offset", "outline-width", "padding",
+    "min-width", "object-position", "offset-anchor", "offset-distance", "offset-position",
+    "outline", "outline-offset", "outline-width", "overflow-clip-margin", "padding",
     "padding-block", "padding-block-end", "padding-block-start", "padding-bottom",
     "padding-inline", "padding-inline-end", "padding-inline-start", "padding-left",
     "padding-right", "padding-top", "perspective", "perspective-origin", "right", "row-gap",
@@ -204,9 +205,10 @@ pub const LENGTH_PROPERTIES: &[&str] = &[
     "scroll-margin-right", "scroll-margin-top", "scroll-padding", "scroll-padding-block",
     "scroll-padding-block-end", "scroll-padding-block-start", "scroll-padding-bottom",
     "scroll-padding-inline", "scroll-padding-inline-end", "scroll-padding-inline-start",
-    "scroll-padding-left", "scroll-padding-right", "scroll-padding-top", "text-decoration-thickness",
-    "text-indent", "text-shadow", "text-underline-offset", "top", "transform-origin",
-    "translate", "width", "word-spacing",
+    "scroll-padding-left", "scroll-padding-right", "scroll-padding-top", "shape-margin",
+    "text-decoration-thickness", "text-indent", "text-shadow", "text-underline-offset", "top",
+    "transform-origin", "translate", "vertical-align", "view-timeline-inset", "width",
+    "word-spacing",
 ];
 
 /// A property whose value is a length (see [`LENGTH_PROPERTIES`]).
@@ -256,9 +258,14 @@ pub fn with_px(property: &str, value: &str) -> String {
         }
         // Words are separated by spaces, commas and slashes outside
         // parentheses and quotes, so a function or a string is part of a
-        // word, which is then not a bare number
-        if depth == 0 && quote.is_none() && (c.is_whitespace() || c == ',' || c == '/') {
+        // word, which is then not a bare number. `!important` starts a
+        // word of its own, also right after a number (`10!important`)
+        let outside = depth == 0 && quote.is_none();
+        if outside && (c.is_whitespace() || c == ',' || c == '/') {
             end_word(&mut out, &mut word, i);
+        } else if outside && c == '!' {
+            end_word(&mut out, &mut word, i);
+            word = Some(i);
         } else if word.is_none() {
             word = Some(i);
         }
@@ -481,6 +488,8 @@ mod tests {
             "1e3 1. #333 10px !important"
         );
         assert_eq!(with_px("width", "var(--w, 10)"), "var(--w, 10)");
+        assert_eq!(with_px("margin", "10!important"), "10px!important");
+        assert_eq!(with_px("margin", "0 4 ! important"), "0 4px ! important");
         // Zero stays zero, however it is written
         assert_eq!(with_px("padding", "0 0.0 -0"), "0 0.0 -0");
         // Numbers in quotes are text

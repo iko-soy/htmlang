@@ -152,8 +152,8 @@ pub(crate) const ATTRIBUTES: &[Doc] = &[
     doc("align-top", "Aligns the element to the top of its parent (`margin-bottom: auto`).", "align-top"),
     doc("align-bottom", "Aligns the element to the bottom of its parent (`margin-top: auto`).", "align-bottom"),
     doc("wrap", "Lets a row's children wrap onto new lines.", "wrap"),
-    doc("grid-cols", "Number of equal grid columns.", "grid-cols 3"),
-    doc("grid-rows", "Number of equal grid rows.", "grid-rows 2"),
+    doc("grid-cols", "Number of equal grid columns, or a track list as in `grid-template-columns` (bare numbers are px).", "grid-cols 3\ngrid-cols 200 1fr"),
+    doc("grid-rows", "Number of equal grid rows, or a track list as in `grid-template-rows` (bare numbers are px).", "grid-rows 2"),
     doc("col-span", "Columns a grid child spans.", "col-span 2"),
     doc("row-span", "Rows a grid child spans.", "row-span 2"),
     doc("line-height", "Line height; a bare number is a multiplier of the font size.", "line-height 1.5"),
@@ -350,7 +350,7 @@ fn attribute_hover(name: &str) -> Option<String> {
     }
     if vocab::is_css_property(name) {
         let value = if vocab::is_length_property(name) {
-            "a length: every bare number outside parentheses is px (`8` is `8px`)"
+            "a length: every bare number outside parentheses and quotes is px (`8` is `8px`)"
         } else {
             "passed through unchanged (its numbers stay numbers)"
         };

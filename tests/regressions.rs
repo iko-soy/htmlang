@@ -1873,3 +1873,28 @@ fn every_shadow_gets_px() {
         out
     );
 }
+
+#[test]
+fn important_right_after_a_length_keeps_its_px() {
+    let out = compile("@el [margin 10!important, padding 4 8 !important] x");
+    assert!(out.contains("margin:10px!important;"), "{}", out);
+    assert!(out.contains("padding:4px 8px !important;"), "{}", out);
+}
+
+#[test]
+fn every_length_valued_property_gets_px() {
+    let out = compile(
+        "@el [vertical-align -2, shape-margin 4, offset-distance 10, offset-position 10 20, offset-anchor 0 5, overflow-clip-margin content-box 8, view-timeline-inset auto 12] x",
+    );
+    for decl in [
+        "vertical-align:-2px;",
+        "shape-margin:4px;",
+        "offset-distance:10px;",
+        "offset-position:10px 20px;",
+        "offset-anchor:0 5px;",
+        "overflow-clip-margin:content-box 8px;",
+        "view-timeline-inset:auto 12px;",
+    ] {
+        assert!(out.contains(decl), "{decl}: {out}");
+    }
+}

@@ -312,7 +312,7 @@ its children, and how it sits in its parent:
 | `center-x`, `center-y` | Center the element in its parent (auto margins) |
 | `align-left`, `align-right`, `align-top`, `align-bottom` | Align the element in its parent (an auto margin on the other side) |
 | `wrap` | Let a row wrap onto more lines |
-| `grid-cols N`, `grid-rows N` | Equal grid columns or rows (on `@grid`) |
+| `grid-cols N`, `grid-rows N` | Equal grid columns or rows (on `@grid`); any other value is a track list, as in `grid-template-columns` (`grid-cols 200 1fr`) |
 | `col-span N`, `row-span N` | Cells a grid child spans |
 
 `spacing`, `wrap`, `grid-cols` and `grid-rows` lay out an element's
@@ -466,12 +466,18 @@ The length properties are these, and only these:
 |---|---|
 | Size | `width`, `height`, `min-*` and `max-*` of both, `block-size`, `inline-size` and their `min-`/`max-`, `flex-basis`, `column-width`, `contain-intrinsic-*` |
 | Space | `margin`, `padding`, `scroll-margin`, `scroll-padding` and every side of them, `gap`, `row-gap`, `column-gap`, `border-spacing` |
-| Position | `top`, `right`, `bottom`, `left`, `inset` and `inset-*`, `translate`, `transform-origin`, `perspective`, `perspective-origin` |
+| Position | `top`, `right`, `bottom`, `left`, `inset` and `inset-*`, `translate`, `transform-origin`, `perspective`, `perspective-origin`, `offset-position`, `offset-anchor`, `offset-distance` |
 | Border | `border` and every `border-*` shorthand, width and radius (not `border-image-*`), `outline`, `outline-width`, `outline-offset`, `column-rule`, `column-rule-width` |
 | Shadow | `box-shadow`, `text-shadow` |
 | Grid | `grid-template-columns`, `grid-template-rows`, `grid-auto-columns`, `grid-auto-rows` |
 | Background | `background-position` (and `-x`, `-y`), `background-size`, `object-position`, `mask-position`, `mask-size` |
-| Text | `font-size`, `letter-spacing`, `word-spacing`, `text-indent`, `text-decoration-thickness`, `text-underline-offset` |
+| Text | `font-size`, `letter-spacing`, `word-spacing`, `text-indent`, `text-decoration-thickness`, `text-underline-offset`, `vertical-align` |
+| Other | `shape-margin`, `overflow-clip-margin`, `view-timeline-inset` |
+
+Shorthands that mix lengths with numbers of other kinds (`font`,
+`background`, `mask`, `grid`, `grid-template`, `offset`, `flex`) are not in
+the table, so the lengths in them are written with their unit:
+`font 700 16px/1.5 Inter`.
 
 Nothing else is added to a value, and a shorthand means what it means in
 CSS: `outline 2 solid red` is `2px solid red`, while `outline 2 red` names
