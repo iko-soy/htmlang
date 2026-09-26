@@ -496,7 +496,7 @@ removed form with its replacement.
 | `@og KEY VALUE` | `@meta og:KEY VALUE` |
 | `@assert`, `@warn`, `@debug`, `@log` | Nothing (the lines are removed) |
 | `@defer` | Its content, directly |
-| `@col`, `@p`, `@img`, `@li`, `@btn`, `@ul`, `@divider`, `@opt` | `@el`, `@paragraph`, `@image`, `@li`, `@button`, `@ul`, `@hr`, `@option` |
+| `@col`, `@p`, `@img`, `@btn`, `@divider`, `@opt` | `@el`, `@paragraph`, `@image`, `@button`, `@hr`, `@option` |
 | `type email`, `id main` (HTML attributes written as styles) | `type=email`, `id=main` |
 | `skeleton`, `no-scrollbar`, `gradient A B` | `$skeleton`, `$no-scrollbar`, `background linear-gradient(A, B)` |
 | `@tooltip TEXT` | `@tooltip [tip TEXT] TEXT` |
