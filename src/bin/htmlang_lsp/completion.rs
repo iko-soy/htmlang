@@ -20,6 +20,11 @@ pub(crate) fn completions(text: &str, position: Position) -> Vec<CompletionItem>
 
     // Inside attribute brackets?
     if in_brackets(before) {
+        // A function's parameter list names its parameters: there are no
+        // attributes or values to offer
+        if in_parameter_list(text, position.line) {
+            return vec![];
+        }
         let current_word = &before[word_start..];
 
         // $ variable/define reference
@@ -67,6 +72,18 @@ pub(crate) fn completions(text: &str, position: Position) -> Vec<CompletionItem>
     }
 
     vec![]
+}
+
+/// Whether `line` is (part of) a function definition's head,
+/// `@let @card [title, tone info]`.
+fn in_parameter_list(text: &str, line: u32) -> bool {
+    let tree = htmlang::syntax::parse(text);
+    crate::tree::node_at(&tree, line)
+        .and_then(|node| node.directive())
+        .is_some_and(|directive| {
+            matches!(&directive.args, htmlang::syntax::DirectiveArgs::Let(def)
+                if matches!(def.form, htmlang::syntax::LetForm::Function(_)))
+        })
 }
 
 pub(crate) fn find_word_start(text: &str) -> usize {
@@ -958,7 +975,15 @@ fn function_completions(text: &str, range: Range) -> Vec<CompletionItem> {
                 .iter()
                 .enumerate()
                 .map(|(i, p)| {
-                    let default = p.default.as_deref().unwrap_or(&p.name);
+                    // A default may hold `$name`, `\,` or `}`, which a
+                    // snippet placeholder escapes
+                    let default = p
+                        .default
+                        .as_deref()
+                        .unwrap_or(&p.name)
+                        .replace('\\', "\\\\")
+                        .replace('$', "\\$")
+                        .replace('}', "\\}");
                     format!("{} ${{{}:{}}}", p.name, i + 1, default)
                 })
                 .collect();
@@ -1108,5 +1133,31 @@ mod tests {
     fn value_completions_after_html_attribute() {
         let items = completions("@input [type=", Position::new(0, 13));
         assert!(items.iter().any(|i| i.label == "email"));
+    }
+
+    #[test]
+    fn a_parameter_list_offers_no_attributes() {
+        let text = "@let @card [title, pad";
+        assert!(completions(text, pos(0, text.len() as u32)).is_empty());
+        let text = "@let @card [\n  title,\n  pa";
+        assert!(completions(text, pos(2, 4)).is_empty());
+        // A call's list still does
+        let text = "@let @card [title]\n  @el $title\n@card [pad";
+        let items = completions(text, pos(2, 10));
+        assert!(items.iter().any(|i| i.label == "padding"), "{:?}", items);
+    }
+
+    #[test]
+    fn a_call_snippet_escapes_its_defaults() {
+        let text = "@let @card [tone $brand, list a\\, b]\n  @el $tone\n";
+        let items = function_completions(text, Range::default());
+        let card = items.iter().find(|i| i.label == "@card").expect("@card");
+        let Some(CompletionTextEdit::Edit(edit)) = &card.text_edit else {
+            panic!("{:?}", card);
+        };
+        assert_eq!(
+            edit.new_text,
+            r"@card [tone ${1:\$brand}, list ${2:a\\, b}]"
+        );
     }
 }

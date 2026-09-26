@@ -4684,6 +4684,8 @@ fn a_function_is_marked_and_lists_its_parameters_in_brackets() {
         .find(|d| d.code == "invalid-definition")
         .unwrap();
     assert_eq!(d.suggestion.as_deref(), Some("title"));
+    // It points at the parameter
+    assert_eq!(d.column, Some(12));
 
     // Text after the closing bracket
     for input in [
@@ -4738,6 +4740,36 @@ fn values_bundles_and_functions_share_one_namespace() {
 }
 
 #[test]
+fn a_definition_inside_a_scope_keeps_one_meaning_per_name() {
+    // A value inside a function body replaces a bundle only for the call
+    let output = compile(
+        "@let gap [padding 4]\n@let @card [title]\n  @let gap 9\n  @el [padding $gap] $title\n@card [title A]\n@el [$gap] after\n",
+    );
+    assert!(output.contains("padding:9px"), "{}", output);
+    assert!(output.contains("padding:4px"), "{}", output);
+    // ... and inside an @each body only for the loop, functions included
+    let output = compile(
+        "@let @card [t]\n  @el card $t\n@each $i in 1, 2\n  @let card $i\n  @el v$card\n@card [t ok]\n",
+    );
+    assert!(
+        output.contains("v1") && output.contains("card ok"),
+        "{}",
+        output
+    );
+    // A bundle defined inside an @if stays after it, and the value it
+    // replaced stays gone
+    let found = parse_diagnostics("@let x 5\n@if true\n  @let x [padding 4]\n@el [$x] a\n@el $x\n");
+    assert!(
+        found
+            .iter()
+            .any(|d| d.code == "undefined-variable" && d.line == 5),
+        "{:?}",
+        found
+    );
+    assert!(!found.iter().any(|d| d.line == 4), "{:?}", found);
+}
+
+#[test]
 fn each_writes_its_variables_with_a_dollar() {
     for input in [
         "@each x in a, b\n  @text $x\n",
@@ -4756,6 +4788,16 @@ fn each_writes_its_variables_with_a_dollar() {
             found
         );
     }
+    // The message shows the whole header; a missing name gets no fix
+    let found = with_code("@each $x, i in a\n  @text $x\n", "invalid-loop");
+    assert!(found[0].1.contains("`@each $x, $i in LIST`"), "{:?}", found);
+    let found = parse_diagnostics("@each $ in a\n  @text x\n");
+    let d = found
+        .iter()
+        .find(|d| d.code == "invalid-loop")
+        .expect("invalid-loop");
+    assert!(d.message.contains("`@each $item in LIST`"), "{}", d.message);
+    assert_eq!(d.suggestion, None);
     let out = compile("@each $x, $i in a, b\n  @text $i:$x\n");
     assert!(out.contains("0:a") && out.contains("1:b"), "{}", out);
 }

@@ -220,18 +220,24 @@ fn header(node: &Node) -> Option<Header> {
     Some(h)
 }
 
-/// Whether a line ends with its attribute list, or has none: nothing
-/// after the `]` that printing the list would drop.
+/// Whether a `@let` line is written as the formatter would print it, up
+/// to spacing: its name as the tree reads it, then its list (if any) and
+/// nothing after the `]`. Anything else (`@let $pad [..]`, `@let @c $t`,
+/// text after the `]`) is an error the formatter keeps as written.
 fn ends_with_list(node: &Node) -> bool {
-    let list = match node.directive().map(|d| &d.args) {
-        Some(DirectiveArgs::Let(def)) => match &def.form {
-            LetForm::Bundle(list) => Some(list),
-            LetForm::Function(function) => function.list.as_ref(),
-            _ => None,
-        },
-        _ => None,
+    let Some(DirectiveArgs::Let(def)) = node.directive().map(|d| &d.args) else {
+        return true;
     };
-    list.is_none_or(|list| !list.closed || node.source.trim_end().ends_with(']'))
+    let (list, name) = match &def.form {
+        LetForm::Bundle(list) => (Some(list), def.name.clone()),
+        LetForm::Function(function) => (function.list.as_ref(), format!("@{}", def.name)),
+        _ => return true,
+    };
+    let first = node.source.lines().next().unwrap_or("");
+    let head = first.split('[').next().unwrap_or(first);
+    let words: Vec<&str> = head.split_whitespace().collect();
+    words == ["@let", name.as_str()]
+        && list.is_none_or(|list| !list.closed || node.source.trim_end().ends_with(']'))
 }
 
 fn print_header(header: Header, node: &Node, level: usize, out: &mut String) {
@@ -423,6 +429,14 @@ mod tests {
         // Text after the list is an error; the formatter keeps it
         let src = "@let @card [title] extra\n  @el $title\n";
         assert_eq!(format(src), src);
+        // So are parameters outside brackets and a `$` before the name
+        for src in [
+            "@let @c $t\n  @el $t\n",
+            "@let  @$c [t]\n  @el $t\n",
+            "@let  $pad [padding 4]\n",
+        ] {
+            assert_eq!(format(src), src);
+        }
     }
 
     #[test]

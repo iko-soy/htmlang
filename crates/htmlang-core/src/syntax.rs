@@ -829,9 +829,14 @@ fn params(list: &AttrList, source: &str, problems: &mut Vec<Diagnostic>) -> Vec<
     let mut out: Vec<Param> = Vec::new();
     for attr in &list.attrs {
         let problem = |message: String| {
-            Diagnostic::error(code::INVALID_DEFINITION, attr.span.line, message)
+            let diagnostic = Diagnostic::error(code::INVALID_DEFINITION, attr.span.line, message)
                 .source(source)
-                .subject(attr.raw.clone())
+                .subject(attr.raw.clone());
+            // The column, where the line shown is the parameter's own
+            match attr.span.line == list.span.line {
+                true => diagnostic.column(attr.span.column),
+                false => diagnostic,
+            }
         };
         let name = attr.key.strip_prefix('$').unwrap_or(&attr.key);
         if attr.key.starts_with('$') {
@@ -1426,14 +1431,25 @@ impl Reader<'_> {
                 let written: Vec<&str> = names.split(',').map(str::trim).collect();
                 // Like `@data $name`, the variables are written with `$`
                 if let Some(bare) = written.iter().find(|n| !n.starts_with('$') || n.len() == 1) {
+                    let fixed: Vec<String> = written
+                        .iter()
+                        .enumerate()
+                        .map(|(i, n)| match n.trim_start_matches('$') {
+                            "" if i == 0 => "$item".to_string(),
+                            "" => "$index".to_string(),
+                            name => format!("${}", name),
+                        })
+                        .collect();
                     let problem = self.error(
                         code::INVALID_LOOP,
                         format!(
-                            "@each names its variables with `$`: `@each ${} in LIST`",
-                            if bare.is_empty() { "item" } else { bare }
+                            "@each names its variables with `$`: `@each {} in LIST`",
+                            fixed.join(", ")
                         ),
                     );
-                    let problem = match bare.is_empty() {
+                    // A name without its `$` gets it; a missing name has
+                    // nothing to replace
+                    let problem = match bare.trim_start_matches('$').is_empty() {
                         true => problem,
                         false => problem.subject(*bare).suggest(Some(format!("${}", bare))),
                     };
@@ -1523,7 +1539,7 @@ impl Reader<'_> {
                     if !valid || written.starts_with('$') {
                         problems.push(invalid(format!(
                             "'{}' is not a function name: a function is named with letters, \
-                             digits and `-`, as in `@let @card`",
+                             digits, `-` and `_`, starting with a letter, as in `@let @card`",
                             written
                         )));
                     }

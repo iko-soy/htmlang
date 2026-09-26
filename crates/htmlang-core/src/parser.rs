@@ -32,6 +32,14 @@ struct FnDef {
     body: Vec<syntax::Node>,
 }
 
+/// A saved namespace; see `ParseContext::save_scope`.
+struct Scope {
+    variables: HashMap<String, String>,
+    defines: HashMap<String, Vec<Attribute>>,
+    functions: HashMap<String, Rc<FnDef>>,
+    scoped_functions: HashSet<String>,
+}
+
 struct ParseContext {
     /// Source line currently being parsed, for diagnostics raised deep
     /// inside helpers that don't take a line number.
@@ -45,7 +53,7 @@ struct ParseContext {
     head_blocks: Vec<String>,
     variables: HashMap<String, String>,
     defines: HashMap<String, Vec<Attribute>>,
-    functions: HashMap<String, FnDef>,
+    functions: HashMap<String, Rc<FnDef>>,
     css_vars: Vec<(String, String)>,
     custom_css: Vec<String>,
     og_tags: Vec<(String, String)>,
@@ -150,6 +158,58 @@ impl ParseContext {
         self.defines.remove(name);
         self.functions.remove(name);
         self.scoped_functions.remove(name);
+    }
+
+    /// What the `@let`s so far define, to restore when a scope ends (an
+    /// `@if` branch, an `@each` body, a function call).
+    fn save_scope(&self) -> Scope {
+        Scope {
+            variables: self.variables.clone(),
+            defines: self.defines.clone(),
+            functions: self.functions.clone(),
+            scoped_functions: self.scoped_functions.clone(),
+        }
+    }
+
+    /// End a scope: its values end with it, while bundles and functions
+    /// defined inside it stay defined after it. Since a name has one
+    /// meaning, a bundle or function that a value inside the scope replaced
+    /// comes back, and a value that a bundle or function defined inside the
+    /// scope replaced stays gone.
+    fn restore_scope(&mut self, saved: Scope) {
+        self.variables = saved.variables;
+        let taken = |ctx: &Self, name: &str| {
+            ctx.defines.contains_key(name) || ctx.functions.contains_key(name)
+        };
+        let new: Vec<String> = self
+            .defines
+            .keys()
+            .filter(|name| !saved.defines.contains_key(*name))
+            .chain(
+                self.functions
+                    .keys()
+                    .filter(|name| !saved.functions.contains_key(*name)),
+            )
+            .cloned()
+            .collect();
+        for (name, attrs) in saved.defines {
+            if !taken(self, &name) {
+                self.defines.insert(name, attrs);
+            }
+        }
+        for (name, function) in saved.functions {
+            if !taken(self, &name) {
+                if saved.scoped_functions.contains(&name) {
+                    self.scoped_functions.insert(name.clone());
+                }
+                self.functions.insert(name, function);
+            }
+        }
+        for name in new {
+            for key in [name.clone(), quoted_key(&name), format!("{}#", name)] {
+                self.variables.remove(&key);
+            }
+        }
     }
 
     /// Evaluate an expression (see `expr.rs`) written at `line` and
@@ -704,9 +764,9 @@ impl Evaluator {
 
     /// Evaluate a block in its own scope: `@let` inside doesn't leak out.
     fn eval_scoped(&mut self, block: &[syntax::Node], ctx: &mut ParseContext) -> Vec<Node> {
-        let saved_vars = ctx.variables.clone();
+        let saved = ctx.save_scope();
         let nodes = self.eval_block(block, ctx);
-        ctx.variables = saved_vars;
+        ctx.restore_scope(saved);
         nodes
     }
 
@@ -1279,7 +1339,7 @@ impl Evaluator {
         if count == 0 {
             return Ok(Some(self.eval_scoped(empty, ctx)));
         }
-        let saved_vars = ctx.variables.clone();
+        let saved = ctx.save_scope();
         let mut nodes = Vec::new();
         for i in 0..count {
             match &data_list {
@@ -1294,7 +1354,7 @@ impl Evaluator {
             }
             nodes.extend(self.eval_block(body, ctx));
         }
-        ctx.variables = saved_vars;
+        ctx.restore_scope(saved);
         Ok(Some(nodes))
     }
 
@@ -1329,14 +1389,14 @@ impl Evaluator {
         ctx.fn_lines.entry(name.to_string()).or_insert(line_num);
         ctx.functions.insert(
             name.to_string(),
-            FnDef {
+            Rc::new(FnDef {
                 params: params.iter().map(|p| p.name.clone()).collect(),
                 defaults: params
                     .iter()
                     .filter_map(|p| Some((p.name.clone(), p.default.clone()?)))
                     .collect(),
                 body: body.into_iter().cloned().collect(),
-            },
+            }),
         );
     }
 
@@ -1472,7 +1532,7 @@ impl Evaluator {
         }
 
         // Save variable state, inject function parameters
-        let saved_vars = ctx.variables.clone();
+        let saved = ctx.save_scope();
         let mut consumed = vec![false; args.len()];
         for (i, param) in fn_def.params.iter().enumerate() {
             let named = args.iter().position(|a| a.key == *param);
@@ -1516,7 +1576,7 @@ impl Evaluator {
         let body_nodes = self.eval_block(&fn_def.body, ctx);
 
         // Restore variables and call stack
-        ctx.variables = saved_vars;
+        ctx.restore_scope(saved);
         ctx.fn_call_stack.pop();
 
         // Replace @children with caller's children and @slot with slot content
