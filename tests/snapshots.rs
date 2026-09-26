@@ -2225,7 +2225,7 @@ fn each_else_non_empty_list() {
 
 #[test]
 fn pseudo_element_before_content() {
-    let output = compile("@el [before:content arrow, before:color red]\n  Hello");
+    let output = compile("@el [before:content \"arrow\", before:color red]\n  Hello");
     assert!(
         output.contains("::before"),
         "should generate ::before CSS: {}",
@@ -2245,7 +2245,7 @@ fn pseudo_element_before_content() {
 
 #[test]
 fn pseudo_element_after_content() {
-    let output = compile("@el [after:content ✓]\n  Done");
+    let output = compile("@el [after:content \"✓\"]\n  Done");
     assert!(
         output.contains("::after"),
         "should generate ::after CSS: {}",

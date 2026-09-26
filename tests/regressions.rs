@@ -455,3 +455,11 @@ fn links_and_images_are_output_as_written() {
     assert!(!out.contains("Skip to content"), "{}", out);
     assert!(!out.contains("hl-main"), "{}", out);
 }
+
+#[test]
+fn css_values_pass_through() {
+    let out = compile("@el [line-height 24, before:content \"→ \", after:content attr(title)] x");
+    assert!(out.contains("line-height:24;"), "{}", out);
+    assert!(out.contains("content:\"→ \""), "{}", out);
+    assert!(out.contains("content:attr(title)"), "{}", out);
+}

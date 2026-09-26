@@ -155,9 +155,11 @@ pub fn is_length_property(name: &str) -> bool {
         "border", "border-top", "border-right", "border-bottom", "border-left", "border-block",
         "border-inline", "outline", "column-rule",
     ];
-    EXACT.contains(&name)
-        || PREFIXES.iter().any(|p| name.starts_with(p))
-        || SUFFIXES.iter().any(|s| name.ends_with(s))
+    // A bare `line-height` number is a multiplier, not a length
+    name != "line-height"
+        && (EXACT.contains(&name)
+            || PREFIXES.iter().any(|p| name.starts_with(p))
+            || SUFFIXES.iter().any(|s| name.ends_with(s)))
 }
 
 /// State prefixes and the selector each adds: `hover:color red` styles

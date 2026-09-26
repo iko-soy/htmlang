@@ -1700,11 +1700,6 @@ fn attrs_to_css(
             },
 
             // Typography
-            "line-height" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "line-height", &css_line_height(v));
-                }
-            }
             "letter-spacing" => {
                 if let Some(v) = val {
                     push_css(&mut css, "letter-spacing", &css_px(v));
@@ -1987,23 +1982,6 @@ fn attrs_to_css(
                 }
             }
 
-            "content" => {
-                if let Some(v) = val {
-                    // Wrap in quotes if not already quoted and not a CSS keyword
-                    if v.starts_with('"')
-                        || v.starts_with('\'')
-                        || v == "none"
-                        || v == "normal"
-                        || v.starts_with("attr(")
-                        || v.starts_with("counter(")
-                    {
-                        push_css(&mut css, "content", v);
-                    } else {
-                        push_css(&mut css, "content", &format!("\"{}\"", v));
-                    }
-                }
-            }
-
             // --- CSS Shorthands ---
             "line-clamp" => {
                 if let Some(v) = val {
@@ -2069,25 +2047,6 @@ fn css_px(value: &str) -> String {
     } else {
         v.to_string()
     }
-}
-
-/// Format a `line-height` value. CSS accepts either a unitless multiplier
-/// (e.g. `1.5`) or a length (e.g. `24px`). Plain integers in htmlang source
-/// are ambiguous: `[line-height 24]` was historically emitted as `24` (which
-/// CSS interprets as 24× font-size — almost never what anyone wants). Treat
-/// integers ≥ 2 as pixel lengths; anything with a decimal, an existing unit,
-/// or the value `0`/`1` passes through unchanged.
-fn css_line_height(value: &str) -> String {
-    let v = value.trim();
-    if v == "0" || v == "1" {
-        return v.to_string();
-    }
-    // Plain integer — treat as pixel length. Decimals, units, keywords and
-    // functions pass through.
-    if !v.is_empty() && v.chars().all(|c| c.is_ascii_digit()) {
-        return format!("{}px", v);
-    }
-    v.to_string()
 }
 
 /// Format multiple space-separated values, each getting px if needed.
