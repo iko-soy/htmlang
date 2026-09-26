@@ -238,11 +238,40 @@ pub fn upgrade(input: &str) -> Upgrade {
     if input.ends_with('\n') {
         output.push('\n');
     }
+    let (output, unaliased) = drop_include_aliases(&output);
     Upgrade {
         output,
-        changes,
+        changes: changes + unaliased,
         manual,
     }
+}
+
+/// `@include lib.hl as ui` → `@include lib.hl`, and `@ui.card` / `$ui.x`
+/// lose their `ui.` prefix.
+fn drop_include_aliases(text: &str) -> (String, usize) {
+    let mut aliases = Vec::new();
+    let mut lines: Vec<String> = Vec::new();
+    for line in text.split('\n') {
+        let trimmed = line.trim_start();
+        if let Some(rest) = trimmed.strip_prefix("@include ")
+            && let Some((file, alias)) = rest.rsplit_once(" as ")
+        {
+            aliases.push(alias.trim().to_string());
+            lines.push(format!("{}@include {}", &line[..line.len() - trimmed.len()], file.trim()));
+        } else {
+            lines.push(line.to_string());
+        }
+    }
+    if aliases.is_empty() {
+        return (text.to_string(), 0);
+    }
+    let mut out = lines.join("\n");
+    for alias in &aliases {
+        out = out
+            .replace(&format!("@{}.", alias), "@")
+            .replace(&format!("${}.", alias), "$");
+    }
+    (out, aliases.len())
 }
 
 struct Block {
@@ -1403,7 +1432,7 @@ mod tests {
         assert_eq!(up("@define c [bold]\n@mixin m [italic]"), "@let c [bold]\n@let m [italic]");
         assert_eq!(up("@for $i in 1..3\n  $i"), "@each $i in 1..3\n  $i");
         assert_eq!(up("@use \"lib.hl\" a, b"), "@include lib.hl");
-        assert_eq!(up("@import theme.hl\n@import \"ui.hl\" as ui"), "@include theme.hl\n@include \"ui.hl\" as ui");
+        assert_eq!(up("@import theme.hl\n@import \"ui.hl\" as ui\n@ui.card [x $ui.gap]"), "@include theme.hl\n@include \"ui.hl\"\n@card [x $gap]");
         assert_eq!(
             up("@repeat 2\n  @text $_count"),
             "@each $_ in 1..2\n  @text 2"

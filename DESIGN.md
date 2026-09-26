@@ -388,7 +388,6 @@ A range counts down when its start is greater than its end.
 | Directive | Effect |
 |---|---|
 | `@include file.hl` | Insert another file: its content and definitions (a library of `@let`s emits nothing) |
-| `@include lib.hl as ui` | Take only its definitions, named `ui.name` |
 | `@data $name file.json` | Load JSON values as variables (`$name.key`) |
 | `@data $name dir/*.json` | Load each file as `$name.STEM.key`; `$name` lists the stems |
 | `@data $name env:NAME [default]` | Read an environment variable |
@@ -486,6 +485,7 @@ removed form with its replacement.
 | `$a ~ " " ~ $b` | `"$a $b"` |
 | `@each $x in LIST [page N]` | Split the list, or filter it with `@if` |
 | `...$bundle` | `$bundle` |
+| `@include lib.hl as ui` | `@include lib.hl`, without the `ui.` prefix |
 | `@data file.json` (keys as `$key`) | `@data $name file.json` (keys as `$name.key`) |
 | `[attrs]` alone on a line | `@el [attrs]` |
 | `animate`, `inset-area` | `animation`, `position-area` |

@@ -4850,35 +4850,6 @@ fn error_circular_include_filesystem() {
 }
 
 #[test]
-fn import_with_alias_prefixes_definitions() {
-    // Verify that @include with alias registers imported fns under `alias.name`.
-    let dir = std::env::temp_dir().join("htmlang_test_import_alias");
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    let lib_path = dir.join("lib.hl");
-    std::fs::write(&lib_path, "@let card\n  @el\n    @text card-body\n").unwrap();
-
-    let input = "@include lib.hl as ui\n@ui.card\n";
-    let result = htmlang::parser::parse_with_base(input, Some(&dir));
-    let html = htmlang::codegen::generate(&result.document);
-    let _ = std::fs::remove_dir_all(&dir);
-
-    assert!(
-        result
-            .diagnostics
-            .iter()
-            .all(|d| d.severity != htmlang::parser::Severity::Error),
-        "no errors expected, got: {:?}",
-        result.diagnostics
-    );
-    assert!(
-        html.contains("card-body"),
-        "alias prefixed call should expand, got: {}",
-        html
-    );
-}
-
-#[test]
 fn error_invalid_json_in_data_directive() {
     let dir = std::env::temp_dir().join("htmlang_test_bad_json");
     let _ = std::fs::remove_dir_all(&dir);

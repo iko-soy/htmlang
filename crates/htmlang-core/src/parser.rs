@@ -95,8 +95,6 @@ struct ParseContext {
     canonical: Option<String>,
     /// Base URL for relative links
     base_url: Option<String>,
-    /// Track @import paths for circular dependency detection
-    import_stack: Vec<PathBuf>,
 }
 
 /// Evaluates a syntax tree (see `syntax.rs`) into the document's nodes.
@@ -177,7 +175,6 @@ pub fn parse_with_base(input: &str, base_path: Option<&Path>) -> ParseResult {
         define_lines: HashMap::new(),
         canonical: None,
         base_url: None,
-        import_stack: Vec::new(),
     };
     load_prelude(&mut ctx);
     let nodes = Evaluator.eval_block(&tree, &mut ctx);
@@ -499,23 +496,22 @@ impl Evaluator {
 
         if let Some(rest) = content.strip_prefix("@include ") {
             let rest = rest.trim();
-            let (filename, alias) = if let Some((file_part, alias_part)) = rest.rsplit_once(" as ")
-            {
-                (
-                    file_part.trim().to_string(),
-                    Some(alias_part.trim().to_string()),
-                )
-            } else {
-                (rest.to_string(), None)
-            };
-            // Strip quotes from filename
-            let filename =
-                if filename.starts_with('"') && filename.ends_with('"') && filename.len() >= 2 {
-                    filename[1..filename.len() - 1].to_string()
-                } else {
-                    filename
-                };
-            let filename = substitute_vars(&filename, &ctx.variables);
+            if let Some((file, alias)) = rest.rsplit_once(" as ") {
+                return Err(ParseError {
+                    line: line_num,
+                    message: format!(
+                        "`@include ... as` was removed: write `@include {}` and drop the `{}.` \
+                         prefix (run `htmlang upgrade`)",
+                        file.trim(),
+                        alias.trim()
+                    ),
+                });
+            }
+            let filename = rest
+                .strip_prefix('"')
+                .and_then(|f| f.strip_suffix('"'))
+                .unwrap_or(rest);
+            let filename = substitute_vars(filename, &ctx.variables);
 
             // Glob support: if filename contains *, expand to multiple imports
             if filename.contains('*') {
@@ -579,18 +575,7 @@ impl Evaluator {
                         .unwrap_or(&file_path)
                         .to_string_lossy()
                         .to_string();
-                    // Synthesize an @include line for each matched file
-                    let import_line = match &alias {
-                        Some(pfx) => {
-                            let stem = file_path
-                                .file_stem()
-                                .unwrap_or_default()
-                                .to_string_lossy()
-                                .to_string();
-                            format!("@include \"{}\" as {}.{}", rel_name, pfx, stem)
-                        }
-                        None => format!("@include \"{}\"", rel_name),
-                    };
+                    let import_line = format!("@include \"{}\"", rel_name);
                     matched_nodes.extend(self.eval_block(&syntax::parse(&import_line), ctx));
                 }
                 return Ok(Some(matched_nodes));
@@ -601,8 +586,8 @@ impl Evaluator {
                 None => PathBuf::from(&filename),
             };
 
-            if ctx.include_stack.contains(&resolved) || ctx.import_stack.contains(&resolved) {
-                let cycle_chain = format_include_chain(&ctx.import_stack);
+            if ctx.include_stack.contains(&resolved) {
+                let cycle_chain = format_include_chain(&ctx.include_stack);
                 ctx.diagnostics.push(Diagnostic {
                     line: line_num,
                     column: None,
@@ -639,65 +624,12 @@ impl Evaluator {
 
             ctx.included_files.push(resolved.clone());
             ctx.include_stack.push(resolved.clone());
-            ctx.import_stack.push(resolved.clone());
             let saved_base = ctx.base_path.clone();
             ctx.base_path = resolved.parent().map(|p| p.to_path_buf());
 
             let diag_count_before = ctx.diagnostics.len();
-            let mut included_nodes = Vec::new();
 
-            if let Some(ref prefix) = alias {
-                // Snapshot just the *key sets* before parsing — much cheaper
-                // than cloning the full HashMaps, since we only need to know
-                // which definitions are new afterwards.
-                let fn_keys_before: std::collections::HashSet<String> =
-                    ctx.functions.keys().cloned().collect();
-                let define_keys_before: std::collections::HashSet<String> =
-                    ctx.defines.keys().cloned().collect();
-                let var_keys_before: std::collections::HashSet<String> =
-                    ctx.variables.keys().cloned().collect();
-
-                let _discarded_nodes = self.eval_block(&syntax::parse(&imported_text), ctx);
-
-                // Remove newly added entries and re-insert them under the prefix.
-                let new_fn_keys: Vec<String> = ctx
-                    .functions
-                    .keys()
-                    .filter(|k| !fn_keys_before.contains(*k))
-                    .cloned()
-                    .collect();
-                for name in new_fn_keys {
-                    if let Some(def) = ctx.functions.remove(&name) {
-                        ctx.functions.insert(format!("{}.{}", prefix, name), def);
-                    }
-                }
-                let new_define_keys: Vec<String> = ctx
-                    .defines
-                    .keys()
-                    .filter(|k| !define_keys_before.contains(*k))
-                    .cloned()
-                    .collect();
-                for name in new_define_keys {
-                    if let Some(attrs) = ctx.defines.remove(&name) {
-                        ctx.defines.insert(format!("{}.{}", prefix, name), attrs);
-                    }
-                }
-                let new_var_keys: Vec<String> = ctx
-                    .variables
-                    .keys()
-                    .filter(|k| !var_keys_before.contains(*k))
-                    .cloned()
-                    .collect();
-                for name in new_var_keys {
-                    if let Some(val) = ctx.variables.remove(&name)
-                        && !name.starts_with("__")
-                    {
-                        ctx.variables.insert(format!("{}.{}", prefix, name), val);
-                    }
-                }
-            } else {
-                included_nodes = self.eval_block(&syntax::parse(&imported_text), ctx);
-            }
+            let included_nodes = self.eval_block(&syntax::parse(&imported_text), ctx);
 
             // Annotate new diagnostics with import chain
             let import_chain = format_include_chain(&ctx.include_stack);
@@ -707,7 +639,6 @@ impl Evaluator {
 
             ctx.base_path = saved_base;
             ctx.include_stack.pop();
-            ctx.import_stack.pop();
             return Ok(Some(included_nodes));
         }
 
