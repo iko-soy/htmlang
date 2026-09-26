@@ -1,6 +1,6 @@
 use tower_lsp::lsp_types::*;
 
-use htmlang::syntax::DefinitionKind;
+use htmlang::syntax::{DefinitionKind, VisibleKind};
 
 use crate::{docs, tree};
 
@@ -13,7 +13,7 @@ pub(crate) fn hover_at(text: &str, position: Position) -> Option<Hover> {
     let doc = if word == "if" && is_if_attribute(text, position.line, line, col) {
         Some(docs::if_attribute())
     } else if let Some(var_name) = word.strip_prefix('$') {
-        hover_variable(text, var_name).or_else(|| docs::hover(&word))
+        hover_variable(text, var_name, position.line).or_else(|| docs::hover(&word))
     } else if let Some(fn_name) = word.strip_prefix('@') {
         hover_user_fn(text, fn_name).or_else(|| docs::hover(&word))
     } else {
@@ -112,9 +112,38 @@ pub(crate) fn is_word_byte(c: u8) -> bool {
     c.is_ascii_alphanumeric() || c == b'@' || c == b'$' || c == b'-' || c == b'_' || c == b':'
 }
 
-fn hover_variable(text: &str, name: &str) -> Option<String> {
+/// What `$name` means on line `line` (0-based): the definition visible
+/// there (see `htmlang::syntax::Tree::visible_at`), else the first of that
+/// name in the file.
+fn hover_variable(text: &str, name: &str, line: u32) -> Option<String> {
     let defs = tree::definitions(text);
-    if let Some(def) = defs.iter().find(|d| d.name == name) {
+    let parsed = htmlang::syntax::parse(text);
+    let visible = parsed
+        .visible_at(line as usize + 1)
+        .into_iter()
+        .rev()
+        .find(|v| v.name == name && v.kind != VisibleKind::Let(DefinitionKind::Function));
+    let def = match visible.as_ref().map(|v| v.kind) {
+        Some(VisibleKind::Parameter) => {
+            // The function whose body the line is in
+            return defs
+                .iter()
+                .filter(|d| d.line <= line && line <= d.end_line)
+                .rfind(|d| d.params.iter().any(|p| p.name == name))
+                .map(|d| format!("**${}** \u{2014} Parameter of `@{}`", name, d.name));
+        }
+        Some(VisibleKind::Loop) => {
+            return Some(format!("**${}** \u{2014} `@each` variable", name));
+        }
+        Some(VisibleKind::Data) => {
+            return Some(format!("**${}** \u{2014} Loaded with `@data`", name));
+        }
+        Some(VisibleKind::Let(_)) => {
+            visible.and_then(|v| defs.iter().find(|d| d.name_range == tree::range(v.span)))
+        }
+        None => defs.iter().find(|d| d.name == name),
+    };
+    if let Some(def) = def {
         match def.kind {
             DefinitionKind::Value => {
                 let value = def.value.as_deref().unwrap_or("");
@@ -212,6 +241,15 @@ mod tests {
         let text = "@el [\n  padding 4,\n  if($on, [if($b, gap 1)])\n]\n  x\n";
         assert!(hover_text(text, 2, 3).contains("Attributes chosen by a condition"));
         assert!(hover_text(text, 2, 12).contains("Attributes chosen by a condition"));
+    }
+
+    #[test]
+    fn a_variable_s_hover_is_the_definition_visible_there() {
+        let text = "@let x 1\n@el\n  @let x 2\n  @text $x\n@text $x\n@let @card [x]\n  @text $x\n@each $x in a, b\n  @text $x\n";
+        assert!(hover_text(text, 3, 9).contains("= `2`"));
+        assert!(hover_text(text, 4, 7).contains("= `1`"));
+        assert!(hover_text(text, 6, 9).contains("Parameter of `@card`"));
+        assert!(hover_text(text, 8, 9).contains("`@each` variable"));
     }
 
     #[test]

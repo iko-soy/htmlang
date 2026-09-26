@@ -560,12 +560,19 @@ impl ParseContext {
             .subject(name);
         }
         let suggestion = suggest_var_name(name, &self.env.value_names());
-        let message = match &suggestion {
-            Some(closest) => format!(
+        let message = match (&suggestion, self.let_lines.get(name)) {
+            (Some(closest), _) => format!(
                 "undefined variable '${}', did you mean '${}'?",
                 name, closest
             ),
-            None => format!("undefined variable '${}'", name),
+            // Defined, but not where this line can see it
+            (None, Some(_)) => format!(
+                "undefined variable '${}': a `@let` defines it, but not where this line \
+                 can see it. A definition is visible from its line to the end of its \
+                 block, and a function's body sees what is defined above the function",
+                name
+            ),
+            (None, None) => format!("undefined variable '${}'", name),
         };
         Diagnostic::error(code::UNDEFINED_VARIABLE, line, message)
             .subject(name)
@@ -2270,7 +2277,8 @@ fn name_column(head: &syntax::Head, line: usize) -> Option<usize> {
 
 /// Define `$name` (and, for `--name`, the CSS custom property, which gets
 /// quoted text with its quotes). `@let name.field value` gives the record
-/// `$name` that field, as a new record in this block.
+/// `$name` that field (or the list `$name` a new item at that index), as
+/// a new value in this block.
 fn set_variable(name: &str, value: Value, line_num: usize, ctx: &mut ParseContext) {
     if name.starts_with("--") {
         let css = value
@@ -2283,30 +2291,85 @@ fn set_variable(name: &str, value: Value, line_num: usize, ctx: &mut ParseContex
     let fields: Vec<&str> = path.collect();
     let value = match fields.is_empty() {
         true => value,
-        false => with_field(ctx.env.value(root).cloned(), &fields, value),
+        false => match with_field(ctx.env.value(root).cloned(), root, &fields, value) {
+            Ok(value) => value,
+            Err(message) => {
+                let diagnostic =
+                    Diagnostic::error(code::INVALID_DEFINITION, line_num, message).subject(name);
+                let diagnostic = match &ctx.current_source {
+                    (current, Some(text)) if *current == line_num => {
+                        diagnostic.source(text.clone())
+                    }
+                    _ => diagnostic,
+                };
+                ctx.push_once(diagnostic);
+                // Reported: the name keeps what it held
+                ctx.let_lines.entry(root.to_string()).or_insert(line_num);
+                return;
+            }
+        },
     };
     ctx.bind(root, value);
     ctx.let_lines.entry(root.to_string()).or_insert(line_num);
 }
 
-/// `record` with the field at `path` set to `value`: a new record when it
-/// isn't one.
-fn with_field(record: Option<Value>, path: &[&str], value: Value) -> Value {
+/// `value` (the value of `$name`) with the field at `path` set to `new`:
+/// a record's field, or the item of a list at an index it has. A name
+/// without a value, or one whose value is empty (a field a record doesn't
+/// have), becomes a record; any other value has no fields to set.
+fn with_field(
+    value: Option<Value>,
+    name: &str,
+    path: &[&str],
+    new: Value,
+) -> Result<Value, String> {
     let Some((field, rest)) = path.split_first() else {
-        return value;
+        return Ok(new);
     };
-    let mut fields = match record {
-        Some(Value::Record(fields)) => fields.as_ref().clone(),
-        _ => Vec::new(),
-    };
-    match fields.iter().position(|(key, _)| key == field) {
-        Some(i) => {
-            let old = std::mem::replace(&mut fields[i].1, Value::empty());
-            fields[i].1 = with_field(Some(old), rest, value);
+    let inner = format!("{}.{}", name, field);
+    match value {
+        Some(Value::Record(fields)) => {
+            let mut fields = fields.as_ref().clone();
+            match fields.iter().position(|(key, _)| key == field) {
+                Some(i) => {
+                    let old = std::mem::replace(&mut fields[i].1, Value::empty());
+                    fields[i].1 = with_field(Some(old), &inner, rest, new)?;
+                }
+                None => fields.push((field.to_string(), with_field(None, &inner, rest, new)?)),
+            }
+            Ok(Value::Record(Rc::new(fields)))
         }
-        None => fields.push((field.to_string(), with_field(None, rest, value))),
+        Some(Value::List(list)) => {
+            let count = list.items.len();
+            let Some(i) = field.parse::<usize>().ok().filter(|&i| i < count) else {
+                return Err(format!(
+                    "`${}` is {}, so `.{}` isn't one of its items (they are `.0` to `.{}`)",
+                    name,
+                    Value::List(list).describe(),
+                    field,
+                    count.saturating_sub(1)
+                ));
+            };
+            let mut items = list.items.as_ref().clone();
+            let old = std::mem::replace(&mut items[i], Value::empty());
+            items[i] = with_field(Some(old), &inner, rest, new)?;
+            // Its items changed, so it no longer prints as written
+            Ok(Value::list(items))
+        }
+        None => Ok(Value::Record(Rc::new(vec![(
+            field.to_string(),
+            with_field(None, &inner, rest, new)?,
+        )]))),
+        Some(value) if value.to_string().is_empty() => with_field(None, name, path, new),
+        Some(value) => Err(format!(
+            "`@let {}.{}` sets a field of a record, but `${}` is {} (`{}`), which has no fields",
+            name,
+            path.join("."),
+            name,
+            value.describe(),
+            value
+        )),
     }
-    Value::Record(Rc::new(fields))
 }
 
 /// The text of a verbatim body (`@head`, `@style`, `@markdown`, `@raw`).

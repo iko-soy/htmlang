@@ -472,7 +472,10 @@ each repetition of `@each` starts afresh, so a `@let` in one doesn't carry
 over to the next. A function's body sees its parameters and what is
 visible where the function is defined: not the names at a call, and not a
 definition further down, so a function means the same wherever it is
-called. `@let t.greeting Hello` gives the record `$t` the field `greeting`.
+called. `@let t.greeting Hello` gives the record `$t` the field `greeting`
+(making `$t` a record when it isn't defined), and `@let items.0 first`
+replaces the first item of the list `$items`; a field of any other value is
+an error.
 
 ### Variables
 

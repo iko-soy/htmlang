@@ -1338,3 +1338,47 @@ fn a_field_set_with_let_makes_a_record() {
     let out = codegen::generate(&result.document);
     assert!(out.contains("Hello Bye"), "{}", out);
 }
+
+#[test]
+fn a_field_set_with_let_keeps_the_kind_of_value() {
+    // An index of a list replaces that item: the list stays a list
+    let out = compile(
+        "@let fruits apple, banana\n@let fruits.1 kiwi\n@text $fruits ${length($fruits)}\n",
+    );
+    assert!(out.contains("apple, kiwi 2"), "{}", out);
+    // A field of a record in a list
+    let out = compile("@data $ps [{\"t\": \"x\"}]\n@let ps.0.t y\n@text $ps.0.t\n");
+    assert!(out.contains(">y<"), "{}", out);
+    // Text has no fields, and a list has no item past its end: errors,
+    // instead of turning the value into a record
+    let src = "@let s hello\n@let s.x 1\n@text $s\n";
+    assert!(has_code(src, 2, "invalid-definition"), "{:?}", codes(src));
+    let src = "@let l a, b\n@let l.5 z\n@text $l\n";
+    assert!(has_code(src, 2, "invalid-definition"), "{:?}", codes(src));
+}
+
+#[test]
+fn a_name_defined_out_of_sight_says_where_names_are_visible() {
+    for src in [
+        "@el\n  @let v one\n@text $v\n",
+        "@let @card\n  @text $later\n@let later L\n@card\n",
+    ] {
+        let d = parser::parse(src)
+            .diagnostics
+            .into_iter()
+            .find(|d| d.code == "undefined-variable")
+            .expect("an error");
+        assert!(
+            d.message.contains("to the end of its block"),
+            "{}",
+            d.message
+        );
+    }
+    // A name never defined gets the plain message
+    let d = parser::parse("@text $nothing\n")
+        .diagnostics
+        .into_iter()
+        .find(|d| d.code == "undefined-variable")
+        .expect("an error");
+    assert!(!d.message.contains("block"), "{}", d.message);
+}
