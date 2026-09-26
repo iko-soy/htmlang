@@ -748,6 +748,24 @@ impl Evaluator {
 
         // --- @each loop ---
 
+        // @raw: its indented body, or the rest of the line, verbatim
+        if content == "@raw" {
+            let text = block_text(children);
+            let text = text.trim_end_matches('\n');
+            return Ok((!text.is_empty()).then(|| vec![Node::Raw(text.to_string())]));
+        }
+        if let Some(rest) = content.strip_prefix("@raw ") {
+            if rest.starts_with("\"\"\"") {
+                return Err(ParseError {
+                    line: line_num,
+                    message: "`@raw \"\"\"` was removed: put the content in an indented block \
+                              under `@raw` (run `htmlang upgrade`)"
+                        .to_string(),
+                });
+            }
+            return Ok(Some(vec![Node::Raw(rest.to_string())]));
+        }
+
         // --- Function call ---
 
         if content.starts_with('@') {
@@ -993,20 +1011,17 @@ impl Evaluator {
             .iter()
             .partition(|node| matches!(node, Syntax::Line { text, .. } if text == "@style"));
         if !style.is_empty() {
-            let mut scoped_css = String::new();
-            for node in style {
-                if let Syntax::Line { children, .. } = node {
-                    for_each_line(children, &mut |node| {
-                        if let Syntax::Line { text, .. } = node
-                            && !text.trim().is_empty()
-                        {
-                            scoped_css.push_str(&format!(".hl-{} {}\n", name, text.trim()));
-                        }
-                    });
-                }
-            }
-            if !scoped_css.is_empty() {
-                ctx.custom_css.push(scoped_css);
+            let css: String = style
+                .iter()
+                .filter_map(|node| match node {
+                    Syntax::Line { children, .. } => Some(block_text(children)),
+                    _ => None,
+                })
+                .collect();
+            // Nested under the scope class, so any CSS works (multi-line
+            // rules, at-rules)
+            if !css.trim().is_empty() {
+                ctx.custom_css.push(format!(".hl-{} {{\n{}}}", name, css));
             }
             ctx.scoped_functions.insert(name.to_string());
         }

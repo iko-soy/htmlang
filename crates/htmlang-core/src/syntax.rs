@@ -1,8 +1,8 @@
 //! Parsing: source text to a syntax tree, before anything is evaluated.
 //!
 //! This step knows the shape of the language: indentation, continuation
-//! lines of attribute lists, verbatim blocks (`@raw """…"""`, the bodies of
-//! `@markdown` and `@script`), multi-line strings, and the directives whose
+//! lines of attribute lists, verbatim bodies (of `@raw`, `@style`, `@head`,
+//! `@script` and `@markdown`), multi-line strings, and the directives whose
 //! structure spans several lines (`@if` / `@else` chains, `@each` with an
 //! `@else`, function definitions). It reads no files and substitutes no
 //! variables; `parser.rs` evaluates the tree.
@@ -101,13 +101,11 @@ impl Syntax {
 pub(crate) fn parse(input: &str) -> Vec<Syntax> {
     let lines = preprocess(input);
     let mut pos = 0;
-    build(&lines, &mut pos, None, false)
+    build(&lines, &mut pos, None)
 }
 
 /// Build the nodes for the lines from `pos` indented deeper than `parent`.
-/// A `plain` block is text (the body of `@style` or `@head`),
-/// so no directive in it is given structure.
-fn build(lines: &[Line], pos: &mut usize, parent: Option<usize>, plain: bool) -> Vec<Syntax> {
+fn build(lines: &[Line], pos: &mut usize, parent: Option<usize>) -> Vec<Syntax> {
     let mut nodes = Vec::new();
     let deeper = |line: &Line| parent.is_none_or(|p| line.indent > p);
     while *pos < lines.len() && deeper(&lines[*pos]) {
@@ -125,7 +123,7 @@ fn build(lines: &[Line], pos: &mut usize, parent: Option<usize>, plain: bool) ->
         };
         // Text and one-line directives take no body: lines indented under
         // them are their siblings.
-        if !plain && !takes_body(&text) {
+        if !takes_body(&text) {
             nodes.push(Syntax::Line {
                 line: line.line_num,
                 indent: line.indent,
@@ -134,20 +132,7 @@ fn build(lines: &[Line], pos: &mut usize, parent: Option<usize>, plain: bool) ->
             });
             continue;
         }
-        let text_body = plain
-            || text == "@style"
-            || text == "@head"
-            || text.starts_with("@head ");
-        let children = build(lines, pos, Some(line.indent), text_body);
-        if plain {
-            nodes.push(Syntax::Line {
-                line: line.line_num,
-                indent: line.indent,
-                text,
-                children,
-            });
-            continue;
-        }
+        let children = build(lines, pos, Some(line.indent));
 
         if let Some(condition) = text.strip_prefix("@if ") {
             let mut branches = vec![Branch {
@@ -168,7 +153,7 @@ fn build(lines: &[Line], pos: &mut usize, parent: Option<usize>, plain: bool) ->
                 branches.push(Branch {
                     line: next_line,
                     condition,
-                    body: build(lines, pos, Some(line.indent), false),
+                    body: build(lines, pos, Some(line.indent)),
                 });
                 if last {
                     break;
@@ -182,7 +167,7 @@ fn build(lines: &[Line], pos: &mut usize, parent: Option<usize>, plain: bool) ->
             let mut empty = Vec::new();
             if let Some((_, "@else")) = sibling(lines, *pos, line.indent) {
                 *pos += 1;
-                empty = build(lines, pos, Some(line.indent), false);
+                empty = build(lines, pos, Some(line.indent));
             }
             nodes.push(Syntax::Each {
                 line: line.line_num,
@@ -274,14 +259,15 @@ pub(crate) fn preprocess(input: &str) -> Vec<Line> {
 
         let indent = line.len() - line.trim_start().len();
 
-        // Inline `@markdown` and `@script` blocks keep their bodies verbatim:
-        // in Markdown, blank lines separate paragraphs, `---` is a rule (not
-        // a comment) and code indentation matters; in JavaScript, newlines,
-        // `{...}` and `$` must reach the output untouched.
-        let verbatim_body = trimmed == "@markdown"
-            || trimmed == "@script"
+        // The bodies of `@markdown`, `@script`, `@style`, `@head` and `@raw`
+        // are foreign text, kept verbatim: in Markdown, blank lines separate
+        // paragraphs and `---` is a rule (not a comment); in CSS, `--name` is
+        // a custom property; in JavaScript, newlines, `{...}` and `$` must
+        // reach the output untouched.
+        let verbatim_body = ["@markdown", "@script", "@style", "@head", "@raw"].contains(&trimmed)
             || trimmed.starts_with("@script ")
-            || trimmed.starts_with("@script[");
+            || trimmed.starts_with("@script[")
+            || trimmed.starts_with("@head ");
         if verbatim_body {
             lines.push(Line {
                 indent,
@@ -325,46 +311,30 @@ pub(crate) fn preprocess(input: &str) -> Vec<Line> {
             continue;
         }
 
-        // Handle @raw """..."""
-        if let Some(raw_rest) = trimmed.strip_prefix("@raw") {
-            let after_raw = raw_rest.trim_start();
-            if let Some(after_open) = after_raw.strip_prefix("\"\"\"") {
-                // Single-line: @raw """content"""
-                if after_open.ends_with("\"\"\"") && after_open.len() >= 3 {
-                    let content = &after_open[..after_open.len() - 3];
-                    lines.push(Line {
-                        indent,
-                        content: LineContent::Raw(content.to_string()),
-                        line_num: i + 1,
-                    });
-                    i += 1;
-                    continue;
-                }
-
-                // Multiline: collect until closing """
-                let mut raw_content = String::new();
-                if !after_open.is_empty() {
-                    raw_content.push_str(after_open);
-                    raw_content.push('\n');
-                }
+        // The removed `@raw """…"""` form: its content is kept whole (and
+        // not evaluated) so the evaluator can point at the indented form.
+        if let Some(after_open) = trimmed.strip_prefix("@raw \"\"\"") {
+            let mut content = vec![after_open.trim_end_matches("\"\"\"")];
+            let first_line_num = i + 1;
+            if !(after_open.len() >= 3 && after_open.ends_with("\"\"\"")) {
                 i += 1;
-                while i < raw_lines.len() {
-                    if raw_lines[i].trim() == "\"\"\"" {
-                        i += 1;
-                        break;
-                    }
-                    raw_content.push_str(raw_lines[i]);
-                    raw_content.push('\n');
+                while i < raw_lines.len() && raw_lines[i].trim() != "\"\"\"" {
+                    content.push(raw_lines[i]);
                     i += 1;
                 }
-
-                lines.push(Line {
-                    indent,
-                    content: LineContent::Raw(raw_content.trim_end_matches('\n').to_string()),
-                    line_num: i,
-                });
-                continue;
             }
+            i += 1;
+            lines.push(Line {
+                indent,
+                content: LineContent::Normal("@raw \"\"\"".to_string()),
+                line_num: first_line_num,
+            });
+            lines.push(Line {
+                indent: indent + 1,
+                content: LineContent::Raw(content.join("\n")),
+                line_num: first_line_num,
+            });
+            continue;
         }
 
         // `@let name """` opens a multi-line string running to a `"""` line;
@@ -501,10 +471,12 @@ mod tests {
     }
 
     #[test]
-    fn text_bodies_stay_plain() {
-        let tree = parse("@style\n  @if x {\n    a\n  }\n");
+    fn text_bodies_are_verbatim() {
+        let tree = parse("@style\n  :root {\n    --brand: red;\n  }\n@text x\n");
         let Syntax::Line { children, .. } = &tree[0] else { unreachable!() };
-        assert_eq!(kinds(children), ["line", "line"]);
+        let [Syntax::Raw { text, .. }] = children.as_slice() else { panic!("{:?}", children) };
+        assert_eq!(text, ":root {\n  --brand: red;\n}");
+        assert_eq!(kinds(&tree), ["line", "line"]);
     }
 
     #[test]

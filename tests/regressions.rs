@@ -410,3 +410,21 @@ fn lines_under_text_are_its_siblings() {
     );
     assert!(html.contains("<span>Some text</span><span>more text</span>"), "{}", html);
 }
+
+#[test]
+fn style_keeps_css_custom_properties() {
+    let out = compile("@style\n  :root {\n    --brand: red;\n  }\n@el [color var(--brand)] x\n");
+    assert!(out.contains("--brand: red;"), "{}", out);
+}
+
+#[test]
+fn raw_takes_an_indented_body() {
+    let out = compile("@raw\n  <div>\n\n    <p>x</p>\n  </div>\n@raw <hr>\n");
+    assert!(out.contains("<div>\n\n  <p>x</p>\n</div><hr>"), "{}", out);
+    let result = parser::parse("@raw \"\"\"<br>\"\"\"\n");
+    assert!(
+        result.diagnostics.iter().any(|d| d.message.contains("`@raw \"\"\"` was removed")),
+        "{:?}",
+        result.diagnostics
+    );
+}

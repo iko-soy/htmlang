@@ -6,7 +6,7 @@ Syntax highlighting, snippets, and LSP-backed intelligence for [htmlang](https:/
 ## Features
 
 - **Syntax highlighting** — `@` directives, `$variables`, `[attribute]` brackets,
-  `-- comments`, `@raw """..."""` blocks.
+  `-- comments`, verbatim `@raw` / `@style` / `@script` bodies.
 - **Diagnostics** — parse errors, missing variables/functions, unused bindings,
   CSS / a11y warnings, and typo suggestions.
 - **Completion** — directives, attribute keys and values, variable names, and

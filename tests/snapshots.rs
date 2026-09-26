@@ -3786,7 +3786,7 @@ fn function_with_style_is_scoped() {
         "@let card $title\n  @style\n    .t { color: red; }\n  @text [class=t] $title\n@card [title Hello]\n",
     );
     assert!(html.contains("hl-card\"><span class=\"t\">Hello"), "{}", html);
-    assert!(html.contains(".hl-card .t { color: red; }"), "{}", html);
+    assert!(html.contains(".hl-card {.t { color: red; }}"), "{}", html);
 }
 
 #[test]

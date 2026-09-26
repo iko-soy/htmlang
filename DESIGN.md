@@ -76,12 +76,16 @@ gets the indented children.
 
 ### Raw content
 
-`@raw """ ... """` is pasted into the output verbatim.
+`@raw` pastes HTML into the output verbatim: the rest of its line, or its
+indented block. The bodies of `@style`, `@head`, `@script` and `@markdown` are
+verbatim too (a `--` line in them is not a comment).
 
 ```
-@raw """
-<div class="custom-widget"></div>
-"""
+@raw <hr class="fancy">
+@raw
+  <div class="custom-widget">
+    <span>Hand-written HTML</span>
+  </div>
 ```
 
 ## Elements
@@ -484,6 +488,7 @@ removed form with its replacement.
 | `$a ~ " " ~ $b` | `"$a $b"` |
 | `@each $x in LIST [page N]` | Split the list, or filter it with `@if` |
 | `...$bundle` | `$bundle` |
+| `@raw """ ... """` | `@raw` with an indented body |
 | `@keyframes NAME` with `from [opacity 0]` | The `@keyframes` rule in `@style` |
 | `@include lib.hl as ui` | `@include lib.hl`, without the `ui.` prefix |
 | `@data file.json` (keys as `$key`) | `@data $name file.json` (keys as `$name.key`) |

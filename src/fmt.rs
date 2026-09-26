@@ -91,8 +91,8 @@ fn is_raw_body_header(code: &str) -> bool {
         "@style",
         "@script",
         "@markdown",
-        "@json-ld",
         "@head",
+        "@raw",
     ]
     .iter()
     .any(|d| code == *d || code.strip_prefix(d).is_some_and(|r| r.starts_with(' ')))
@@ -528,7 +528,7 @@ mod tests {
 
     #[test]
     fn raw_blocks_are_verbatim() {
-        let src = "@raw \"\"\"\n<pre>\n        deeply indented\n</pre>\n\"\"\"\n";
+        let src = "@raw\n  <pre>\n          deeply indented\n  </pre>\n";
         assert_eq!(format(src), src);
     }
 

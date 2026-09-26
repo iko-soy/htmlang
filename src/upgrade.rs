@@ -45,7 +45,7 @@ const FILTER_ALIASES: &[(&str, &str)] = &[
 
 /// Directives whose indented bodies are foreign text (CSS, JS, Markdown,
 /// HTML, JSON) and must not be rewritten.
-const VERBATIM_BODIES: &[&str] = &["@style", "@script", "@markdown", "@head"];
+const VERBATIM_BODIES: &[&str] = &["@style", "@script", "@markdown", "@head", "@raw"];
 
 /// The function name a layout file becomes: `layout.hl` → `layout`,
 /// `base.hl` → `base-layout` (so it can't shadow an element like `@main`).
@@ -173,6 +173,34 @@ pub fn upgrade(input: &str) -> Upgrade {
         let line = lines[i];
         let trimmed = line.trim();
         let indent = indent_of(line);
+
+        // `@raw """…"""` → `@raw` with the content as its indented body
+        if let Some(after_open) = trimmed.strip_prefix("@raw \"\"\"") {
+            let pad = " ".repeat(indent);
+            match triple_quote_end(&lines, i) {
+                None => out.push(format!(
+                    "{pad}@raw {}",
+                    after_open.strip_suffix("\"\"\"").unwrap_or(after_open)
+                )),
+                Some(end) => {
+                    out.push(format!("{pad}@raw"));
+                    let closed = end <= lines.len() && lines[end - 1].trim() == "\"\"\"";
+                    let body_end = if closed { end - 1 } else { end };
+                    let content = std::iter::once(after_open)
+                        .filter(|l| !l.is_empty())
+                        .chain(lines[i + 1..body_end].iter().copied());
+                    out.extend(content.map(|l| {
+                        if l.trim().is_empty() { String::new() } else { format!("{pad}  {l}") }
+                    }));
+                    i = end;
+                    changes += 1;
+                    continue;
+                }
+            }
+            changes += 1;
+            i += 1;
+            continue;
+        }
 
         // Copy verbatim regions unchanged.
         if let Some(end) = triple_quote_end(&lines, i) {
@@ -1566,7 +1594,7 @@ mod tests {
         );
         assert_eq!(
             up("@raw \"\"\"\n@let button $x\n\"\"\"\n@button [type submit] Go"),
-            "@raw \"\"\"\n@let button $x\n\"\"\"\n@button [type=submit] Go"
+            "@raw\n  @let button $x\n@button [type=submit] Go"
         );
         // Multi-line lists keep their element context.
         assert_eq!(up("@input [\n  type email,\n  padding 8\n]"), "@input [\n  type=email,\n  padding 8\n]");
@@ -1649,6 +1677,15 @@ mod tests {
     }
 
     #[test]
+    fn raw_strings_become_indented_bodies() {
+        assert_eq!(up("@raw \"\"\"<br>\"\"\"\n"), "@raw <br>\n");
+        assert_eq!(
+            up("@el\n  @raw \"\"\"\n<div>\n\n  <p>x</p>\n</div>\n\"\"\"\n@text y\n"),
+            "@el\n  @raw\n    <div>\n\n      <p>x</p>\n    </div>\n@text y\n"
+        );
+    }
+
+    #[test]
     fn keyframes_move_into_style() {
         assert_eq!(
             up("@keyframes fade\n  from [opacity 0, transform translate(0, 4px)]\n  50% { opacity: 0.5; }\n  to [opacity 1]\n@text x\n"),
@@ -1702,7 +1739,7 @@ mod tests {
 
     #[test]
     fn verbatim_regions_are_untouched() {
-        let src = "@script\n  for (x of y) {}\n@raw \"\"\"\n@unless\n\"\"\"\n@style\n  .p { }";
+        let src = "@script\n  for (x of y) {}\n@raw\n  @unless\n@style\n  .p { }\n@let s \"\"\"\n@unless\n\"\"\"";
         assert_eq!(up(src), src);
         assert_eq!(up("@script [src app.js, defer]"), "@script [src=app.js, defer]");
     }

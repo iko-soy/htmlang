@@ -44,9 +44,8 @@
   }
 
 -- Raw HTML escape hatch
-@raw """
-<noscript><style>.needs-js{display:none}</style></noscript>
-"""
+@raw
+  <noscript><style>.needs-js{display:none}</style></noscript>
 
 -- Component with default parameter + @children slot
 @let card $title $icon=◆
@@ -128,11 +127,10 @@
       padding 16, rounded 8, font monospace, size 13,
       overflow-x auto
     ]
-      @raw """
-@let button $label
-  @el [padding 12, background blue]
-    @text $label
-"""
+      @raw
+        @let button $label
+          @el [padding 12, background blue]
+            @text $label
 
   -- Control flow: @each, @else, @match, if()
   @titled [title Control flow]

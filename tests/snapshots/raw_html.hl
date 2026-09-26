@@ -1,5 +1,5 @@
 @page Raw HTML
 @column [spacing 10]
   @text Before raw
-  @raw """<div class="custom">Raw HTML content</div>"""
+  @raw <div class="custom">Raw HTML content</div>
   @text After raw
