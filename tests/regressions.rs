@@ -1843,3 +1843,33 @@ fn a_fragment_without_styles_has_no_empty_layer() {
     let html = compile("@page T\nHello\n");
     assert!(!html.contains("@layer htmlang{}"), "{}", html);
 }
+
+#[test]
+fn a_line_style_after_an_outline_width_is_kept() {
+    let out = compile("@el [outline 2 dashed red] x\n@el [outline none] y");
+    assert!(out.contains("outline:2px dashed red;"), "{}", out);
+    assert!(out.contains("outline:none;"), "{}", out);
+}
+
+#[test]
+fn numbers_inside_a_colour_function_get_no_px() {
+    let out = compile("@el [border 1 solid rgb(255 128 0)] x");
+    assert!(out.contains("border:1px solid rgb(255 128 0);"), "{}", out);
+}
+
+#[test]
+fn border_image_width_is_a_number() {
+    let out = compile("@el [border-image-width 2, border-image-slice 30] x");
+    assert!(out.contains("border-image-width:2;"), "{}", out);
+    assert!(out.contains("border-image-slice:30;"), "{}", out);
+}
+
+#[test]
+fn every_shadow_gets_px() {
+    let out = compile("@el [hover:box-shadow 0 4 12 rgba(0,0,0,0.1)\\, 0 1 2 red] x");
+    assert!(
+        out.contains("box-shadow:0 4px 12px rgba(0,0,0,0.1), 0 1px 2px red;"),
+        "{}",
+        out
+    );
+}

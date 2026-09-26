@@ -55,7 +55,7 @@ separated by commas, and the list may span several lines:
   padding 20,
   background white,
   border-radius 8,
-  box-shadow 0 2px 4px rgba(0,0,0,0.1)
+  box-shadow 0 2 4 rgba(0,0,0,0.1)
 ]
   Content
 ```
@@ -447,12 +447,31 @@ commas: `font-family "Inter, sans-serif"` names one family called
 several values with commas between them, written `\,`:
 `font-family Inter\, sans-serif`.
 
-Values mean what they mean in CSS, with one addition: **a bare number in a
-length is pixels**. So `padding 20` is `20px`, `border 1 solid red` is
-`1px solid red`, and `margin 0 auto` is `0 auto`. Values that have a unit,
-keywords and CSS functions pass through as written (`width 50%`,
-`max-width min(100%, 800px)`), and so do numbers that aren't lengths
-(`opacity 0.5`, `z-index 2`, `line-height 1.5`, `flex 1`).
+Values mean what they mean in CSS, with one addition: **in a length
+property, every bare number outside parentheses and quotes is pixels**. So
+`padding 20` is `20px`, `border 1 solid red` is `1px solid red`,
+`box-shadow 0 2 4 rgba(0,0,0,0.1)` is `0 2px 4px rgba(0,0,0,0.1)`, and
+`margin 0 auto` is `0 auto` (a zero stays `0`). Numbers inside a function
+belong to it (`rgb(255 128 0)`, `calc(100% - 20px)`), and values that have
+a unit or are keywords pass through as written (`width 50%`, `max-width
+min(100%, 800px)`). Every other property takes numbers as CSS does, so
+`opacity 0.5`, `z-index 2`, `line-height 1.5`, `flex 1 1 240px`,
+`grid-column 1 / 3`, `initial-letter 3` and `border-image-width 2` are
+written as they are, and so are custom properties (`--cols 3`), which have
+no type to go by.
+
+The length properties are these, and only these:
+
+| Group | Properties |
+|---|---|
+| Size | `width`, `height`, `min-*` and `max-*` of both, `block-size`, `inline-size` and their `min-`/`max-`, `flex-basis`, `column-width`, `contain-intrinsic-*` |
+| Space | `margin`, `padding`, `scroll-margin`, `scroll-padding` and every side of them, `gap`, `row-gap`, `column-gap`, `border-spacing` |
+| Position | `top`, `right`, `bottom`, `left`, `inset` and `inset-*`, `translate`, `transform-origin`, `perspective`, `perspective-origin` |
+| Border | `border` and every `border-*` shorthand, width and radius (not `border-image-*`), `outline`, `outline-width`, `outline-offset`, `column-rule`, `column-rule-width` |
+| Shadow | `box-shadow`, `text-shadow` |
+| Grid | `grid-template-columns`, `grid-template-rows`, `grid-auto-columns`, `grid-auto-rows` |
+| Background | `background-position` (and `-x`, `-y`), `background-size`, `object-position`, `mask-position`, `mask-size` |
+| Text | `font-size`, `letter-spacing`, `word-spacing`, `text-indent`, `text-decoration-thickness`, `text-underline-offset` |
 
 Nothing else is added to a value, and a shorthand means what it means in
 CSS: `outline 2 solid red` is `2px solid red`, while `outline 2 red` names

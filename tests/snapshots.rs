@@ -7743,3 +7743,67 @@ fn the_focus_outline_is_kept_to_htmlang_s_elements() {
     );
     assert!(!out.contains("a:focus-visible"), "{}", out);
 }
+
+#[test]
+fn snapshot_px_rule() {
+    snapshot_test("px_rule");
+}
+
+#[test]
+fn a_bare_number_in_a_length_property_is_px() {
+    let out = compile(
+        "@el [box-shadow 0 2 4 rgba(0,0,0,.1), translate 10 20, grid-template-columns 200 1fr, gap 10 20, inset 0 10, border-inline 1 solid red, transform-origin 0 0, background-size 20 20] x",
+    );
+    for decl in [
+        "box-shadow:0 2px 4px rgba(0,0,0,.1);",
+        "translate:10px 20px;",
+        "grid-template-columns:200px 1fr;",
+        "gap:10px 20px;",
+        "inset:0 10px;",
+        "border-inline:1px solid red;",
+        "transform-origin:0 0;",
+        "background-size:20px 20px;",
+    ] {
+        assert!(out.contains(decl), "{decl}: {out}");
+    }
+}
+
+#[test]
+fn number_valued_and_custom_properties_are_written_as_they_are() {
+    let out = compile(
+        "@el [flex 1 1 240, grid-column 1 / 3, grid-row span 2, initial-letter 3, columns 3, border-image-width 2, animation-iteration-count 3, --cols 3] x",
+    );
+    for decl in [
+        "flex:1 1 240;",
+        "grid-column:1 / 3;",
+        "grid-row:span 2;",
+        "initial-letter:3;",
+        "columns:3;",
+        "border-image-width:2;",
+        "animation-iteration-count:3;",
+        "--cols:3;",
+    ] {
+        assert!(out.contains(decl), "{decl}: {out}");
+    }
+    // `@let --name` is a custom property too
+    let out = compile("@let --cols 3\n@el [grid-template-columns repeat(var(--cols), 1fr)] x");
+    assert!(out.contains("--cols:3;"), "{}", out);
+    assert!(
+        out.contains("grid-template-columns:repeat(var(--cols), 1fr);"),
+        "{}",
+        out
+    );
+}
+
+#[test]
+fn spacing_and_grid_cols_follow_the_px_rule() {
+    let out = compile("@grid [spacing 4 8, grid-cols 200 1fr]\n  a\n");
+    assert!(out.contains("gap:4px 8px;"), "{}", out);
+    assert!(out.contains("grid-template-columns:200px 1fr;"), "{}", out);
+    let out = compile("@grid [grid-cols 3]\n  a\n");
+    assert!(
+        out.contains("grid-template-columns:repeat(3,1fr);"),
+        "{}",
+        out
+    );
+}

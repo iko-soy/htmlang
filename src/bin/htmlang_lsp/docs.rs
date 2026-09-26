@@ -349,13 +349,18 @@ fn attribute_hover(name: &str) -> Option<String> {
         return Some(markdown(name, "htmlang attribute.", ""));
     }
     if vocab::is_css_property(name) {
+        let value = if vocab::is_length_property(name) {
+            "a length: every bare number outside parentheses is px (`8` is `8px`)"
+        } else {
+            "passed through unchanged (its numbers stay numbers)"
+        };
         return Some(format!(
-            "**{name}** \u{2014} CSS property `{name}`, passed through unchanged.\n\n[MDN](https://developer.mozilla.org/docs/Web/CSS/{name})"
+            "**{name}** \u{2014} CSS property `{name}`, {value}.\n\n[MDN](https://developer.mozilla.org/docs/Web/CSS/{name})"
         ));
     }
     if vocab::is_custom_property(name) || vocab::is_vendor_property(name) {
         return Some(format!(
-            "**{name}** \u{2014} CSS property `{name}`, written to the CSS as it is."
+            "**{name}** \u{2014} CSS property `{name}`, written to the CSS as it is (no px)."
         ));
     }
     if vocab::BOOLEAN_HTML_ATTRS.contains(&name) {

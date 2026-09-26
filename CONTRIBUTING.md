@@ -38,7 +38,7 @@ Linux, macOS, and Windows. Your change should pass all three.
     (the reset makes it the column), so the top level of a page is laid
     out like any column; a fragment's top level has no layout of its own.
     Every CSS property goes through one generic path (its name, its value
-    as written, and `vocab::px_rule`'s pixels); only htmlang's layout
+    as written, with `vocab::with_px`'s pixels); only htmlang's layout
     words and `line-clamp` have code of their own. Generated classes are
     `hl-` + a short name; an element's defaults (`ElementKind::css`) are
     part of its class, never a rule on a global element selector, so
@@ -58,8 +58,10 @@ Linux, macOS, and Windows. Your change should pass all three.
     `span`, `p` and `div` to htmlang's own names for the unknown-element
     suggestion only.
   - `vocab.rs` — the attribute vocabulary (htmlang attributes, CSS properties,
-    HTML attributes, `@page`'s own `favicon`), the pixel rule for bare
-    numbers (`px_rule`) and the state/media prefixes.
+    HTML attributes, `@page`'s own `favicon`), the pixel rule
+    (`LENGTH_PROPERTIES`, the one table of properties whose bare numbers
+    are px, and `with_px`, the one function that applies it) and the
+    state/media prefixes.
   - `expr.rs` — the expression language for conditions, computed values and
     `${...}`. It evaluates only what decides the result (the branch `if()`
     takes, the side of `and`/`or` that decides) and only reads the rest.

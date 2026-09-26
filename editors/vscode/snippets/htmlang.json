@@ -128,7 +128,7 @@
   "Grid with named areas": {
     "prefix": "@grid-areas",
     "body": [
-      "@grid [grid-template-columns ${1:240px 1fr}, grid-template-areas \"${2:header header}\" \"${3:sidebar main}\", spacing ${4:20}]",
+      "@grid [grid-template-columns ${1:240 1fr}, grid-template-areas \"${2:header header}\" \"${3:sidebar main}\", spacing ${4:20}]",
       "  @header [grid-area header]",
       "    ${5:Header}",
       "  @aside [grid-area sidebar]",

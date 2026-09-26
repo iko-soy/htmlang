@@ -1,0 +1,20 @@
+-- A bare number in a length is pixels; everything else is as written
+@page Pixels
+@el [padding 20, box-shadow 0 2 4 rgba(0,0,0,.1), flex 1 1 240px, grid-column 1 / 3, initial-letter 3]
+  Lengths get px, numbers inside rgba() and number-valued properties don't
+@el [box-shadow 0 1 3 rgba(0,0,0,0.1)\, inset 0 0 0 1 #e5e7eb, text-shadow 0 1 2 black]
+  Every shadow in a list
+@grid [grid-template-columns 200 1fr, grid-auto-rows minmax(80px, auto), gap 10 20, row-gap 4]
+  Tracks and gaps
+@el [position absolute, inset 0 10, translate 10 20, transform-origin 0 0]
+  Position
+@el [background-position 0 0\, 10 10, background-size 20 20, object-position 50% 10]
+  Positions and sizes
+@el [border-inline 1 solid red, border 1 solid rgb(255 128 0), border-radius 8 / 4, border-spacing 2 4]
+  Borders
+@el [outline 2 dashed red, outline-offset 2, hover:outline none]
+  Outlines
+@el [border-image-width 2, opacity 0.5, z-index 2, line-height 1.5, font-weight 700, aspect-ratio 16 / 9, order 1, --cols 3]
+  Numbers stay numbers, and custom properties are as written
+@el [width calc(100% - 20px), margin 0 auto, padding 0 4, font-size 1.2em]
+  Functions, zeros and units

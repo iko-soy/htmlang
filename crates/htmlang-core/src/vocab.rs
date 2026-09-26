@@ -167,96 +167,118 @@ pub const HTML_ATTRIBUTES: &[&str] = &[
     "usemap", "value", "width", "wrap",
 ];
 
-/// CSS properties whose bare numbers are lengths, so `margin-top 16` means
-/// `16px`. (Others, like `opacity` or `z-index`, take unitless numbers.)
+/// The CSS properties whose values are lengths. In them, and only in them,
+/// a bare number is pixels: `padding 8 16`, `box-shadow 0 2 4 black`. Every
+/// other property, custom properties included, takes its value as written,
+/// so the numbers of `flex 1 1 240px`, `grid-column 1 / 3`, `opacity 0.5`
+/// or `border-image-width 2` stay numbers. Sorted, for the binary search.
+#[rustfmt::skip]
+pub const LENGTH_PROPERTIES: &[&str] = &[
+    "background-position", "background-position-x", "background-position-y",
+    "background-size", "block-size", "border", "border-block", "border-block-end",
+    "border-block-end-width", "border-block-start", "border-block-start-width",
+    "border-block-width", "border-bottom", "border-bottom-left-radius",
+    "border-bottom-right-radius", "border-bottom-width", "border-end-end-radius",
+    "border-end-start-radius", "border-inline", "border-inline-end", "border-inline-end-width",
+    "border-inline-start", "border-inline-start-width", "border-inline-width", "border-left",
+    "border-left-width", "border-radius", "border-right", "border-right-width",
+    "border-spacing", "border-start-end-radius", "border-start-start-radius", "border-top",
+    "border-top-left-radius", "border-top-right-radius", "border-top-width", "border-width",
+    "bottom", "box-shadow", "column-gap", "column-rule", "column-rule-width", "column-width",
+    "contain-intrinsic-block-size", "contain-intrinsic-height", "contain-intrinsic-inline-size",
+    "contain-intrinsic-size", "contain-intrinsic-width", "flex-basis", "font-size", "gap",
+    "grid-auto-columns", "grid-auto-rows", "grid-template-columns", "grid-template-rows",
+    "height", "inline-size", "inset", "inset-block", "inset-block-end", "inset-block-start",
+    "inset-inline", "inset-inline-end", "inset-inline-start", "left", "letter-spacing",
+    "margin", "margin-block", "margin-block-end", "margin-block-start", "margin-bottom",
+    "margin-inline", "margin-inline-end", "margin-inline-start", "margin-left", "margin-right",
+    "margin-top", "mask-position", "mask-size", "max-block-size", "max-height",
+    "max-inline-size", "max-width", "min-block-size", "min-height", "min-inline-size",
+    "min-width", "object-position", "outline", "outline-offset", "outline-width", "padding",
+    "padding-block", "padding-block-end", "padding-block-start", "padding-bottom",
+    "padding-inline", "padding-inline-end", "padding-inline-start", "padding-left",
+    "padding-right", "padding-top", "perspective", "perspective-origin", "right", "row-gap",
+    "scroll-margin", "scroll-margin-block", "scroll-margin-block-end",
+    "scroll-margin-block-start", "scroll-margin-bottom", "scroll-margin-inline",
+    "scroll-margin-inline-end", "scroll-margin-inline-start", "scroll-margin-left",
+    "scroll-margin-right", "scroll-margin-top", "scroll-padding", "scroll-padding-block",
+    "scroll-padding-block-end", "scroll-padding-block-start", "scroll-padding-bottom",
+    "scroll-padding-inline", "scroll-padding-inline-end", "scroll-padding-inline-start",
+    "scroll-padding-left", "scroll-padding-right", "scroll-padding-top", "text-decoration-thickness",
+    "text-indent", "text-shadow", "text-underline-offset", "top", "transform-origin",
+    "translate", "width", "word-spacing",
+];
+
+/// A property whose value is a length (see [`LENGTH_PROPERTIES`]).
 pub fn is_length_property(name: &str) -> bool {
-    const PREFIXES: &[&str] = &[
-        "margin",
-        "padding",
-        "inset",
-        "scroll-margin",
-        "scroll-padding",
-    ];
-    const SUFFIXES: &[&str] = &["-width", "-height", "-radius", "-offset", "-spacing", "gap"];
-    const EXACT: &[&str] = &[
-        "top",
-        "right",
-        "bottom",
-        "left",
-        "width",
-        "height",
-        "font-size",
-        "block-size",
-        "inline-size",
-        "min-block-size",
-        "max-block-size",
-        "min-inline-size",
-        "max-inline-size",
-        "text-indent",
-        "flex-basis",
-        "perspective",
-        "text-decoration-thickness",
-        // Shorthands that start with a width: `border 1 solid red`
-        "border",
-        "border-top",
-        "border-right",
-        "border-bottom",
-        "border-left",
-        "border-block",
-        "border-inline",
-        "outline",
-        "column-rule",
-    ];
-    // A bare `line-height` number is a multiplier, not a length
-    name != "line-height"
-        && (EXACT.contains(&name)
-            || PREFIXES.iter().any(|p| name.starts_with(p))
-            || SUFFIXES.iter().any(|s| name.ends_with(s)))
+    LENGTH_PROPERTIES.binary_search(&name).is_ok()
 }
 
-/// Where a known CSS property's value gets `px` after a bare number.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Px {
-    /// Nowhere: the value is written as it is
-    None,
-    /// Only when the whole value is one number (`width 200`)
-    Whole,
-    /// After every word that is a bare number (`padding 8 16`)
-    EachWord,
-}
-
-/// The `px` rule of a CSS property: which bare numbers in its value are
-/// pixels. A name that isn't a standard CSS property (a custom property,
-/// a vendor-prefixed or an unknown one) is written as it is.
-pub fn px_rule(name: &str) -> Px {
-    // Properties whose value gets `px` only when it is one number
-    #[rustfmt::skip]
-    const WHOLE: &[&str] = &[
-        "block-size", "border-end-end-radius", "border-end-start-radius", "border-spacing",
-        "border-start-end-radius", "border-start-start-radius", "bottom", "column-gap",
-        "column-width", "flex-basis", "gap", "height", "inline-size", "inset",
-        "inset-block-end", "inset-block-start", "inset-inline-end", "inset-inline-start",
-        "left", "letter-spacing", "margin-block-end", "margin-block-start",
-        "margin-inline-end", "margin-inline-start", "max-block-size", "max-height",
-        "max-inline-size", "max-width", "min-block-size", "min-height", "min-inline-size",
-        "min-width", "padding-block-end", "padding-block-start", "padding-bottom",
-        "padding-inline-end", "padding-inline-start", "padding-left", "padding-right",
-        "padding-top", "right", "scroll-margin", "scroll-margin-bottom", "scroll-margin-left",
-        "scroll-margin-right", "scroll-margin-top", "scroll-padding", "scroll-padding-bottom",
-        "scroll-padding-left", "scroll-padding-right", "scroll-padding-top",
-        "text-decoration-thickness", "text-indent", "text-underline-offset", "top", "width",
-    ];
-    // Logical border shorthands, written as they are
-    const AS_WRITTEN: &[&str] = &["border-block", "border-inline"];
-    if !is_css_property(name) || AS_WRITTEN.contains(&name) {
-        Px::None
-    } else if WHOLE.contains(&name) {
-        Px::Whole
-    } else if is_length_property(name) {
-        Px::EachWord
-    } else {
-        Px::None
+/// The value of `property` as it goes into the CSS. In a length property,
+/// every bare number outside parentheses and quotes gets `px`: `0 2 4
+/// rgba(0,0,0,.1)` is `0 2px 4px rgba(0,0,0,.1)`. A zero stays `0`, and
+/// numbers inside a function (`calc(100% - 20)`, `rgb(255 128 0)`) are
+/// the function's. Any other property's value is written as it is.
+pub fn with_px(property: &str, value: &str) -> String {
+    let value = value.trim();
+    if !is_length_property(property) {
+        return value.to_string();
     }
+    let mut out = String::with_capacity(value.len() + 8);
+    let mut depth = 0usize;
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+    // Where the current word started in `value`, while one is open
+    let mut word: Option<usize> = None;
+    let end_word = |out: &mut String, word: &mut Option<usize>, at: usize| {
+        if let Some(start) = word.take()
+            && is_bare_number(&value[start..at])
+            && value[start..at].parse::<f64>().is_ok_and(|n| n != 0.0)
+        {
+            out.push_str("px");
+        }
+    };
+    for (i, c) in value.char_indices() {
+        if escaped {
+            escaped = false;
+        } else if c == '\\' {
+            escaped = true;
+        } else if let Some(q) = quote {
+            if c == q {
+                quote = None;
+            }
+        } else if c == '"' || c == '\'' {
+            quote = Some(c);
+        } else if c == '(' {
+            depth += 1;
+        } else if c == ')' {
+            depth = depth.saturating_sub(1);
+        }
+        // Words are separated by spaces, commas and slashes outside
+        // parentheses and quotes, so a function or a string is part of a
+        // word, which is then not a bare number
+        if depth == 0 && quote.is_none() && (c.is_whitespace() || c == ',' || c == '/') {
+            end_word(&mut out, &mut word, i);
+        } else if word.is_none() {
+            word = Some(i);
+        }
+        out.push(c);
+    }
+    end_word(&mut out, &mut word, value.len());
+    out
+}
+
+/// `12`, `-4`, `+1.5`, `.5`: a sign, digits and at most one decimal point,
+/// with a digit after it. Nothing else (`10px`, `1e3`, `#333`, `1.`).
+fn is_bare_number(word: &str) -> bool {
+    let digits = word.strip_prefix(['-', '+']).unwrap_or(word);
+    let (int, frac) = match digits.split_once('.') {
+        Some((int, frac)) => (int, Some(frac)),
+        None => (digits, None),
+    };
+    int.bytes().all(|b| b.is_ascii_digit())
+        && frac.is_none_or(|f| !f.is_empty() && f.bytes().all(|b| b.is_ascii_digit()))
+        && (!int.is_empty() || frac.is_some())
 }
 
 /// State prefixes and the selector each adds: `hover:color red` styles
@@ -425,21 +447,90 @@ pub fn all_attributes() -> Vec<&'static str> {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn the_px_rule_is_the_property_s() {
-        use super::{Px, px_rule};
-        assert_eq!(px_rule("width"), Px::Whole);
-        assert_eq!(px_rule("gap"), Px::Whole);
-        assert_eq!(px_rule("padding"), Px::EachWord);
-        assert_eq!(px_rule("outline"), Px::EachWord);
-        assert_eq!(px_rule("border"), Px::EachWord);
-        assert_eq!(px_rule("opacity"), Px::None);
-        assert_eq!(px_rule("line-height"), Px::None);
-        assert_eq!(px_rule("border-inline"), Px::None);
-        // Only standard properties: a custom, vendor or unknown one is
-        // written as it is
-        assert_eq!(px_rule("--gap"), Px::None);
-        assert_eq!(px_rule("-webkit-margin-start"), Px::None);
-        assert_eq!(px_rule("corner-radius"), Px::None);
+    fn a_bare_number_in_a_length_is_px() {
+        use super::with_px;
+        assert_eq!(with_px("padding", "8 16"), "8px 16px");
+        assert_eq!(with_px("width", "200"), "200px");
+        assert_eq!(with_px("margin", "0 auto"), "0 auto");
+        assert_eq!(with_px("margin", "-10 +2.5 .5"), "-10px +2.5px .5px");
+        assert_eq!(
+            with_px("box-shadow", "0 2 4 rgba(0,0,0,.1)"),
+            "0 2px 4px rgba(0,0,0,.1)"
+        );
+        assert_eq!(
+            with_px("box-shadow", "0 1 red, inset 0 0 0 1 blue"),
+            "0 1px red, inset 0 0 0 1px blue"
+        );
+        assert_eq!(
+            with_px("border", "1 solid rgb(255 128 0)"),
+            "1px solid rgb(255 128 0)"
+        );
+        assert_eq!(with_px("border-radius", "8/4"), "8px/4px");
+        assert_eq!(with_px("grid-template-columns", "200 1fr"), "200px 1fr");
+        assert_eq!(
+            with_px("grid-template-columns", "repeat(3, 100) minmax(0, 1fr)"),
+            "repeat(3, 100) minmax(0, 1fr)"
+        );
+        assert_eq!(with_px("inset", "0 10"), "0 10px");
+        assert_eq!(with_px("outline", "2 dashed red"), "2px dashed red");
+        assert_eq!(with_px("width", "calc(100% - 20)"), "calc(100% - 20)");
+        assert_eq!(with_px("width", "10px"), "10px");
+        assert_eq!(with_px("font-size", "1.2em"), "1.2em");
+        assert_eq!(
+            with_px("margin", "1e3 1. #333 10 !important"),
+            "1e3 1. #333 10px !important"
+        );
+        assert_eq!(with_px("width", "var(--w, 10)"), "var(--w, 10)");
+        // Zero stays zero, however it is written
+        assert_eq!(with_px("padding", "0 0.0 -0"), "0 0.0 -0");
+        // Numbers in quotes are text
+        assert_eq!(with_px("text-shadow", "0 0 2 \"4\""), "0 0 2px \"4\"");
+        // Number-valued properties and custom properties are as written
+        for (property, value) in [
+            ("flex", "1 1 240"),
+            ("grid-column", "1 / 3"),
+            ("grid-row", "span 2"),
+            ("initial-letter", "3"),
+            ("columns", "3"),
+            ("opacity", "0.5"),
+            ("z-index", "2"),
+            ("line-height", "1.5"),
+            ("font-weight", "700"),
+            ("aspect-ratio", "16 / 9"),
+            ("scale", "2"),
+            ("border-image-width", "2"),
+            ("border-image-slice", "30"),
+            ("animation-iteration-count", "3"),
+            ("--gap", "12"),
+            ("-webkit-margin-start", "4"),
+            ("corner-radius", "4"),
+        ] {
+            assert_eq!(with_px(property, value), value, "{property}");
+        }
+    }
+
+    #[test]
+    fn every_length_property_is_a_css_property() {
+        let table = super::LENGTH_PROPERTIES;
+        assert!(
+            table.windows(2).all(|w| w[0] < w[1]),
+            "sorted, no duplicates"
+        );
+        for name in table {
+            assert!(super::is_css_property(name), "{name}");
+            assert!(!name.starts_with("border-image"), "{name}");
+        }
+        // Every border shorthand, width and radius is a length
+        for name in super::CSS_PROPERTIES
+            .iter()
+            .filter(|n| n.starts_with("border"))
+        {
+            let takes_length = !name.starts_with("border-image")
+                && !name.ends_with("-color")
+                && !name.ends_with("-style")
+                && *name != "border-collapse";
+            assert_eq!(super::is_length_property(name), takes_length, "{name}");
+        }
     }
 
     #[test]

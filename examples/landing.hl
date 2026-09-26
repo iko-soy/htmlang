@@ -92,7 +92,7 @@
         background white,
         dark:background #0b1220,
         border-radius 12,
-        if($plan.featured, [border 2 solid var(--brand), box-shadow 0 12px 32px rgba(37, 99, 235, 0.15)], border 1 solid var(--line))
+        if($plan.featured, [border 2 solid var(--brand), box-shadow 0 12 32 rgba(37, 99, 235, 0.15)], border 1 solid var(--line))
       ]
         @el [spacing 4]
           @h3 [font-size 18] $plan.name

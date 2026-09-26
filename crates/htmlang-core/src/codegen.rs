@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
 use crate::ast::*;
+use crate::vocab::with_px;
 
 // ---------------------------------------------------------------------------
 // Style collector: deduplicates CSS and assigns class names
@@ -2107,7 +2108,7 @@ fn attrs_to_css(attrs: &[Attribute], state_prefix: &str, site: &Site) -> String 
             "spacing" if !lays_out_children => {}
             "spacing" => {
                 if let Some(v) = val {
-                    push_css(&mut css, "gap", &css_px(v));
+                    push_css(&mut css, "gap", &with_px("gap", v));
                 }
             }
 
@@ -2167,7 +2168,7 @@ fn attrs_to_css(attrs: &[Attribute], state_prefix: &str, site: &Site) -> String 
                     };
                     match v.parse::<u32>() {
                         Ok(n) => push_css(&mut css, property, &format!("repeat({},1fr)", n)),
-                        Err(_) => push_css(&mut css, property, v),
+                        Err(_) => push_css(&mut css, property, &with_px(property, v)),
                     }
                 }
             }
@@ -2217,44 +2218,6 @@ fn push_css(css: &mut String, prop: &str, value: &str) {
     css.push(':');
     css.push_str(value);
     css.push(';');
-}
-
-/// A CSS property's value with `px` after its bare numbers where the
-/// property takes a length (see [`crate::vocab::px_rule`]).
-fn with_px(property: &str, value: &str) -> String {
-    match crate::vocab::px_rule(property) {
-        crate::vocab::Px::None => value.to_string(),
-        crate::vocab::Px::Whole => css_px(value),
-        crate::vocab::Px::EachWord => css_px_multi(value),
-    }
-}
-
-/// Format a length value: a bare number gets `px` appended; anything else
-/// (values with units, keywords like `auto`, functions like `calc(...)`) is
-/// passed through unchanged.
-fn css_px(value: &str) -> String {
-    let v = value.trim();
-    if v == "0" {
-        return "0".to_string();
-    }
-    let is_bare_number = !v.is_empty()
-        && v.bytes()
-            .all(|b| b.is_ascii_digit() || matches!(b, b'.' | b'-' | b'+'))
-        && v.parse::<f64>().is_ok();
-    if is_bare_number {
-        format!("{}px", v)
-    } else {
-        v.to_string()
-    }
-}
-
-/// Format multiple space-separated values, each getting px if needed.
-fn css_px_multi(value: &str) -> String {
-    value
-        .split_whitespace()
-        .map(css_px)
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 fn extract_id_class(attrs: &[Attribute]) -> (Option<String>, Option<String>) {

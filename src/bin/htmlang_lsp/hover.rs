@@ -263,4 +263,15 @@ mod tests {
         assert!(dot.contains("Takes no content"), "{}", dot);
         assert!(!dot.contains("Slots"), "{}", dot);
     }
+
+    #[test]
+    fn a_css_property_s_hover_says_whether_its_numbers_are_px() {
+        let text = "@el [box-shadow 0 2 4 black, flex 1 1 240px, --cols 3] x\n";
+        let shadow = hover_text(text, 0, 7);
+        assert!(shadow.contains("a length: every bare number"), "{}", shadow);
+        let flex = hover_text(text, 0, 31);
+        assert!(flex.contains("its numbers stay numbers"), "{}", flex);
+        let custom = hover_text(text, 0, 48);
+        assert!(custom.contains("as it is (no px)"), "{}", custom);
+    }
 }

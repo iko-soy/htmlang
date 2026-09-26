@@ -57,7 +57,10 @@ unless you write some, and nothing is added that you didn't ask for.
   #f8fafc] Home`).
 - **Styling is CSS.** Any other attribute is a CSS property with its CSS
   name and value: `padding 20`, `border 1 solid #eee`,
-  `grid-template-columns 1fr 2fr`. In lengths, a bare number means pixels.
+  `grid-template-columns 1fr 2fr`. In a length property, every bare
+  number is pixels (`box-shadow 0 2 4 black` is `0 2px 4px black`); numbers
+  in any other property (`flex 1`, `z-index 2`) and in custom properties
+  stay numbers.
   Prefixes make a style conditional: `hover:`, `md:`, `dark:`, `first:`.
   A comma separates attributes, so a comma inside a value is written `\,`
   (`transition opacity 0.3s\, transform 0.3s`), and quoted text keeps its
