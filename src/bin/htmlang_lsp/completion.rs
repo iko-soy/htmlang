@@ -160,7 +160,7 @@ fn snippet_completions(range: Range) -> Vec<CompletionItem> {
         (
             "responsive layout",
             "Centered responsive column layout",
-            "@column [max-width 800, center-x, padding 40, spacing 20]",
+            "@el [max-width 800, center-x, padding 40, spacing 20]",
         ),
         (
             "nav bar",

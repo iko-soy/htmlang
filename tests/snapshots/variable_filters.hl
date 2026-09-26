@@ -2,7 +2,7 @@
 @let name hello world
 @let greeting hi
 
-@column [spacing 10]
+@el [spacing 10]
   @text ${uppercase($name)}
   @text ${lowercase($name)}
   @text ${capitalize($name)}

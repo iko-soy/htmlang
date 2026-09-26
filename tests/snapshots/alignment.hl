@@ -1,5 +1,5 @@
 @page Alignment
-@column [height 400]
+@el [height 400]
   @el [center-x] Centered X
   @el [center-y] Centered Y
   @el [align-left] Left

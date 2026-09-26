@@ -1,6 +1,6 @@
 @page Pseudo Elements
 
-@column [spacing 20]
+@el [spacing 20]
   @el [before:content "→ ", before:color red]
     Item with arrow prefix
   @el [after:content " ✓", after:color green]

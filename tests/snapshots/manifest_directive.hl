@@ -3,5 +3,5 @@
 @head
   <link rel="manifest" href="manifest.json">
 
-@column [padding 20]
+@el [padding 20]
   @text Hello

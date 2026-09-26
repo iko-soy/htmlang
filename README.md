@@ -15,7 +15,7 @@ A minimalist layout language inspired by [elm-ui](https://package.elm-lang.org/p
     @text [font-weight bold] $title
     @children
 
-@column [max-width 800, center-x, padding 40, spacing 20]
+@el [max-width 800, center-x, padding 40, spacing 20]
   @text [font-weight bold, font-size 32] Hello
 
   @paragraph
@@ -69,7 +69,7 @@ formatting.
 
 ## Language tour
 
-Elements are laid out with `@row`, `@column` and `@el`; `@text`, `@paragraph`,
+Elements are laid out with `@el` (a column) and `@row`; `@text`, `@paragraph`,
 `@link` and `@image` hold content, and every other HTML element is available by
 name (`@nav`, `@section`, `@table`, `@input`, ...).
 

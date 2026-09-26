@@ -1,4 +1,4 @@
 @page Test
-@column
+@el
   @paragraph
     Hello world

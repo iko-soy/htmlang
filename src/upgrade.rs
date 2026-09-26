@@ -15,7 +15,7 @@ pub struct Upgrade {
 
 /// Element aliases and their canonical names.
 const ELEMENT_ALIASES: &[(&str, &str)] = &[
-    ("col", "column"),
+    ("col", "el"),
     ("p", "paragraph"),
     ("img", "image"),
     ("li", "item"),
@@ -1698,7 +1698,7 @@ mod tests {
 
     #[test]
     fn element_aliases() {
-        assert_eq!(up("@col [padding 4]\n  @p hi"), "@column [padding 4]\n  @paragraph hi");
+        assert_eq!(up("@col [padding 4]\n  @p hi"), "@el [padding 4]\n  @paragraph hi");
         assert_eq!(up("@el > @btn Go"), "@el > @button Go");
         assert_eq!(up("Say {@img a.png} now"), "Say {@image a.png} now");
         // Not aliases: @page, @paragraph, text mentioning @p
@@ -1992,8 +1992,8 @@ mod tests {
         );
         assert_eq!(super::layout_function_name("parts/base.hl"), "base-layout");
         assert_eq!(
-            super::convert_layout("@page Site\n@column\n  @children\n", "layout").unwrap(),
-            "@let layout\n  @page Site\n  @column\n    @children\n"
+            super::convert_layout("@page Site\n@el\n  @children\n", "layout").unwrap(),
+            "@let layout\n  @page Site\n  @el\n    @children\n"
         );
         assert!(super::convert_layout("@let layout\n  x\n", "layout").is_none());
         assert_eq!(

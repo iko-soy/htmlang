@@ -5,7 +5,7 @@
     @children
 
 @let wrapper
-  @column [spacing 10]
+  @el [spacing 10]
     @children
 
 @wrapper

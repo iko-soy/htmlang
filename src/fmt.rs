@@ -510,7 +510,7 @@ mod tests {
 
     #[test]
     fn bracket_in_text_does_not_join_lines() {
-        let src = "@column\n  Use [ to open a list\n  @text [font-weight bold] Second\n";
+        let src = "@el\n  Use [ to open a list\n  @text [font-weight bold] Second\n";
         assert_eq!(format(src), src);
     }
 

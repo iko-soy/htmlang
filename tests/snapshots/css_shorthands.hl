@@ -1,6 +1,6 @@
 @page CSS Shorthands
 
-@column [spacing 20]
+@el [spacing 20]
   -- Truncate
   @text [max-width 200, $truncate] This text will be truncated with an ellipsis
 

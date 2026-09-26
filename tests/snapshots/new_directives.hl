@@ -16,5 +16,5 @@
     }
   </script>
 
-@column [spacing 10]
+@el [spacing 10]
   @text [font-family Inter] Hello with custom fonts

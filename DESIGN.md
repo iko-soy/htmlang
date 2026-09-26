@@ -91,13 +91,12 @@ verbatim too (a `--` line in them is not a comment).
 ## Elements
 
 Layout elements set up flexbox; the rest map to the HTML element of the same
-name.
+name. Every container lays its children out in a column, except `@row`.
 
 | Element | Output | Purpose |
 |---|---|---|
 | `@row` | div, flex row | Horizontal layout |
-| `@column` | div, flex column | Vertical layout |
-| `@el` | div, flex column | Generic container |
+| `@el` | div, flex column | The container: children laid out top to bottom |
 | `@grid` | div, grid | Grid container (use `grid-cols`) |
 | `@stack` | div, position relative | Children layered on top of each other |
 | `@in-front` / `@behind` | div, absolute | Overlay layers filling the parent (see below) |
@@ -413,7 +412,7 @@ with `@slot name` (named blocks, with default content) and `@children`
 -- layout.hl
 @let layout
   @page My Site
-  @column [max-width 800, center-x]
+  @el [max-width 800, center-x]
     @slot header
       @text Default header
     @children
@@ -485,7 +484,7 @@ removed form with its replacement.
 | `@og KEY VALUE` | `@meta og:KEY VALUE` |
 | `@assert`, `@warn`, `@debug`, `@log` | Nothing (the lines are removed) |
 | `@defer` | Its content, directly |
-| `@col`, `@p`, `@img`, `@li`, `@btn`, `@ul`, `@divider`, `@opt` | `@column`, `@paragraph`, `@image`, `@item`, `@button`, `@list`, `@hr`, `@option` |
+| `@col`, `@p`, `@img`, `@li`, `@btn`, `@ul`, `@divider`, `@opt` | `@el`, `@paragraph`, `@image`, `@item`, `@button`, `@list`, `@hr`, `@option` |
 | `type email`, `id main` (HTML attributes written as styles) | `type=email`, `id=main` |
 | `skeleton`, `no-scrollbar`, `gradient A B` | `$skeleton`, `$no-scrollbar`, `background linear-gradient(A, B)` |
 | `@tooltip TEXT` | `@tooltip [tip TEXT] TEXT` |

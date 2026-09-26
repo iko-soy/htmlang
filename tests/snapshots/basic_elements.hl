@@ -2,7 +2,7 @@
 @row [spacing 10]
   @text [font-weight bold] Hello
   @text World
-@column [spacing 5]
+@el [spacing 5]
   @el [padding 10]
     @text Inner
 @paragraph

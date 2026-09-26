@@ -121,18 +121,18 @@
 
 @row [spacing 0, min-height 100vh]
 
-  @column [width 260, background white, dark:background #0f172a, border-right 1 solid $--border, dark:border-right 1 solid #1e293b, padding $--gap, spacing $--gap-sm]
+  @el [width 260, background white, dark:background #0f172a, border-right 1 solid $--border, dark:border-right 1 solid #1e293b, padding $--gap, spacing $--gap-sm]
 
     @row [spacing 12, padding 8, align-items center]
       @avatar [initials HL, size 36]
-      @column [spacing 2]
+      @el [spacing 2]
         @text [font-weight bold, font-size 16, color $--dark, dark:color white] htmlang
         @text [font-size 12, color $--gray] Dashboard v2.0
 
     @divider
 
     @sidebar-section [title Navigation]
-      @column [spacing 2]
+      @el [spacing 2]
         @nav-link [url /dashboard, label Dashboard, active true]
         @nav-link [url /analytics, label Analytics]
         @nav-link [url /projects, label Projects]
@@ -143,13 +143,13 @@
         @nav-link [url /settings, label Settings]
 
     @sidebar-section [title Favorites]
-      @column [spacing 2]
+      @el [spacing 2]
         @nav-link [url /project/alpha, label Project Alpha]
         @nav-link [url /project/beta, label Project Beta]
         @nav-link [url /reports/q4, label Q4 Reports]
 
     @sidebar-section [title Shortcuts]
-      @column [spacing 4]
+      @el [spacing 4]
         @row [spacing 8, align-items center]
           @el [width 6, height 6, border-radius 50%, background $--secondary]
           @text [font-size 13, color $--gray] Online (12)
@@ -163,15 +163,15 @@
     @el [margin-top auto, padding 12, background #f1f5f9, dark:background #1e293b, border-radius $--radius]
       @row [spacing 8, align-items center]
         @avatar [initials JD, size 28]
-        @column [spacing 0]
+        @el [spacing 0]
           @text [font-size 13, font-weight bold, color $--dark, dark:color white] Jane Doe
           @text [font-size 11, color $--gray] jane@example.com
 
-  @column [width fill, background $--light, dark:background #0f172a]
+  @el [width fill, background $--light, dark:background #0f172a]
 
     @header [padding 12 24, background white, dark:background #0f172a, border-bottom 1 solid $--border, dark:border-bottom 1 solid #1e293b]
       @row [spacing 16, align-items center]
-        @column [spacing 2]
+        @el [spacing 2]
           @row [spacing 8]
             @breadcrumb-item [url /, label Home]
             @breadcrumb-item [url /dashboard, label Dashboard, is-last true]
@@ -205,21 +205,21 @@
               @el [width fill, height $height%, background $--primary, hover:background #2563eb, border-radius 4 4 0 0, transition all 0.2s, min-width 20]
 
         @card [title Activity Feed]
-          @column [spacing 12, margin-top 12]
+          @el [spacing 12, margin-top 12]
             @each $member in $team-members
               @row [spacing 12, align-items center, padding 8, hover:background #f8fafc, dark:hover:background #1e293b, border-radius 6]
                 @avatar [initials $member, size 32]
-                @column [spacing 2, width fill]
+                @el [spacing 2, width fill]
                   @text [font-size 14, font-weight bold, color $--dark, dark:color white] $member
                   @text [font-size 12, color $--gray] Updated project files
                 @text [font-size 11, color $--gray] 2h ago
 
       @row [spacing $--gap, margin-top $--gap-lg, sm:flex-direction column, lg:flex-direction row]
 
-        @column [width fill, spacing $--gap]
+        @el [width fill, spacing $--gap]
 
           @card [title Project Status]
-            @column [spacing 0, margin-top 12]
+            @el [spacing 0, margin-top 12]
               @row [spacing 0, padding 8 16, background #f8fafc, dark:background #0f172a, border-bottom 1 solid $--border]
                 @el [width 200]
                   @text [font-weight bold, font-size 12, color $--gray, text-transform uppercase] Project
@@ -237,16 +237,16 @@
               @table-row [col1 Project Epsilon, col2 On Hold, col3 45%, col4 Feb 28 2026]
 
           @card [title Progress Breakdown]
-            @column [spacing 12, margin-top 12]
+            @el [spacing 12, margin-top 12]
               @each $project in $projects
-                @column [spacing 4]
+                @el [spacing 4]
                   @row [spacing 0]
                     @text [font-size 13, color $--dark, dark:color white, width fill] $project
                     @text [font-size 13, color $--gray] 67%
                   @progress-bar [percent 67, color var(--primary)]
 
           @card [title Recent Activity Log]
-            @column [spacing 8, margin-top 12]
+            @el [spacing 8, margin-top 12]
               @let log-entries Deployed v2.3.1 to production,Merged feature/auth-redesign,Closed issue #482: Login timeout,Updated CI/CD pipeline config,Added unit tests for payment module,Reviewed PR #156: API refactor,Fixed memory leak in worker pool,Released hotfix 2.3.2
               @each $entry, $i in $log-entries
                 @row [spacing 12, padding 8 12, align-items center]
@@ -255,21 +255,21 @@
                   @text [font-size 14, color $--dark, dark:color white, width fill] $entry
                   @text [font-size 11, color $--gray] just now
 
-        @column [width 340, sm:width fill, spacing $--gap]
+        @el [width 340, sm:width fill, spacing $--gap]
 
           @card [title Quick Actions]
-            @column [spacing 8, margin-top 12]
+            @el [spacing 8, margin-top 12]
               @icon-button [label New Project, color var(--primary)]
               @icon-button [label Create Report, color var(--secondary)]
               @icon-button [label Invite Member, color var(--accent)]
               @icon-button [label View Backlog, color var(--gray)]
 
           @card [title Team Members]
-            @column [spacing 8, margin-top 12]
+            @el [spacing 8, margin-top 12]
               @each $member in $team-members
                 @row [spacing 10, align-items center, padding 6 8, hover:background #f1f5f9, dark:hover:background #1e293b, border-radius 6, transition all 0.15s]
                   @avatar [initials $member, size 28]
-                  @column [spacing 0, width fill]
+                  @el [spacing 0, width fill]
                     @text [font-size 13, font-weight bold, color $--dark, dark:color white] $member
                     @text [font-size 11, color $--gray] Developer
                   @el [width 8, height 8, border-radius 50%, background $--secondary]
@@ -290,7 +290,7 @@
               @tag [label api]
 
           @card [title Notifications]
-            @column [spacing 0, margin-top 12]
+            @el [spacing 0, margin-top 12]
               @let notifications New deployment completed,PR review requested,Build failed on staging,Meeting in 30 minutes,Subscription renewal due
               @each $note in $notifications
                 @row [spacing 10, padding 10 12, border-bottom 1 solid $--border, dark:border-bottom 1 solid #334155, align-items center]
@@ -299,7 +299,7 @@
                   @text [font-size 11, color $--gray] now
 
           @card [title Settings]
-            @column [spacing 12, margin-top 12]
+            @el [spacing 12, margin-top 12]
               @row [spacing 0, align-items center]
                 @text [font-size 14, color $--dark, dark:color white, width fill] Dark Mode
                 @toggle [checked true]
@@ -315,7 +315,7 @@
 
       @el [margin-top $--gap-lg]
         @card [title Data Table]
-          @column [spacing 0, margin-top 12]
+          @el [spacing 0, margin-top 12]
             @row [spacing 16, margin-bottom 12, align-items center]
               @input [type=search, placeholder=Filter results..., padding 8 12, border-radius 6, border 1 solid $--border, width 240]
               @el [width fill]
@@ -363,33 +363,33 @@
 
     @footer [padding $--gap-lg 24, background white, dark:background #0f172a, border-top 1 solid $--border, dark:border-top 1 solid #1e293b]
       @row [spacing $--gap-lg, sm:flex-direction column, lg:flex-direction row]
-        @column [spacing 8, width fill]
+        @el [spacing 8, width fill]
           @text [font-weight bold, font-size 14, color $--dark, dark:color white] htmlang Dashboard
           @text [font-size 12, color $--gray] Built with htmlang - a declarative HTML language
           @text [font-size 11, color $--gray] Copyright 2025 htmlang contributors
 
-        @column [spacing 4]
+        @el [spacing 4]
           @text [font-weight bold, font-size 12, color $--gray, text-transform uppercase, margin-bottom 4] Product
           @link [color $--gray, hover:color $--primary, font-size 13] /features Features
           @link [color $--gray, hover:color $--primary, font-size 13] /pricing Pricing
           @link [color $--gray, hover:color $--primary, font-size 13] /changelog Changelog
           @link [color $--gray, hover:color $--primary, font-size 13] /roadmap Roadmap
 
-        @column [spacing 4]
+        @el [spacing 4]
           @text [font-weight bold, font-size 12, color $--gray, text-transform uppercase, margin-bottom 4] Resources
           @link [color $--gray, hover:color $--primary, font-size 13] /docs Documentation
           @link [color $--gray, hover:color $--primary, font-size 13] /api API Reference
           @link [color $--gray, hover:color $--primary, font-size 13] /guides Guides
           @link [color $--gray, hover:color $--primary, font-size 13] /examples Examples
 
-        @column [spacing 4]
+        @el [spacing 4]
           @text [font-weight bold, font-size 12, color $--gray, text-transform uppercase, margin-bottom 4] Company
           @link [color $--gray, hover:color $--primary, font-size 13] /about About
           @link [color $--gray, hover:color $--primary, font-size 13] /blog Blog
           @link [color $--gray, hover:color $--primary, font-size 13] /careers Careers
           @link [color $--gray, hover:color $--primary, font-size 13] /contact Contact
 
-        @column [spacing 4]
+        @el [spacing 4]
           @text [font-weight bold, font-size 12, color $--gray, text-transform uppercase, margin-bottom 4] Legal
           @link [color $--gray, hover:color $--primary, font-size 13] /privacy Privacy Policy
           @link [color $--gray, hover:color $--primary, font-size 13] /terms Terms of Service

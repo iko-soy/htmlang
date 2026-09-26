@@ -5,5 +5,5 @@
     .fade-in { opacity: 0; }
   }
 
-@column [padding 20]
+@el [padding 20]
   @text [opacity 1, transition opacity 0.3s ease] Hello

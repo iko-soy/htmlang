@@ -1,6 +1,6 @@
 @page New CSS Properties 3
 
-@column [spacing 20]
+@el [spacing 20]
   @text [font-weight 600] Semi-bold text
   @text [font-style oblique] Oblique text
   @text [text-wrap balance, font-size 32] A heading that wraps nicely

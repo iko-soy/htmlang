@@ -50,7 +50,7 @@
 
     @pre [background $code-bg, padding 16, border-radius 8, overflow-x auto]
       @page Hello
-      @column [padding 40, spacing 16]
+      @el [padding 40, spacing 16]
         @text [font-weight bold, font-size 32] Hi there
 
     @paragraph [color $ink, line-height 1.7]

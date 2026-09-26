@@ -6,6 +6,6 @@
     to { opacity: 1; }
   }
 
-@column [padding 20]
+@el [padding 20]
   @el [animation fade-in linear, animation-timeline scroll(), animation-range entry 0% cover 50%]
     @text Animated on scroll

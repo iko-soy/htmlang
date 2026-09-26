@@ -2,7 +2,7 @@
 
 -- Empty list triggers @else (variable resolves to empty string)
 @let empty ""
-@column [spacing 10]
+@el [spacing 10]
   @each $item in $empty
     @text $item
   @else
@@ -10,7 +10,7 @@
 
 -- Non-empty list renders loop, not @else
 @let fruits apple, banana
-@column [spacing 10]
+@el [spacing 10]
   @each $fruit in $fruits
     @text $fruit
   @else

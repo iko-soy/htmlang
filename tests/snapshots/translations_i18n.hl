@@ -1,6 +1,6 @@
 @let t.greeting Hello
 @let t.farewell Goodbye
 
-@column [padding 20]
+@el [padding 20]
   @text $t.greeting
   @text $t.farewell

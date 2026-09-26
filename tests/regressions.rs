@@ -158,7 +158,7 @@ fn source_map_uses_real_output_lines() {
 
 #[test]
 fn bracket_in_text_does_not_join_lines() {
-    let out = compile("@column\n  Use [ to open a list\n  @text [font-weight bold] Second\n  @text Third");
+    let out = compile("@el\n  Use [ to open a list\n  @text [font-weight bold] Second\n  @text Third");
     assert!(out.contains("Use [ to open a list"), "{}", out);
     assert!(out.contains(">Second<"), "{}", out);
     assert!(out.contains(">Third<"), "{}", out);
@@ -236,7 +236,7 @@ fn quoted_font_stack_is_one_attribute() {
 
 #[test]
 fn diagnostic_column_includes_indentation() {
-    let result = parser::parse("@let name x\n@column\n    Hello $nmae");
+    let result = parser::parse("@let name x\n@el\n    Hello $nmae");
     let d = result
         .diagnostics
         .iter()

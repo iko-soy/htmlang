@@ -6,12 +6,12 @@
 @let bg-subtle #f8fafc
 
 @let feature $title $body
-  @column [padding 24, background white, border-radius 12, border 1 solid #e2e8f0, spacing 8]
+  @el [padding 24, background white, border-radius 12, border 1 solid #e2e8f0, spacing 8]
     @text [font-weight bold, font-size 18, color $ink] $title
     @paragraph [color $muted, line-height 1.6]
       $body
 
-@column [spacing 0]
+@el [spacing 0]
   -- Hero
   @section [
     padding 80,
@@ -40,7 +40,7 @@
 
   -- Features
   @section [padding 80, padding-inline 24, max-width 1100, center-x, spacing 40]
-    @column [spacing 8, text-align center]
+    @el [spacing 8, text-align center]
       @text [font-weight bold, font-size 32, color $ink] Everything you need
       @text [color $muted] Opinionated where it matters, flexible where it counts.
     @row [wrap, gap 20]

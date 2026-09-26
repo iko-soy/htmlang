@@ -1508,7 +1508,7 @@ const REMOVED_SYNTAX: &[(&str, &str)] = &[
         "@component",
         "use `@let`: an `@style` block in a function body is scoped to it",
     ),
-    ("@col", "use `@column`"),
+    ("@col", "use `@el`"),
     ("@p", "use `@paragraph`"),
     ("@img", "use `@image`"),
     ("@li", "use `@item`"),
@@ -2661,7 +2661,7 @@ fn split_if_args(input: &str) -> Vec<&str> {
 // Post-parse validation (context-dependent warnings)
 // ---------------------------------------------------------------------------
 
-/// Attributes that only make sense on container elements (@row, @column, @el).
+/// Attributes that only make sense on container elements (@row, @el, @el).
 const CONTAINER_ONLY_ATTRS: &[&str] = &[
     "spacing",
     "gap",
@@ -2678,7 +2678,7 @@ fn element_kind_name(kind: &ElementKind) -> String {
 }
 
 fn is_container(kind: &ElementKind) -> bool {
-    matches!(kind, ElementKind::Row | ElementKind::Column | ElementKind::El)
+    matches!(kind, ElementKind::Row | ElementKind::El)
         || kind.spec().is_some_and(|spec| spec.container)
 }
 
@@ -2704,7 +2704,7 @@ pub fn lint(nodes: &[Node]) -> Vec<Diagnostic> {
                     depth
                 ));
             }
-            if matches!(elem.kind, ElementKind::Row | ElementKind::Column | ElementKind::El)
+            if matches!(elem.kind, ElementKind::Row | ElementKind::El)
                 && elem.children.is_empty()
             {
                 warn(format!("empty container (@{}) has no children", elem.kind.name()));
@@ -2745,12 +2745,12 @@ fn validate_tree(
                 }
                 if base == "height"
                     && attr.value.as_deref() == Some("fill")
-                    && !matches!(parent_kind, Some(ElementKind::Column))
+                    && !parent_kind.is_some_and(ElementKind::is_column)
                 {
                     diagnostics.push(Diagnostic {
                         line: elem.line_num,
                         column: None,
-                        message: "'height fill' works best inside @column; using 100% as fallback"
+                        message: "'height fill' works best inside @el; using 100% as fallback"
                             .to_string(),
                         severity: Severity::Warning,
                         source_line: None,
@@ -2763,7 +2763,7 @@ fn validate_tree(
                         line: elem.line_num,
                         column: None,
                         message: format!(
-                            "'{}' has no effect on {} (only works on @row, @column, @el)",
+                            "'{}' has no effect on {} (only works on @row, @el, @el)",
                             base,
                             element_kind_name(&elem.kind)
                         ),

@@ -5,6 +5,6 @@
   Select this text to see custom selection colors.
 
 -- Multiple elements with selection
-@column [spacing 16]
+@el [spacing 16]
   @text [selection:background #ef4444, selection:color white] Red selection
   @text [selection:background #22c55e, selection:color black] Green selection

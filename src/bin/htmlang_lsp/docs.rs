@@ -34,8 +34,7 @@ const fn doc(name: &'static str, summary: &'static str, usage: &'static str) -> 
 /// from their row in `TAGS`.
 pub(crate) const ELEMENTS: &[Doc] = &[
     doc("row", "Horizontal layout: a flex row.", "@row [spacing 10]\n  @text A\n  @text B"),
-    doc("column", "Vertical layout: a flex column.", "@column [spacing 10]\n  @text A\n  @text B"),
-    doc("el", "Generic container (a flex column).", "@el [padding 20, background white]\n  Content"),
+    doc("el", "The container: a flex column (only `@row` lays out horizontally).", "@el [padding 20, background white]\n  Content"),
     doc("text", "Styled inline text (`<span>`).", "@text [font-weight bold, font-size 24] Hello"),
     doc(
         "paragraph",

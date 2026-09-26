@@ -1,4 +1,4 @@
-@column [spacing 20]
+@el [spacing 20]
   @el [display none]
     Hidden
   @el [visibility hidden]

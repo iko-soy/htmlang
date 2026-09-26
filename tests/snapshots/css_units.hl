@@ -1,5 +1,5 @@
 @page CSS Units
-@column [padding 2rem, spacing 1.5em]
+@el [padding 2rem, spacing 1.5em]
   @el [width 50%, height 100vh, max-width 80ch]
     @text [font-size 1.2rem] Hello
   @el [padding 10 2rem, border-radius 0.5rem]

@@ -1,7 +1,7 @@
 @page Each Step
 
 -- Basic step
-@column [spacing 4]
+@el [spacing 4]
   @each $i in 0..20 step 5
     @text Value: $i
 
@@ -12,6 +12,6 @@
       @text [color white, font-size 12] $n
 
 -- Reverse range with step
-@column [spacing 4]
+@el [spacing 4]
   @each $i in 10..1 step 2
     @text Countdown: $i

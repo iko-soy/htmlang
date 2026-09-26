@@ -972,7 +972,7 @@ fn generate_node(
         Node::Text(segments) => {
             let needs_wrap = matches!(
                 parent_kind,
-                Some(ElementKind::Row | ElementKind::Column | ElementKind::El)
+                Some(ElementKind::Row | ElementKind::El)
             ) || parent_kind
                 .and_then(ElementKind::spec)
                 .is_some_and(|spec| spec.wraps_text);
@@ -1144,7 +1144,7 @@ fn generate_element(
     }
 
     let tag = match &elem.kind {
-        ElementKind::Row | ElementKind::Column | ElementKind::El => "div",
+        ElementKind::Row | ElementKind::El => "div",
         ElementKind::Text => "span",
         ElementKind::Paragraph => "p",
         ElementKind::Link => "a",
@@ -1698,7 +1698,7 @@ fn attrs_to_css(
         }
         match kind {
             ElementKind::Row => css.push_str("display:flex;flex-direction:row;"),
-            ElementKind::Column | ElementKind::El => css.push_str(FLEX_COLUMN),
+            ElementKind::El => css.push_str(FLEX_COLUMN),
             ElementKind::Paragraph => css.push_str("margin:0;"),
             ElementKind::Tag(spec) => css.push_str(spec.css),
             _ => {}
@@ -1777,7 +1777,7 @@ fn attrs_to_css(
                 if let Some(v) = val {
                     match v {
                         "fill" => match parent_kind {
-                            Some(ElementKind::Column) => {
+                            Some(parent) if parent.is_column() => {
                                 push_css(&mut css, "flex", "1");
                                 push_css(&mut css, "min-height", "0");
                             }
@@ -1811,7 +1811,7 @@ fn attrs_to_css(
 
             // Alignment
             "center-x" => match parent_kind {
-                Some(ElementKind::Column) | Some(ElementKind::El) => {
+                Some(parent) if parent.is_column() => {
                     push_css(&mut css, "align-self", "center");
                 }
                 _ => {
@@ -1827,13 +1827,13 @@ fn attrs_to_css(
                 }
             },
             "align-left" => match parent_kind {
-                Some(ElementKind::Column) | Some(ElementKind::El) => {
+                Some(parent) if parent.is_column() => {
                     push_css(&mut css, "align-self", "flex-start");
                 }
                 _ => push_css(&mut css, "margin-right", "auto"),
             },
             "align-right" => match parent_kind {
-                Some(ElementKind::Column) | Some(ElementKind::El) => {
+                Some(parent) if parent.is_column() => {
                     push_css(&mut css, "align-self", "flex-end");
                 }
                 _ => push_css(&mut css, "margin-left", "auto"),

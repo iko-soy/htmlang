@@ -12,7 +12,7 @@
 @el [writing-mode vertical-rl]
   @text Vertical text
 
-@column [column-count 3, column-gap 20]
+@el [column-count 3, column-gap 20]
   @text Multi-column layout content here
 
 @paragraph [text-indent 2em]

@@ -61,7 +61,6 @@ pub struct Attribute {
 pub enum ElementKind {
     // Layout and text: the core of the language
     Row,
-    Column,
     El,
     Text,
     Paragraph,
@@ -82,7 +81,6 @@ impl ElementKind {
     pub fn name(&self) -> &str {
         match self {
             ElementKind::Row => "row",
-            ElementKind::Column => "column",
             ElementKind::El => "el",
             ElementKind::Text => "text",
             ElementKind::Paragraph => "paragraph",
@@ -103,6 +101,13 @@ impl ElementKind {
         }
     }
 
+    /// Does this element lay its children out in a flex column (`@el` and
+    /// the semantic containers)?
+    pub fn is_column(&self) -> bool {
+        matches!(self, ElementKind::El)
+            || self.spec().is_some_and(|spec| spec.css.contains("flex-direction:column"))
+    }
+
     /// Is this the table element named `name` (e.g. `"main"`)?
     pub fn is_tag(&self, name: &str) -> bool {
         self.spec().is_some_and(|spec| spec.name == name)
@@ -112,7 +117,6 @@ impl ElementKind {
     pub fn from_name(name: &str) -> Option<ElementKind> {
         Some(match name {
             "row" => ElementKind::Row,
-            "column" => ElementKind::Column,
             "el" => ElementKind::El,
             "text" => ElementKind::Text,
             "paragraph" => ElementKind::Paragraph,
@@ -129,7 +133,7 @@ impl ElementKind {
     /// Every element name, for suggestions and completions.
     pub fn all_names() -> impl Iterator<Item = &'static str> {
         [
-            "row", "column", "el", "text", "paragraph", "link", "image", "script", "fragment",
+            "row", "el", "text", "paragraph", "link", "image", "script", "fragment",
             "children", "slot",
         ]
         .into_iter()

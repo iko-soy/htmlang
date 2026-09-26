@@ -6,5 +6,5 @@
     .body { color: #333; }
   }
 
-@column [padding 20]
+@el [padding 20]
   @text Hello

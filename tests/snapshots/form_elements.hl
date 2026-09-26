@@ -3,7 +3,7 @@
   @button [type=submit] Click me
   @input [type=text, placeholder=Enter name, name=username]
   @input [type=email, required, disabled]
-@column [spacing 5]
+@el [spacing 5]
   @label [for=bio] Biography
   @textarea [name=bio, rows=4] Default text
 @select [name=color]

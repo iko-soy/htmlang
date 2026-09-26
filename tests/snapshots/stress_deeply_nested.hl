@@ -14,17 +14,17 @@
     @text [font-size 13, color #64748b] $label
     @children
 
-@column [spacing 20, padding 24]
+@el [spacing 20, padding 24]
 
   @el [background #f0f9ff, border-radius 12, padding 20, border 1 solid #bae6fd]
     @text [font-weight bold, font-size 20, color #0369a1] Level 1 - App Shell
     @row [spacing 16, margin-top 16]
       @el [background white, border-radius 8, padding 16, border 1 solid $--border, width fill]
         @text [font-weight bold, font-size 16, color #1e293b] Level 2 - Sidebar
-        @column [spacing 8, margin-top 12]
+        @el [spacing 8, margin-top 12]
           @el [background #f1f5f9, border-radius 6, padding 12]
             @text [font-size 14, color #475569] Level 3 - Nav Group
-            @column [spacing 4, margin-top 8]
+            @el [spacing 4, margin-top 8]
               @el [padding 8 12, hover:background #e2e8f0, border-radius 4, transition all 0.15s]
                 @text [font-size 13, color #64748b] Level 4 - Nav Item
                 @row [spacing 6, margin-top 4, align-items center]
@@ -50,14 +50,14 @@
 
           @el [background #f1f5f9, border-radius 6, padding 12]
             @text [font-size 14, color #475569] Level 3 - Second Group
-            @column [spacing 4, margin-top 8]
+            @el [spacing 4, margin-top 8]
               @each $item in Settings,Profile,Security
                 @el [padding 8 12, hover:background #e2e8f0, border-radius 4]
                   @text [font-size 13, color #64748b] $item
 
       @el [background white, border-radius 8, padding 16, border 1 solid $--border, width fill]
         @text [font-weight bold, font-size 16, color #1e293b] Level 2 - Main Content
-        @column [spacing 12, margin-top 12]
+        @el [spacing 12, margin-top 12]
           @deep-card [title Level 3 - Dashboard Card]
             @inner-panel [label Level 4 - Chart Area]
               @row [spacing 8, margin-top 8]
@@ -85,7 +85,7 @@
 
           @deep-card [title Level 3 - Form Card]
             @inner-panel [label Level 4 - Form Section]
-              @column [spacing 8, margin-top 8]
+              @el [spacing 8, margin-top 8]
                 @el [padding 8, border 1 solid $--border, border-radius 4]
                   @text [font-size 12, color #64748b, margin-bottom 4] Level 5 - Field Group
                   @input [type=text, placeholder=Name, padding 6 10, border-radius 4, border 1 solid $--border, width fill]
@@ -105,12 +105,12 @@
 
           @deep-card [title Level 3 - Nested Lists Card]
             @inner-panel [label Level 4 - Category Browser]
-              @column [spacing 6, margin-top 8]
+              @el [spacing 6, margin-top 8]
                 @let top-categories Electronics,Clothing,Books
                 @each $cat in $top-categories
                   @el [padding 8, border 1 solid $--border, border-radius 4, hover:background #f8fafc]
                     @text [font-size 14, font-weight bold, color #1e293b] Level 5 - $cat
-                    @column [spacing 4, margin-top 6, margin-left 12]
+                    @el [spacing 4, margin-top 6, margin-left 12]
                       @el [padding 6, background #f8fafc, border-radius 4]
                         @row [spacing 8, align-items center]
                           @el [width 8, height 8, border-radius 2, background $--primary]
@@ -122,10 +122,10 @@
 
   @el [background #fefce8, border-radius 12, padding 20, border 1 solid #fde68a, margin-top 20]
     @text [font-weight bold, font-size 20, color #854d0e] Level 1 - Settings Panel
-    @column [spacing 12, margin-top 16]
+    @el [spacing 12, margin-top 16]
       @el [background white, border-radius 8, padding 16, border 1 solid $--border]
         @text [font-weight bold, font-size 16, color #1e293b] Level 2 - Account Settings
-        @column [spacing 8, margin-top 12]
+        @el [spacing 8, margin-top 12]
           @el [background #f8fafc, border-radius 6, padding 12]
             @text [font-size 14, color #475569] Level 3 - Profile Section
             @el [margin-top 8, padding 10, border 1 solid $--border, border-radius 6]
@@ -141,7 +141,7 @@
 
           @el [background #f8fafc, border-radius 6, padding 12]
             @text [font-size 14, color #475569] Level 3 - Preferences
-            @column [spacing 6, margin-top 8]
+            @el [spacing 6, margin-top 8]
               @each $pref in Language,Timezone,Currency
                 @row [spacing 8, align-items center, padding 6 8, border 1 solid $--border, border-radius 4]
                   @text [font-size 13, color #1e293b, width fill] Level 4 - $pref
@@ -150,7 +150,7 @@
 
       @el [background white, border-radius 8, padding 16, border 1 solid $--border]
         @text [font-weight bold, font-size 16, color #1e293b] Level 2 - Notification Preferences
-        @column [spacing 6, margin-top 12]
+        @el [spacing 6, margin-top 12]
           @let channels Email,Push,SMS,Slack
           @each $channel in $channels
             @row [spacing 8, align-items center, padding 8, border-bottom 1 solid $--border]

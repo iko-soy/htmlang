@@ -3,7 +3,7 @@
 @let --spacing 20
 @let --radius 8
 
-@column [spacing $--spacing]
+@el [spacing $--spacing]
   @el [background var(--primary), border-radius $--radius, padding $--spacing]
     @text [color white] Using CSS vars
   @el [border 1 solid var(--primary), border-radius $--radius, padding $--spacing]

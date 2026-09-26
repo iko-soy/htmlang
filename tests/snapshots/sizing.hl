@@ -3,6 +3,6 @@
   @el [width fill, background #eee] Fill width
   @el [width 100, background #ddd] Fixed 100
   @el [width shrink, background #ccc] Shrink
-@column [width 400]
+@el [width 400]
   @el [height fill, background #eee] Fill height
   @el [height 50, background #ddd] Fixed 50

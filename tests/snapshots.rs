@@ -309,7 +309,7 @@ fn error_opacity_range() {
 
 #[test]
 fn warning_fill_outside_row() {
-    let diags = parse_diagnostics("@column\n  @el [width fill]");
+    let diags = parse_diagnostics("@el\n  @el [width fill]");
     assert!(
         diags
             .iter()
@@ -730,7 +730,7 @@ fn removed_aliases_point_to_upgrade() {
     for (src, replacement) in [
         ("@li Works", "@item"),
         ("@divider", "@hr"),
-        ("@el > @col x", "@column"),
+        ("@el > @col x", "@el"),
         ("Say {@img a.png}", "@image"),
     ] {
         let diags = parse_diagnostics(src);
@@ -1135,11 +1135,11 @@ fn warning_controls_on_non_media() {
 
 #[test]
 fn fmt_normalizes_indentation() {
-    let input = "@row\n      @column\n            @text hello\n      @column\n            @text world";
+    let input = "@row\n      @el\n            @text hello\n      @el\n            @text world";
     let formatted = htmlang::fmt::format(input);
     assert_eq!(
         formatted,
-        "@row\n  @column\n    @text hello\n  @column\n    @text world\n"
+        "@row\n  @el\n    @text hello\n  @el\n    @text world\n"
     );
 }
 
@@ -1621,7 +1621,7 @@ fn even_generates_pseudo() {
 
 #[test]
 fn fragment_no_wrapper() {
-    let output = compile("@page T\n@column\n  @fragment\n    @text A\n    @text B");
+    let output = compile("@page T\n@el\n  @fragment\n    @text A\n    @text B");
     // Fragment should NOT add any div wrapper
     assert!(!output.contains("<div class=\"_1\"><span"));
     // But children should still be present
@@ -1946,13 +1946,13 @@ fn css_writing_mode() {
 
 #[test]
 fn css_column_count() {
-    let output = compile("@page T\n@column [column-count 3]");
+    let output = compile("@page T\n@el [column-count 3]");
     assert!(output.contains("column-count:3"));
 }
 
 #[test]
 fn css_column_gap() {
-    let output = compile("@page T\n@column [column-gap 20]");
+    let output = compile("@page T\n@el [column-gap 20]");
     assert!(output.contains("column-gap:20px"));
 }
 
@@ -3323,7 +3323,7 @@ fn output_contains_layer_wrapping() {
 #[test]
 fn fn_named_slots() {
     let output = compile(
-        "@let layout\n  @column\n    @slot header\n      Default Header\n    @slot content\n@layout\n  @slot header\n    Custom Header\n  @slot content\n    Page body",
+        "@let layout\n  @el\n    @slot header\n      Default Header\n    @slot content\n@layout\n  @slot header\n    Custom Header\n  @slot content\n    Page body",
     );
     assert!(
         output.contains("Custom Header"),
@@ -3345,7 +3345,7 @@ fn fn_named_slots() {
 #[test]
 fn fn_named_slot_default() {
     let output = compile(
-        "@let layout\n  @column\n    @slot header\n      Default Header\n    @slot content\n@layout\n  @slot content\n    Only content",
+        "@let layout\n  @el\n    @slot header\n      Default Header\n    @slot content\n@layout\n  @slot content\n    Only content",
     );
     assert!(
         output.contains("Default Header"),
@@ -3848,7 +3848,7 @@ fn switch_with_attrs() {
 
 #[test]
 fn minified_output_is_smaller() {
-    let input = "@page Test\n@column [padding 20]\n  @text [font-weight bold] Hello World\n  @paragraph\n    Some text here\n";
+    let input = "@page Test\n@el [padding 20]\n  @text [font-weight bold] Hello World\n  @paragraph\n    Some text here\n";
     let result = htmlang::parser::parse(input);
     let normal = htmlang::codegen::generate(&result.document);
     let minified = htmlang::codegen::generate_minified(&result.document);
@@ -3863,7 +3863,7 @@ fn minified_output_is_smaller() {
 
 #[test]
 fn minified_strips_comments() {
-    let input = "@page Test\n@column\n  @text Hello\n";
+    let input = "@page Test\n@el\n  @text Hello\n";
     let result = htmlang::parser::parse(input);
     let dev = htmlang::codegen::generate_dev(&result.document);
     let minified = htmlang::codegen::generate_minified(&result.document);

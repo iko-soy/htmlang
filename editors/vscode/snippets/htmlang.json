@@ -5,7 +5,7 @@
       "@page ${1:My Page}",
       "@let primary ${2:#3b82f6}",
       "",
-      "@column [max-width ${3:800}, center-x, padding ${4:40}, spacing ${5:20}]",
+      "@el [max-width ${3:800}, center-x, padding ${4:40}, spacing ${5:20}]",
       "  $0"
     ],
     "description": "Page boilerplate with title, variables, and layout"
@@ -27,7 +27,7 @@
     "prefix": "@let-slots",
     "body": [
       "@let ${1:layout} \\$${2:title}",
-      "  @column [${3:max-width 800, center-x, padding 40}]",
+      "  @el [${3:max-width 800, center-x, padding 40}]",
       "    @slot ${4:header}",
       "      @text [font-weight bold, font-size 32] \\$$2",
       "    @slot ${5:content}",
@@ -145,7 +145,7 @@
   "Hero section": {
     "prefix": "@hero",
     "body": [
-      "@column [center-x, center-y, min-height ${1:80vh}, padding ${2:40}, spacing ${3:20}]",
+      "@el [center-x, center-y, min-height ${1:80vh}, padding ${2:40}, spacing ${3:20}]",
       "  @text [font-weight bold, font-size ${4:48}, text-align center] ${5:Hero Title}",
       "  @paragraph [max-width ${6:600}, text-align center, color ${7:#666}, line-height 1.6]",
       "    ${8:Hero description text}",

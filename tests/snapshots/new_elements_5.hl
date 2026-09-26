@@ -1,6 +1,6 @@
 @page New Elements 5
 
-@column [spacing 20]
+@el [spacing 20]
   -- Avatar
   @avatar [width 48, height 48, background #e5e7eb]
     @text AB

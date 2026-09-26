@@ -62,7 +62,7 @@
     @children
 
 -- Top-level layout
-@column [
+@el [
   max-width 960,
   center-x,
   padding 32,
@@ -83,7 +83,7 @@
         @text [color $ink] htmlang
 
     @row [spacing $gap, align-items center]
-      @column [width fill, spacing 6]
+      @el [width fill, spacing 6]
         @text [font-weight bold, font-size 40, color $ink, dark:color white] Welcome to htmlang
         @paragraph [line-height 1.6, color $muted]
           A minimalist layout language that compiles to
@@ -134,7 +134,7 @@
 
   -- Control flow: @each, @else, @match, if()
   @titled [title Control flow]
-    @column [spacing 6]
+    @el [spacing 6]
       @data $team [
         {"name": "Alice", "role": "Engineer"},
         {"name": "Bob", "role": "Designer"},
@@ -242,7 +242,7 @@
   -- Lists and tables
   @titled [title Data]
     @row [gap $gap, wrap]
-      @column [width fill, spacing $base, min-width 240]
+      @el [width fill, spacing $base, min-width 240]
         @text [font-weight bold] Unordered
         @list [spacing 4, list-style disc, padding-inline-start 20]
           @item [display list-item] Composable with @each
@@ -254,7 +254,7 @@
           @item [display list-item] Second
           @item [display list-item] Third
 
-      @column [width fill, spacing $base, min-width 240]
+      @el [width fill, spacing $base, min-width 240]
         @text [font-weight bold] Table
         @table
           @thead
