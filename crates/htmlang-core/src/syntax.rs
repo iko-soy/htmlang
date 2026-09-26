@@ -459,6 +459,19 @@ impl Tree {
         out
     }
 
+    /// The names visible at `line` (1-based), by the lexical rule the
+    /// compiler follows: a definition (`@let`, `@data`) is visible from the
+    /// line after it to the end of its block; an `@each` line's variables
+    /// in its body; a function's parameters (and the function itself) in
+    /// its body, which also sees what is visible where the function is
+    /// defined. In the order they are defined, so a later one with the same
+    /// name hides an earlier one.
+    pub fn visible_at(&self, line: usize) -> Vec<Visible<'_>> {
+        let mut out = Vec::new();
+        visible_in(&self.nodes, line, &mut out);
+        out
+    }
+
     /// The innermost node whose own lines include `line` (1-based).
     pub fn node_at_line(&self, line: usize) -> Option<&Node> {
         let mut found = None;
@@ -494,6 +507,82 @@ pub struct Definition<'a> {
     pub value: Option<String>,
     /// The `@let` line, with the function's body as its children.
     pub node: &'a Node,
+}
+
+/// A name visible at a line (see [`Tree::visible_at`]).
+#[derive(Clone, Debug)]
+pub struct Visible<'a> {
+    pub name: &'a str,
+    pub kind: VisibleKind,
+    /// Where the name is written in its definition (for a loop variable,
+    /// the `@each` line).
+    pub span: Span,
+}
+
+/// What defines a visible name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VisibleKind {
+    /// A `@let`, of this kind.
+    Let(DefinitionKind),
+    /// A function's parameter, in its body.
+    Parameter,
+    /// An `@each` variable, in its body.
+    Loop,
+    /// `@data $name`.
+    Data,
+}
+
+fn visible_in<'a>(block: &'a [Node], line: usize, out: &mut Vec<Visible<'a>>) {
+    for node in block {
+        if node.span.line >= line {
+            break;
+        }
+        let inside = line <= node.end_line();
+        match node.directive().map(|d| &d.args) {
+            Some(DirectiveArgs::Let(def)) => {
+                let kind = match &def.form {
+                    LetForm::Function(_) => DefinitionKind::Function,
+                    LetForm::Bundle(_) => DefinitionKind::Bundle,
+                    _ => DefinitionKind::Value,
+                };
+                // `@let t.greeting` gives the record `t` a field
+                let name = def.name.split('.').next().unwrap_or(&def.name);
+                out.push(Visible {
+                    name,
+                    kind: VisibleKind::Let(kind),
+                    span: def.name_span,
+                });
+                if let (true, LetForm::Function(function)) = (inside, &def.form) {
+                    out.extend(function.params.iter().map(|p| Visible {
+                        name: &p.name,
+                        kind: VisibleKind::Parameter,
+                        span: p.name_span,
+                    }));
+                }
+            }
+            Some(DirectiveArgs::Data {
+                name, name_span, ..
+            }) => out.push(Visible {
+                name,
+                kind: VisibleKind::Data,
+                span: *name_span,
+            }),
+            Some(DirectiveArgs::Each(each)) if inside => {
+                for name in std::iter::once(&each.item).chain(&each.index) {
+                    out.push(Visible {
+                        name,
+                        kind: VisibleKind::Loop,
+                        span: node.span,
+                    });
+                }
+            }
+            _ => {}
+        }
+        if inside {
+            visible_in(&node.children, line, out);
+            return;
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1069,6 +1158,40 @@ pub fn unescape(s: &str) -> String {
     out
 }
 
+/// The parts of `text` between the commas that aren't escaped (`\,`) or
+/// inside `(...)`, `[...]`, `{...}` (so `${...}` too) or `"..."`: the items
+/// of a list written in the source, or the attributes of a list.
+pub fn split_list(text: &str) -> Vec<std::ops::Range<usize>> {
+    let mut parts = Vec::new();
+    let mut from = 0;
+    let mut depth = 0i32;
+    let mut quoted = false;
+    let mut i = 0;
+    while i < text.len() {
+        let rest = &text[i..];
+        let escape = escape_len(rest);
+        if escape > 0 {
+            i += escape;
+            continue;
+        }
+        let Some(c) = rest.chars().next() else { break };
+        match c {
+            '"' => quoted = !quoted,
+            _ if quoted => {}
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            ',' if depth <= 0 => {
+                parts.push(from..i);
+                from = i + 1;
+            }
+            _ => {}
+        }
+        i += c.len_utf8();
+    }
+    parts.push(from..text.len());
+    parts
+}
+
 /// The text between the quotes when `s` is one quoted string, `"..."`, and
 /// nothing else: `\"` inside it is not its end.
 pub fn quoted_string(s: &str) -> Option<&str> {
@@ -1257,34 +1380,10 @@ impl Reader<'_> {
     /// Ranges between the commas that aren't escaped (`\,`) or inside
     /// `(...)`, `[...]`, `{...}` or `"..."`.
     fn split_commas(&self, start: usize, end: usize) -> Vec<(usize, usize)> {
-        let mut parts = Vec::new();
-        let mut from = start;
-        let mut depth = 0i32;
-        let mut quoted = false;
-        let mut i = start;
-        while i < end {
-            let rest = &self.text[i..end];
-            let escape = escape_len(rest);
-            if escape > 0 {
-                i += escape;
-                continue;
-            }
-            let Some(c) = rest.chars().next() else { break };
-            match c {
-                '"' => quoted = !quoted,
-                _ if quoted => {}
-                '(' | '[' | '{' => depth += 1,
-                ')' | ']' | '}' => depth -= 1,
-                ',' if depth <= 0 => {
-                    parts.push((from, i));
-                    from = i + 1;
-                }
-                _ => {}
-            }
-            i += c.len_utf8();
-        }
-        parts.push((from, end));
-        parts
+        split_list(&self.text[start..end])
+            .into_iter()
+            .map(|part| (start + part.start, start + part.end))
+            .collect()
     }
 
     fn attr(&self, start: usize, end: usize) -> Option<Attr> {
@@ -2072,6 +2171,27 @@ mod tests {
         assert_eq!(defs[0].kind, DefinitionKind::Function);
         assert_eq!(defs[0].params[1].default.as_deref(), Some("x"));
         assert!(tree.diagnostics.is_empty(), "{:?}", tree.diagnostics);
+    }
+
+    #[test]
+    fn names_are_visible_to_the_end_of_their_block() {
+        let tree = parse(
+            "@let a 1\n@let @card [title]\n  @let inner 2\n  @el $title\n@if $a\n  @let b [padding 4]\n  @el x\n@each $x, $i in 1, 2\n  @text $x\n@data $d {}\n@let t.greeting hi\n@el end\n",
+        );
+        let names = |line| {
+            tree.visible_at(line)
+                .iter()
+                .map(|v| v.name.to_string())
+                .collect::<Vec<_>>()
+        };
+        // In a function's body: its parameters, itself, and what is above it
+        assert_eq!(names(4), ["a", "card", "title", "inner"]);
+        assert_eq!(names(7), ["a", "card", "b"]);
+        assert_eq!(names(9), ["a", "card", "x", "i"]);
+        assert_eq!(names(12), ["a", "card", "d", "t"]);
+        assert_eq!(names(1), Vec::<String>::new());
+        let kinds: Vec<VisibleKind> = tree.visible_at(9).iter().map(|v| v.kind).collect();
+        assert_eq!(kinds[2], VisibleKind::Loop);
     }
 
     #[test]

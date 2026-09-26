@@ -1,5 +1,5 @@
 use htmlang::ast::ElementKind;
-use htmlang::syntax::DefinitionKind;
+use htmlang::syntax::{DefinitionKind, VisibleKind};
 use htmlang::vocab;
 use tower_lsp::lsp_types::*;
 
@@ -990,10 +990,18 @@ fn color_value_completions(before: &str, range: Range) -> Option<Vec<CompletionI
     Some(items)
 }
 
+/// The `$names` visible where the cursor is (see
+/// `htmlang::syntax::Tree::visible_at`): definitions above it in its
+/// block and the blocks around it, the variables of the `@each` and the
+/// parameters of the function it is in, and the standard library's
+/// bundles.
 fn variable_completions(text: &str, range: Range) -> Vec<CompletionItem> {
     let mut items = Vec::new();
+    let tree = htmlang::syntax::parse(text);
+    let visible = tree.visible_at(range.start.line as usize + 1);
+    let hidden = |name: &str| visible.iter().any(|v| v.name == name);
 
-    for doc in docs::BUNDLES {
+    for doc in docs::BUNDLES.iter().filter(|doc| !hidden(doc.name)) {
         let label = format!("${}", doc.name);
         let detail = format!("{} (standard-library bundle)", doc.summary);
         items.push(item(
@@ -1005,31 +1013,36 @@ fn variable_completions(text: &str, range: Range) -> Vec<CompletionItem> {
         ));
     }
 
-    for def in crate::tree::definitions(text) {
-        let label = format!("${}", def.name);
-        match def.kind {
-            DefinitionKind::Bundle => {
-                items.push(item(
-                    &label,
-                    CompletionItemKind::CONSTANT,
-                    "Attribute bundle",
-                    &label,
-                    range,
-                ));
-            }
-            DefinitionKind::Value => {
-                let value = def.value.unwrap_or_default();
-                let detail = format!("= {}", value.trim_start_matches("= "));
-                items.push(item(
-                    &label,
-                    CompletionItemKind::VARIABLE,
-                    &detail,
-                    &label,
-                    range,
-                ));
-            }
-            DefinitionKind::Function => {}
+    // What each `@let` says, by where its name is written
+    let defs = crate::tree::definitions(text);
+    let mut seen = std::collections::HashSet::new();
+    // The innermost of each name
+    for name in visible.iter().rev() {
+        if !seen.insert(name.name) {
+            continue;
         }
+        let label = format!("${}", name.name);
+        let (kind, detail) = match name.kind {
+            VisibleKind::Let(DefinitionKind::Function) => continue,
+            VisibleKind::Let(DefinitionKind::Bundle) => {
+                (CompletionItemKind::CONSTANT, "Attribute bundle".to_string())
+            }
+            VisibleKind::Let(DefinitionKind::Value) => {
+                let value = defs
+                    .iter()
+                    .find(|d| d.name_range == crate::tree::range(name.span))
+                    .and_then(|d| d.value.clone())
+                    .unwrap_or_default();
+                (
+                    CompletionItemKind::VARIABLE,
+                    format!("= {}", value.trim_start_matches("= ")),
+                )
+            }
+            VisibleKind::Parameter => (CompletionItemKind::VARIABLE, "Parameter".to_string()),
+            VisibleKind::Loop => (CompletionItemKind::VARIABLE, "@each variable".to_string()),
+            VisibleKind::Data => (CompletionItemKind::VARIABLE, "@data".to_string()),
+        };
+        items.push(item(&label, kind, &detail, &label, range));
     }
 
     items
@@ -1374,6 +1387,39 @@ mod tests {
         assert!(labels.iter().any(|l| l == "@key"), "{:?}", labels);
         assert!(labels.iter().any(|l| l == "@kbd"), "{:?}", labels);
         assert!(!labels.iter().any(|l| l == "@each"), "{:?}", labels);
+    }
+
+    #[test]
+    fn variables_offered_are_those_visible_at_the_cursor() {
+        let text = "@let a 1\n@let @card [title]\n  @let inner 2\n  @text $\n@each $x in 1, 2\n  @text $\n@text $\n@let later 3\n";
+        let labels = |line| -> Vec<String> {
+            completions(text, pos(line, 9))
+                .into_iter()
+                .map(|c| c.label)
+                .collect()
+        };
+        let body = labels(3);
+        for name in ["$a", "$title", "$inner", "$truncate"] {
+            assert!(body.iter().any(|l| l == name), "{}: {:?}", name, body);
+        }
+        assert!(
+            !body.iter().any(|l| l == "$later" || l == "$x"),
+            "{:?}",
+            body
+        );
+        let each = labels(5);
+        assert!(each.iter().any(|l| l == "$x"), "{:?}", each);
+        assert!(
+            !each.iter().any(|l| l == "$inner" || l == "$title"),
+            "{:?}",
+            each
+        );
+        let after = labels(6);
+        assert!(
+            !after.iter().any(|l| l == "$x" || l == "$later"),
+            "{:?}",
+            after
+        );
     }
 
     #[test]

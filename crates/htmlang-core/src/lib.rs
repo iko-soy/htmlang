@@ -5,6 +5,7 @@ pub mod expr;
 pub mod interp;
 pub mod parser;
 pub mod syntax;
+pub mod value;
 pub mod vocab;
 
 #[cfg(test)]

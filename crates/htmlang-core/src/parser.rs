@@ -7,6 +7,7 @@ use crate::diagnostic::code;
 pub use crate::diagnostic::{Diagnostic, Severity};
 use crate::interp::{self, Sink};
 use crate::syntax::{self, DirectiveArgs, LetForm, NodeKind, Segment, Tree};
+use crate::value::{self, Value};
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -43,6 +44,11 @@ struct FnDef {
     slots: Vec<String>,
     /// Whether its body has a `@children` for the content of a call.
     has_children: bool,
+    /// Whether its body starts with a scoped `@style`.
+    scoped: bool,
+    /// What was visible where it was defined: its body and its defaults
+    /// see this, plus its parameters.
+    env: Env,
 }
 
 impl FnDef {
@@ -51,28 +57,122 @@ impl FnDef {
     }
 }
 
-/// A saved namespace; see `ParseContext::save_scope`.
-struct Scope {
-    variables: HashMap<String, String>,
-    defines: HashMap<String, Vec<Attribute>>,
-    functions: HashMap<String, Rc<FnDef>>,
-    scoped_functions: HashSet<String>,
+/// What a name means: every `@let`, parameter, loop variable and `@data`
+/// binds one, and they share one namespace.
+#[derive(Clone)]
+enum Binding {
+    Value(Value),
+    Bundle(Rc<Vec<Attribute>>),
+    Function(Rc<FnDef>),
+}
+
+/// The names visible at a line: one frame per block it is in (the
+/// standard library, the file, an element's children, an `@if` branch, an
+/// iteration of `@each`, a function's body), the innermost last. A
+/// definition goes into the innermost frame, so it is visible from its
+/// line to the end of its block. A function keeps the frames visible
+/// where it is defined; a frame is shared until one side changes it.
+#[derive(Clone, Default)]
+struct Env {
+    frames: Vec<Rc<HashMap<String, Binding>>>,
+}
+
+impl Env {
+    fn push(&mut self) {
+        self.frames.push(Rc::default());
+    }
+
+    fn pop(&mut self) {
+        self.frames.pop();
+    }
+
+    /// Give `name` a meaning in the innermost frame, replacing what it
+    /// meant there and hiding what it means outside it.
+    fn define(&mut self, name: &str, binding: Binding) {
+        if self.frames.is_empty() {
+            self.push();
+        }
+        if let Some(frame) = self.frames.last_mut() {
+            Rc::make_mut(frame).insert(name.to_string(), binding);
+        }
+    }
+
+    /// What `name` means here: the innermost definition.
+    fn get(&self, name: &str) -> Option<&Binding> {
+        self.frames.iter().rev().find_map(|frame| frame.get(name))
+    }
+
+    fn value(&self, name: &str) -> Option<&Value> {
+        match self.get(name)? {
+            Binding::Value(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    fn bundle(&self, name: &str) -> Option<&Rc<Vec<Attribute>>> {
+        match self.get(name)? {
+            Binding::Bundle(attrs) => Some(attrs),
+            _ => None,
+        }
+    }
+
+    fn function(&self, name: &str) -> Option<&Rc<FnDef>> {
+        match self.get(name)? {
+            Binding::Function(function) => Some(function),
+            _ => None,
+        }
+    }
+
+    /// Every name visible here, with what it means.
+    fn visible(&self) -> HashMap<&str, &Binding> {
+        let mut names = HashMap::new();
+        for frame in &self.frames {
+            for (name, binding) in frame.iter() {
+                names.insert(name.as_str(), binding);
+            }
+        }
+        names
+    }
+
+    /// The names of the values visible here.
+    fn value_names(&self) -> Vec<&str> {
+        self.visible()
+            .into_iter()
+            .filter(|(_, binding)| matches!(binding, Binding::Value(_)))
+            .map(|(name, _)| name)
+            .collect()
+    }
+
+    /// The names of the bundles visible here.
+    fn bundle_names(&self) -> Vec<&str> {
+        self.visible()
+            .into_iter()
+            .filter(|(_, binding)| matches!(binding, Binding::Bundle(_)))
+            .map(|(name, _)| name)
+            .collect()
+    }
+}
+
+impl interp::Scope for Env {
+    fn get(&self, name: &str) -> Option<Value> {
+        self.value(name).cloned()
+    }
 }
 
 struct ParseContext {
     /// Source line currently being parsed, for diagnostics raised deep
     /// inside helpers that don't take a line number.
     current_line: usize,
-    /// Functions whose body has a scoped @style block.
-    scoped_functions: std::collections::HashSet<String>,
     page_title: Option<String>,
     lang: Option<String>,
     favicon: Option<String>,
     meta_tags: Vec<(String, String)>,
     head_blocks: Vec<String>,
-    variables: HashMap<String, String>,
-    defines: HashMap<String, Vec<Attribute>>,
-    functions: HashMap<String, Rc<FnDef>>,
+    /// What each name means at the line being evaluated.
+    env: Env,
+    /// Every function whose definition ran, by name (the last one), for
+    /// the checks of code that never runs.
+    defined_functions: HashMap<String, Rc<FnDef>>,
     css_vars: Vec<(String, String)>,
     custom_css: Vec<String>,
     og_tags: Vec<(String, String)>,
@@ -134,117 +234,13 @@ struct ParseContext {
 /// itself without an `@if` that stops it is an error instead of a hang.
 const MAX_CALL_DEPTH: usize = 64;
 
-/// The variables in scope, for interpolation and expressions.
-struct Vars<'a>(&'a HashMap<String, String>);
-
-impl interp::Scope for Vars<'_> {
-    fn defined(&self, path: &str) -> bool {
-        self.0.contains_key(path) || self.0.contains_key(&format!("{}#", path))
-    }
-
-    fn value(&self, path: &str) -> Option<crate::expr::Value> {
-        lookup(self.0, path)
-    }
-
-    fn has_fields(&self, path: &str) -> bool {
-        self.0.contains_key(&format!("{}#", path))
-            || self.0.keys().any(|key| {
-                key.strip_prefix(path)
-                    .is_some_and(|rest| rest.starts_with('.'))
-            })
-    }
-
-    fn quoted(&self, path: &str) -> Option<String> {
-        self.0.get(&quoted_key(path)).cloned()
-    }
-}
-
-/// Where the variables keep the CSS form of a quoted value `name`: under
-/// `name"`, next to `name` (what it says), as a list keeps its length
-/// under `name#`.
-fn quoted_key(name: &str) -> String {
-    format!("{}\"", name)
-}
-
-/// Give the variable `name` a value, quoted text or not.
-fn assign(vars: &mut HashMap<String, String>, name: &str, value: String, quoted: Option<&Quoted>) {
-    match quoted {
-        Some(quoted) => {
-            vars.insert(quoted_key(name), quoted.css.clone());
-            vars.insert(name.to_string(), quoted.text.clone());
-        }
-        None => {
-            vars.remove(&quoted_key(name));
-            vars.insert(name.to_string(), value);
-        }
-    }
-}
-
 /// Evaluates a syntax tree (see `syntax.rs`) into the document's nodes.
 struct Evaluator;
 
 impl ParseContext {
-    /// Forget what `name` means (a value, a bundle or a function), before a
-    /// `@let` gives it a new meaning.
-    fn forget(&mut self, name: &str) {
-        for key in [name.to_string(), quoted_key(name), format!("{}#", name)] {
-            self.variables.remove(&key);
-        }
-        self.defines.remove(name);
-        self.functions.remove(name);
-        self.scoped_functions.remove(name);
-    }
-
-    /// What the `@let`s so far define, to restore when a scope ends (an
-    /// `@if` branch, an `@each` body, a function call).
-    fn save_scope(&self) -> Scope {
-        Scope {
-            variables: self.variables.clone(),
-            defines: self.defines.clone(),
-            functions: self.functions.clone(),
-            scoped_functions: self.scoped_functions.clone(),
-        }
-    }
-
-    /// End a scope: its values end with it, while bundles and functions
-    /// defined inside it stay defined after it. Since a name has one
-    /// meaning, a bundle or function that a value inside the scope replaced
-    /// comes back, and a value that a bundle or function defined inside the
-    /// scope replaced stays gone.
-    fn restore_scope(&mut self, saved: Scope) {
-        self.variables = saved.variables;
-        let taken = |ctx: &Self, name: &str| {
-            ctx.defines.contains_key(name) || ctx.functions.contains_key(name)
-        };
-        let new: Vec<String> = self
-            .defines
-            .keys()
-            .filter(|name| !saved.defines.contains_key(*name))
-            .chain(
-                self.functions
-                    .keys()
-                    .filter(|name| !saved.functions.contains_key(*name)),
-            )
-            .cloned()
-            .collect();
-        for (name, attrs) in saved.defines {
-            if !taken(self, &name) {
-                self.defines.insert(name, attrs);
-            }
-        }
-        for (name, function) in saved.functions {
-            if !taken(self, &name) {
-                if saved.scoped_functions.contains(&name) {
-                    self.scoped_functions.insert(name.clone());
-                }
-                self.functions.insert(name, function);
-            }
-        }
-        for name in new {
-            for key in [name.clone(), quoted_key(&name), format!("{}#", name)] {
-                self.variables.remove(&key);
-            }
-        }
+    /// Bind a value to `name` in the innermost block.
+    fn bind(&mut self, name: &str, value: Value) {
+        self.env.define(name, Binding::Value(value));
     }
 
     /// Evaluate an expression (see `expr.rs`) written at `line` and
@@ -256,7 +252,7 @@ impl ParseContext {
         column: Option<usize>,
     ) -> Option<crate::expr::Value> {
         track_var_refs(src, &mut self.used_variables);
-        match crate::expr::eval(src, &Vars(&self.variables)) {
+        match crate::expr::eval(src, &self.env) {
             Ok(value) => Some(value),
             Err(error) => {
                 // Without the line to point into, show the expression
@@ -315,7 +311,7 @@ impl ParseContext {
             return (protected, true);
         }
         track_var_refs(&protected, &mut self.used_variables);
-        let (out, problems) = interp::interpolate_for(&protected, &Vars(&self.variables), sink);
+        let (out, problems) = interp::interpolate_for(&protected, &self.env, sink);
         let filled = problems.is_empty();
         for mut problem in problems {
             match &mut problem {
@@ -347,7 +343,7 @@ impl ParseContext {
         if let Some(inner) = syntax::quoted_string(raw) {
             let (css, ok) = self.fill(raw, line, column, Sink::Css);
             // Already reported by the CSS pass, so filled in quietly
-            let (text, _) = interp::interpolate(&protect_escapes(inner), &Vars(&self.variables));
+            let (text, _) = interp::interpolate(&protect_escapes(inner), &self.env);
             let quoted = Quoted {
                 text: restore_escapes(&text),
                 css,
@@ -359,12 +355,140 @@ impl ParseContext {
             return (out, Some(quoted), ok);
         }
         let (out, ok) = self.fill(raw, line, column, sink);
-        let quoted = whole_reference(raw, &self.variables).and_then(|path| {
-            let css = interp::Scope::quoted(&Vars(&self.variables), &path)?;
-            let text = self.variables.get(&path)?.clone();
-            Some(Quoted { text, css })
+        let quoted = whole_reference(raw, &self.env).and_then(|path| {
+            match interp::resolve(&path, &self.env)? {
+                Value::Quoted(quoted) => Some(quoted),
+                _ => None,
+            }
         });
         (out, quoted, ok)
+    }
+
+    /// The value of a value slot (a `@let` value, the source of `@each`, a
+    /// parameter's value or default), written at `line` and `column`:
+    ///
+    /// - exactly one `$name` or `${...}` is the value it holds or gives,
+    ///   whatever its type (a list, a record, quoted text);
+    /// - one `"..."` is quoted text;
+    /// - commas outside quotes, brackets and `${...}`, and not escaped
+    ///   (`\,`), make a list, which prints as written;
+    /// - `A..B` or `A..B step N` with whole numbers is a range;
+    /// - anything else is text, with its variables filled in.
+    ///
+    /// What can't be filled in is reported; the flag says whether
+    /// everything was.
+    fn slot_value(&mut self, raw: &str, line: usize, column: Option<usize>) -> (Value, bool) {
+        let trimmed = raw.trim();
+        let column = column.map(|c| c + (raw.len() - raw.trim_start().len()));
+        if let Some(value) = self.whole_value(trimmed, line, column) {
+            return value;
+        }
+        if syntax::quoted_string(trimmed).is_some() {
+            let (text, quoted, ok) = self.fill_value(trimmed, line, column, Sink::Text);
+            return (quoted.map_or(Value::Str(text), Value::Quoted), ok);
+        }
+        let parts = syntax::split_list(trimmed);
+        if parts.len() > 1 {
+            // Each item is a value of its own; the list prints as written
+            let mut items = Vec::new();
+            let mut written = String::new();
+            let mut ok = true;
+            let mut end = 0;
+            for part in parts {
+                let item = &trimmed[part.clone()];
+                let lead = item.len() - item.trim_start().len();
+                written.push_str(&trimmed[end..part.start + lead]);
+                end = part.start + lead + item.trim().len();
+                if item.trim().is_empty() {
+                    continue;
+                }
+                let at = column.map(|c| c + part.start + lead);
+                let (value, text, filled) = self.item_value(item.trim(), line, at);
+                ok &= filled;
+                written.push_str(&text);
+                items.push(value);
+            }
+            written.push_str(&trimmed[end..]);
+            let list = value::List {
+                items: Rc::new(items),
+                written: Some(written.into()),
+            };
+            return (Value::List(list), ok);
+        }
+        let (text, ok) = self.fill(trimmed, line, column, Sink::Text);
+        match value::written_range(&text) {
+            Some(Ok(range)) => (range, ok),
+            Some(Err(message)) => {
+                self.report(
+                    interp::Problem::Invalid { message, offset: 0 },
+                    line,
+                    column,
+                );
+                (Value::list(Vec::new()), false)
+            }
+            None => (Value::Str(text), ok),
+        }
+    }
+
+    /// An item of a list written in the source (see
+    /// [`slot_value`](Self::slot_value)), and how it is written in the
+    /// list's text.
+    fn item_value(
+        &mut self,
+        item: &str,
+        line: usize,
+        column: Option<usize>,
+    ) -> (Value, String, bool) {
+        let (value, ok) = match self.whole_value(item, line, column) {
+            Some(value) => value,
+            None if syntax::quoted_string(item).is_some() => {
+                let (text, quoted, ok) = self.fill_value(item, line, column, Sink::Text);
+                (quoted.map_or(Value::Str(text), Value::Quoted), ok)
+            }
+            None => {
+                let (text, ok) = self.fill(item, line, column, Sink::Text);
+                (Value::Str(text), ok)
+            }
+        };
+        // Quoted text keeps its quotes in the list's text, as written
+        let text = value
+            .quoted_css()
+            .map_or_else(|| value.to_string(), str::to_string);
+        (value, text, ok)
+    }
+
+    /// The value of a slot that is exactly one `$name` or `${...}`, with its
+    /// type; `None` when it is anything else.
+    fn whole_value(
+        &mut self,
+        raw: &str,
+        line: usize,
+        column: Option<usize>,
+    ) -> Option<(Value, bool)> {
+        let after = raw.strip_prefix('$')?;
+        let (reference, len) = interp::reference(after, &self.env)?;
+        if len != after.len() {
+            return None;
+        }
+        track_var_refs(raw, &mut self.used_variables);
+        let problem = match reference {
+            interp::Reference::Var(path) => match interp::resolve(&path, &self.env) {
+                Some(value) => return Some((value, true)),
+                None => interp::Problem::Undefined {
+                    name: path,
+                    offset: 0,
+                },
+            },
+            interp::Reference::Expr(source) => match crate::expr::eval(source, &self.env) {
+                Ok(value) => return Some((value, true)),
+                Err(crate::expr::Error::Invalid(message)) => {
+                    interp::Problem::Invalid { message, offset: 0 }
+                }
+                Err(error) => error.at(2),
+            },
+        };
+        self.report(problem, line, column);
+        Some((Value::Str(raw.to_string()), false))
     }
 
     /// Report a variable that can't be filled in, or an invalid `${...}`,
@@ -421,7 +545,7 @@ impl ParseContext {
     /// The error for `$name` with no definition: what the name is if it is
     /// something else, or the closest defined name.
     fn undefined(&mut self, name: &str, line: usize) -> Diagnostic {
-        if self.defines.contains_key(name) {
+        if self.env.bundle(name).is_some() {
             // Reported here, so not also as unused
             self.used_defines.insert(name.to_string());
             return Diagnostic::error(
@@ -435,7 +559,7 @@ impl ParseContext {
             )
             .subject(name);
         }
-        let suggestion = suggest_var_name(name, &self.variables);
+        let suggestion = suggest_var_name(name, &self.env.value_names());
         let message = match &suggestion {
             Some(closest) => format!(
                 "undefined variable '${}', did you mean '${}'?",
@@ -488,6 +612,9 @@ impl ParseContext {
 const PRELUDE: &str = include_str!("std.hl");
 
 fn load_prelude(ctx: &mut ParseContext) {
+    // The library's definitions are in a block of their own, around the
+    // file's, so the file's own `@let` of the same name hides them
+    ctx.env.push();
     let tree = ctx.parse_tree(PRELUDE);
     collect_namespace(&tree.nodes, None, &mut HashSet::new(), ctx);
     ctx.current_file = Some("std.hl".to_string());
@@ -497,6 +624,7 @@ fn load_prelude(ctx: &mut ParseContext) {
     ctx.fn_lines.clear();
     ctx.define_lines.clear();
     ctx.let_lines.clear();
+    ctx.env.push();
 }
 
 pub fn parse(input: &str) -> ParseResult {
@@ -506,15 +634,13 @@ pub fn parse(input: &str) -> ParseResult {
 pub fn parse_with_base(input: &str, base_path: Option<&Path>) -> ParseResult {
     let mut ctx = ParseContext {
         current_line: 0,
-        scoped_functions: std::collections::HashSet::new(),
         page_title: None,
         lang: None,
         favicon: None,
         meta_tags: Vec::new(),
         head_blocks: Vec::new(),
-        variables: HashMap::new(),
-        defines: HashMap::new(),
-        functions: HashMap::new(),
+        env: Env::default(),
+        defined_functions: HashMap::new(),
         css_vars: Vec::new(),
         custom_css: Vec::new(),
         og_tags: Vec::new(),
@@ -557,6 +683,21 @@ pub fn parse_with_base(input: &str, base_path: Option<&Path>) -> ParseResult {
     validate_tree(&nodes, None, &mut ctx.diagnostics);
     check_unused(&mut ctx);
     dedupe(&mut ctx.diagnostics);
+    // What the file itself defines at its top level
+    let file = ctx.env.frames.last().cloned().unwrap_or_default();
+    let mut variables = HashMap::new();
+    let mut defines = HashMap::new();
+    for (name, binding) in file.iter() {
+        match binding {
+            Binding::Value(value) => {
+                variables.insert(name.clone(), value.to_string());
+            }
+            Binding::Bundle(attrs) => {
+                defines.insert(name.clone(), attrs.to_vec());
+            }
+            Binding::Function(_) => {}
+        }
+    }
     ParseResult {
         document: Document {
             page_title: ctx.page_title,
@@ -564,13 +705,8 @@ pub fn parse_with_base(input: &str, base_path: Option<&Path>) -> ParseResult {
             favicon: ctx.favicon,
             meta_tags: ctx.meta_tags,
             head_blocks: ctx.head_blocks,
-            // Without the quoted forms (see `quoted_key`)
-            variables: ctx
-                .variables
-                .into_iter()
-                .filter(|(key, _)| !key.ends_with('"'))
-                .collect(),
-            defines: ctx.defines,
+            variables,
+            defines,
             css_vars: ctx.css_vars,
             custom_css: ctx.custom_css,
             og_tags: ctx.og_tags,
@@ -692,7 +828,7 @@ fn check_unevaluated_content(
         .chain
         .iter()
         .map(|head| {
-            let function = ctx.functions.get(&head.name)?;
+            let function = ctx.defined_functions.get(&head.name)?;
             Some((head.name.clone(), function.clone()))
         })
         .collect();
@@ -724,10 +860,11 @@ fn check_unevaluated_content(
 /// Check a head that was never evaluated: its name, and its attributes
 /// (for a call, see [`check_call`]).
 fn check_head(head: &syntax::Head, line: usize, inline: bool, ctx: &mut ParseContext) {
-    let is_function = ctx.namespace.contains(&head.name) || ctx.functions.contains_key(&head.name);
+    let is_function =
+        ctx.namespace.contains(&head.name) || ctx.defined_functions.contains_key(&head.name);
     if is_function {
         ctx.used_functions.insert(head.name.clone());
-        if let Some(function) = ctx.functions.get(&head.name).cloned() {
+        if let Some(function) = ctx.defined_functions.get(&head.name).cloned() {
             check_call(head, &function, line, ctx);
         }
         return;
@@ -908,11 +1045,12 @@ impl Evaluator {
         nodes
     }
 
-    /// Evaluate a block in its own scope: `@let` inside doesn't leak out.
+    /// Evaluate a block in its own scope: what it defines is visible to
+    /// the end of the block, and not after it.
     fn eval_scoped(&mut self, block: &[syntax::Node], ctx: &mut ParseContext) -> Vec<Node> {
-        let saved = ctx.save_scope();
+        ctx.env.push();
         let nodes = self.eval_block(block, ctx);
-        ctx.restore_scope(saved);
+        ctx.env.pop();
         nodes
     }
 
@@ -1035,8 +1173,7 @@ impl Evaluator {
             ("let", DirectiveArgs::Let(def)) => {
                 let name = def.name.as_str();
                 // Values, bundles and functions share one namespace: a
-                // definition replaces whatever the name meant before
-                ctx.forget(name);
+                // definition replaces whatever the name meant in its block
                 match &def.form {
                     LetForm::Function(function) => {
                         self.define_function(name, &function.params, node, ctx);
@@ -1045,26 +1182,21 @@ impl Evaluator {
                     LetForm::Computed(expression) => {
                         let value = ctx
                             .eval(&expression.raw, line_num, Some(expression.span.column))
-                            .map(|v| v.to_string())
-                            .unwrap_or_default();
-                        set_variable(name, value, None, line_num, ctx);
+                            .unwrap_or_else(Value::empty);
+                        set_variable(name, value, line_num, ctx);
                     }
                     // Attribute bundle: @let name [attr1, attr2, ...]
                     LetForm::Bundle(list) => {
                         let attrs = parse_attr_list(&list.attrs, line_num, ctx, true, &[]);
-                        ctx.defines.insert(name.to_string(), attrs);
+                        ctx.env.define(name, Binding::Bundle(Rc::new(attrs)));
                         ctx.define_lines.entry(name.to_string()).or_insert(line_num);
                     }
-                    // Text with `$var` interpolation: `@let size 16px`. It is
-                    // quoted text when it is one variable holding some.
+                    // `@let size 16px`, `@let fruits apple, banana`,
+                    // `@let post $posts.0`: see `slot_value`
                     LetForm::Value(value) => {
-                        let (text, quoted, _) = ctx.fill_value(
-                            &value.raw,
-                            value.span.line,
-                            Some(value.span.column),
-                            Sink::Text,
-                        );
-                        set_variable(name, text, quoted.as_ref(), line_num, ctx);
+                        let (value, _) =
+                            ctx.slot_value(&value.raw, value.span.line, Some(value.span.column));
+                        set_variable(name, value, line_num, ctx);
                     }
                     // Quoted text: `@let arrow "→ "`
                     LetForm::Quoted(value) => {
@@ -1072,7 +1204,8 @@ impl Evaluator {
                         let column = value.span.column.saturating_sub(1);
                         let (text, quoted, _) =
                             ctx.fill_value(&raw, value.span.line, Some(column), Sink::Text);
-                        set_variable(name, text, quoted.as_ref(), line_num, ctx);
+                        let value = quoted.map_or(Value::Str(text), Value::Quoted);
+                        set_variable(name, value, line_num, ctx);
                     }
                 }
                 Ok(None)
@@ -1260,7 +1393,6 @@ impl Evaluator {
         ctx: &mut ParseContext,
     ) {
         let prefix = prefix.to_string();
-        ctx.variables.remove(&quoted_key(&prefix));
         let filename = source.raw.as_str();
         if let Some(env) = filename.strip_prefix("env:") {
             let (var, default) = match env.split_once(char::is_whitespace) {
@@ -1284,7 +1416,7 @@ impl Evaluator {
                     .source(content),
                 );
             }
-            assign(&mut ctx.variables, &prefix, value.unwrap_or_default(), None);
+            ctx.bind(&prefix, Value::Str(value.unwrap_or_default()));
             return;
         }
 
@@ -1317,7 +1449,7 @@ impl Evaluator {
             }
         };
         match parse_json_with_error(&json_text) {
-            Ok(json) => flatten_json(&prefix, &json, &mut ctx.variables),
+            Ok(json) => ctx.bind(&prefix, json_value(json)),
             Err(detail) => ctx.diagnostics.push(
                 Diagnostic::error(
                     code::INVALID_JSON,
@@ -1423,13 +1555,14 @@ impl Evaluator {
             }
             ctx.included_files.push(file);
         }
-        flatten_json(name, &JsonValue::Array(records), &mut ctx.variables);
+        ctx.bind(name, json_value(JsonValue::Array(records)));
     }
 
     /// `@each $item in LIST` or `@each $item, $index in LIST`, with the
-    /// `@else` that follows it. A LIST from JSON binds each record or value
-    /// to `$item`; any other list is text, split on commas, or a range
-    /// `A..B [step N]`.
+    /// `@else` that follows it. LIST is a value (see
+    /// [`ParseContext::slot_value`]): a list written with commas, a range,
+    /// or one `$name` or `${...}` that holds a list. Each item is bound
+    /// whole to `$item`, and each iteration is a block of its own.
     fn eval_each(
         &mut self,
         node: &syntax::Node,
@@ -1449,60 +1582,75 @@ impl Evaluator {
         let empty: &[syntax::Node] = empty_branch.map_or(&[], |b| &b.children);
         let (item, index) = (header.item.as_str(), header.index.as_deref());
         let list = &header.list;
-        let list_src = list.raw.as_str();
-        track_var_refs(list_src, &mut ctx.used_variables);
-
-        // A source that is one `$name` (or `${name}`) is that variable's
-        // value: a list loaded from JSON, by name, or text
-        let whole = whole_reference(list_src, &ctx.variables);
-        let data_list = whole.as_ref().and_then(|name| {
-            let len = ctx
-                .variables
-                .get(&format!("{}#", name))?
-                .parse::<usize>()
-                .ok()?;
-            Some((name.clone(), len))
-        });
-        let undefined = whole
-            .as_ref()
-            .is_some_and(|path| interp::resolve(path, &Vars(&ctx.variables)).is_none());
-        // A field a record doesn't have (`$post.tags`) is an empty list
-        // Items are split at the commas that aren't escaped (`\,`)
-        let (text, _) =
-            ctx.fill_protected(list_src, list.span.line, Some(list.span.column), Sink::Text);
-        let text_items: Vec<String> = match &data_list {
-            Some(_) => Vec::new(),
-            // Reported; there is nothing to repeat
-            None if undefined => Vec::new(),
-            None => text_list_items(&text)
-                .iter()
-                .map(|item| restore_escapes(item))
-                .collect(),
+        // `[...]` is an attribute list or JSON elsewhere, not a list here
+        let bracketed = list.raw.starts_with('[') && list.raw.ends_with(']');
+        let (source, filled) = match bracketed {
+            true => (Value::empty(), false),
+            false => ctx.slot_value(&list.raw, list.span.line, Some(list.span.column)),
         };
-        let count = data_list.as_ref().map_or(text_items.len(), |(_, len)| *len);
+        let not_a_list = |message: String, ctx: &ParseContext| {
+            let diagnostic = Diagnostic::error(code::INVALID_LOOP, list.span.line, message)
+                .column(list.span.column)
+                .subject(list.raw.as_str());
+            match &ctx.current_source {
+                (current, Some(text)) if *current == list.span.line => {
+                    diagnostic.source(text.clone())
+                }
+                _ => diagnostic,
+            }
+        };
+        if bracketed {
+            let inner = list.raw[1..list.raw.len() - 1].trim().to_string();
+            let diagnostic = not_a_list(
+                format!(
+                    "@each takes a list written without brackets, `@each ${} in {}`; \
+                     JSON data goes in `@data`",
+                    item, inner
+                ),
+                ctx,
+            )
+            .suggest(Some(inner));
+            ctx.push_once(diagnostic);
+        }
+        let items: Vec<Value> = match source {
+            Value::List(list) => list.items.to_vec(),
+            // Reported (an undefined `$name`, brackets): there is nothing
+            // to repeat
+            _ if !filled => Vec::new(),
+            Value::Record(_) => {
+                let diagnostic = not_a_list(
+                    format!(
+                        "@each repeats for the items of a list, and `{}` is a record: \
+                         loop over a list of records, or use its fields",
+                        list.raw
+                    ),
+                    ctx,
+                );
+                ctx.push_once(diagnostic);
+                Vec::new()
+            }
+            // Empty text (a field a record doesn't have) is no items; any
+            // other value is one
+            value if value.to_string().is_empty() => Vec::new(),
+            value => vec![value],
+        };
 
         if body.iter().all(syntax::Node::is_trivia) {
             return Ok(Some(Vec::new()));
         }
-        if count == 0 {
+        if items.is_empty() {
             return Ok(Some(self.eval_scoped(empty, ctx)));
         }
-        let saved = ctx.save_scope();
         let mut nodes = Vec::new();
-        for i in 0..count {
-            match &data_list {
-                Some((name, _)) => bind_item(&mut ctx.variables, &format!("{}.{}", name, i), item),
-                None => {
-                    let text = text_items.get(i).cloned().unwrap_or_default();
-                    assign(&mut ctx.variables, item, text, None);
-                }
-            }
+        for (i, value) in items.into_iter().enumerate() {
+            ctx.env.push();
+            ctx.bind(item, value);
             if let Some(index) = index {
-                assign(&mut ctx.variables, index, i.to_string(), None);
+                ctx.bind(index, Value::Num(i as f64));
             }
             nodes.extend(self.eval_block(body, ctx));
+            ctx.env.pop();
         }
-        ctx.restore_scope(saved);
         Ok(Some(nodes))
     }
 
@@ -1532,7 +1680,6 @@ impl Evaluator {
             if !css.trim().is_empty() {
                 ctx.custom_css.push(format!(".hl-{} {{\n{}}}", name, css));
             }
-            ctx.scoped_functions.insert(name.to_string());
         }
 
         // A default is filled in only when a call leaves its parameter
@@ -1543,19 +1690,21 @@ impl Evaluator {
         ctx.fn_lines.entry(name.to_string()).or_insert(line_num);
         let body: Vec<syntax::Node> = body.into_iter().cloned().collect();
         let (slots, has_children) = declared_slots(&body, ctx);
-        ctx.functions.insert(
-            name.to_string(),
-            Rc::new(FnDef {
-                params: params.to_vec(),
-                line: line_num,
-                source: ctx.current_source.1.clone(),
-                node: node.id,
-                body,
-                file: ctx.current_file.clone(),
-                slots,
-                has_children,
-            }),
-        );
+        let function = Rc::new(FnDef {
+            params: params.to_vec(),
+            line: line_num,
+            source: ctx.current_source.1.clone(),
+            node: node.id,
+            body,
+            file: ctx.current_file.clone(),
+            slots,
+            has_children,
+            scoped: !style.is_empty(),
+            env: ctx.env.clone(),
+        });
+        ctx.defined_functions
+            .insert(name.to_string(), function.clone());
+        ctx.env.define(name, Binding::Function(function));
     }
 
     /// An element line: a chain of elements and function calls, the last of
@@ -1595,7 +1744,7 @@ impl Evaluator {
                 Resolved::Element(_) => None,
             })
             .collect();
-        let mut current = self.eval_block(&node.children, ctx);
+        let mut current = self.eval_scoped(&node.children, ctx);
         // After the lines under the call ran, so the files they include
         // are read
         check_fillers(node, element, &calls, ctx);
@@ -1633,7 +1782,7 @@ impl Evaluator {
             name,
             function: fn_def,
             args,
-            records,
+            values,
             text: trailing_text,
             written_form,
             line: line_num,
@@ -1696,10 +1845,14 @@ impl Evaluator {
         );
         ctx.fn_call_stack.push(name.to_string());
 
-        // Bind the parameters, by name, in the order they are declared: a
-        // default is filled in at the call, where it sees the parameters
-        // before it.
-        let saved = ctx.save_scope();
+        // The body runs where the function is defined: it sees what was
+        // visible there, the function itself (so it can call itself), and
+        // its parameters, bound by name in the order they are declared. A
+        // default is filled in at the call, seeing the same, with the
+        // parameters before it.
+        let caller_env = std::mem::replace(&mut ctx.env, fn_def.env.clone());
+        ctx.env.push();
+        ctx.env.define(name, Binding::Function(fn_def.clone()));
         let mut consumed = vec![false; args.len()];
         for param in &fn_def.params {
             let mut passed = None;
@@ -1726,31 +1879,26 @@ impl Evaluator {
                     let value = arg.value.as_deref().unwrap_or("");
                     ctx.push_once(parameter_form(name, &arg.key, value, line_num).source(content));
                 }
-                passed = Some(arg);
+                passed = Some(j);
             }
-            let (value, quoted, record) = match passed {
+            let value = match passed {
                 // A parameter's name alone is true: `@post-card [featured]`
-                Some(arg) if arg.value.is_none() => ("true".to_string(), None, None),
-                Some(arg) => {
-                    let quoted = arg.quoted.clone();
-                    let value = match &quoted {
-                        Some(quoted) => quoted.text.clone(),
-                        None => arg.value.clone().unwrap_or_default(),
-                    };
-                    let record = records
-                        .iter()
-                        .find(|(key, _)| *key == param.name)
-                        .map(|(_, entries)| entries.clone());
-                    (value, quoted, record)
-                }
+                Some(j) if args[j].value.is_none() => Value::Bool(true),
+                // What the call passed, with its type: a record, a list,
+                // quoted text
+                Some(j) => values[j].clone().unwrap_or_else(|| {
+                    let arg = &args[j];
+                    match &arg.quoted {
+                        Some(quoted) => Value::Quoted(quoted.clone()),
+                        None => Value::Str(arg.value.clone().unwrap_or_default()),
+                    }
+                }),
                 None => match &param.default {
                     Some(default) => {
-                        let record = whole_record(default, &ctx.variables)
-                            .map(|path| record_entries(&ctx.variables, &path));
                         let before = ctx.diagnostics.len();
-                        let (value, quoted) = fill_default(&fn_def, param, default, ctx);
+                        let value = fill_default(&fn_def, param, default, ctx);
                         point_at_call(ctx, before, &fn_def, name, line_num, content);
-                        (value, quoted, record)
+                        value
                     }
                     None => {
                         let (column, text) = match &name_at {
@@ -1760,14 +1908,11 @@ impl Evaluator {
                         ctx.push_once(
                             missing_parameter(name, &param.name, line_num, column).source(text),
                         );
-                        (String::new(), None, None)
+                        Value::empty()
                     }
                 },
             };
-            assign(&mut ctx.variables, &param.name, value, quoted.as_ref());
-            if let Some(entries) = record {
-                bind_record(&mut ctx.variables, &param.name, &entries);
-            }
+            ctx.bind(&param.name, value);
         }
         // Arguments that aren't parameters are attributes for the
         // function's root element, so a function can be styled like an
@@ -1787,8 +1932,8 @@ impl Evaluator {
         ctx.current_file = caller_file;
         point_at_call(ctx, before, &fn_def, name, line_num, content);
 
-        // Restore variables and call stack
-        ctx.restore_scope(saved);
+        // Back to the caller's names and call stack
+        ctx.env = caller_env;
         ctx.fn_call_stack.pop();
         if ctx.fn_call_stack.is_empty() {
             ctx.too_deep = false;
@@ -1804,10 +1949,7 @@ impl Evaluator {
 
         // Attributes that aren't parameters style the function's root
         // element, and a scoped @style's class goes on it too.
-        let scope_class = ctx
-            .scoped_functions
-            .contains(name)
-            .then(|| format!("hl-{}", name));
+        let scope_class = fn_def.scoped.then(|| format!("hl-{}", name));
         if !forwarded.is_empty() || scope_class.is_some() {
             let mut roots = result_nodes.iter_mut().filter_map(|n| match n {
                 Node::Element(e) => Some(e),
@@ -1883,9 +2025,9 @@ struct Call {
     name: String,
     function: Rc<FnDef>,
     args: Vec<Attribute>,
-    /// Parameters passed one `$name` that holds a record or a list, with
-    /// its entries (see [`record_entries`]): the parameter gets all of it.
-    records: Vec<(String, Vec<(String, String)>)>,
+    /// The value of each argument that passes a parameter, with its type
+    /// (see [`ParseContext::slot_value`]), in the order of `args`.
+    values: Vec<Option<Value>>,
     /// Text after the attributes, which is content.
     text: Option<syntax::Text>,
     /// Parameters written `name=value`, already reported.
@@ -1908,24 +2050,18 @@ fn resolve(
     source: &str,
     ctx: &mut ParseContext,
 ) -> Result<Resolved, ParseError> {
-    let Some(function) = ctx.functions.get(&head.name).cloned() else {
+    let Some(function) = ctx.env.function(&head.name).cloned() else {
         return parse_single_element(head, text, line, ctx).map(Resolved::Element);
     };
     ctx.used_functions.insert(head.name.clone());
     let params: Vec<String> = function.params.iter().map(|p| p.name.clone()).collect();
     let written = head.attrs.as_ref().map_or(&[][..], |list| &list.attrs[..]);
     let written_form = written_parameter_forms(&head.name, &function, written, line, ctx);
-    let records = written
-        .iter()
-        .filter(|a| !a.html && function.is_param(&a.key))
-        .filter_map(|a| {
-            let path = whole_record(a.value.as_deref()?, &ctx.variables)?;
-            Some((a.key.clone(), record_entries(&ctx.variables, &path)))
-        })
-        .collect();
     // Parameters are bound by name; every other attribute goes to the
     // root element, and is checked like any attribute
-    let args = parse_attr_list(written, line, ctx, true, &params);
+    let (args, values) = parse_attrs(written, line, ctx, true, &params)
+        .into_iter()
+        .unzip();
     let name_at = name_column(head, line).zip(match &ctx.current_source {
         (current, Some(text)) if *current == line => Some(text.clone()),
         _ => None,
@@ -1934,7 +2070,7 @@ fn resolve(
         name: head.name.clone(),
         function,
         args,
-        records,
+        values,
         text: text.cloned(),
         written_form,
         line,
@@ -2054,15 +2190,16 @@ fn inline_segments(mut nodes: Vec<Node>, line: usize) -> Vec<TextSegment> {
 }
 
 /// Fill in the default of a parameter that a call leaves out, like the
-/// value of an attribute passed for it: variables are filled in, and one
-/// `"..."` is quoted text. Its problems are reported
-/// at the definition, once.
+/// value of an attribute passed for it: variables are filled in, one
+/// `$name` keeps its type and one `"..."` is quoted text. It sees what the
+/// body sees: the names visible where the function is defined, and the
+/// parameters before it. Its problems are reported at the definition, once.
 fn fill_default(
     fn_def: &FnDef,
     param: &syntax::Param,
     default: &str,
     ctx: &mut ParseContext,
-) -> (String, Option<Quoted>) {
+) -> Value {
     // A default that uses a later parameter is an error in the
     // definition; the later one isn't bound yet, so don't report it again
     let later = fn_def
@@ -2072,7 +2209,7 @@ fn fill_default(
         .skip(1);
     let names = interp::names(default);
     if later.clone().any(|p| names.contains(&p.name.as_str())) {
-        return (String::new(), None);
+        return Value::empty();
     }
     let line = param.span.line;
     let at_head = line == fn_def.line && fn_def.source.is_some();
@@ -2085,9 +2222,9 @@ fn fill_default(
         ),
         std::mem::replace(&mut ctx.current_node, fn_def.node),
     );
-    let (text, quoted, _) = ctx.fill_value(default, line, column, Sink::Text);
+    let (value, _) = ctx.slot_value(default, line, column);
     (ctx.current_source, ctx.current_node) = caller;
-    (text, quoted)
+    value
 }
 
 /// A parameter passed `name=value`, the form of an HTML attribute.
@@ -2132,20 +2269,44 @@ fn name_column(head: &syntax::Head, line: usize) -> Option<usize> {
 }
 
 /// Define `$name` (and, for `--name`, the CSS custom property, which gets
-/// quoted text with its quotes).
-fn set_variable(
-    name: &str,
-    value: String,
-    quoted: Option<&Quoted>,
-    line_num: usize,
-    ctx: &mut ParseContext,
-) {
+/// quoted text with its quotes). `@let name.field value` gives the record
+/// `$name` that field, as a new record in this block.
+fn set_variable(name: &str, value: Value, line_num: usize, ctx: &mut ParseContext) {
     if name.starts_with("--") {
-        let css = quoted.map_or_else(|| value.clone(), |q| q.css.clone());
+        let css = value
+            .quoted_css()
+            .map_or_else(|| value.to_string(), str::to_string);
         ctx.css_vars.push((name.to_string(), css));
     }
-    assign(&mut ctx.variables, name, value, quoted);
-    ctx.let_lines.entry(name.to_string()).or_insert(line_num);
+    let mut path = name.split('.');
+    let root = path.next().unwrap_or(name);
+    let fields: Vec<&str> = path.collect();
+    let value = match fields.is_empty() {
+        true => value,
+        false => with_field(ctx.env.value(root).cloned(), &fields, value),
+    };
+    ctx.bind(root, value);
+    ctx.let_lines.entry(root.to_string()).or_insert(line_num);
+}
+
+/// `record` with the field at `path` set to `value`: a new record when it
+/// isn't one.
+fn with_field(record: Option<Value>, path: &[&str], value: Value) -> Value {
+    let Some((field, rest)) = path.split_first() else {
+        return value;
+    };
+    let mut fields = match record {
+        Some(Value::Record(fields)) => fields.as_ref().clone(),
+        _ => Vec::new(),
+    };
+    match fields.iter().position(|(key, _)| key == field) {
+        Some(i) => {
+            let old = std::mem::replace(&mut fields[i].1, Value::empty());
+            fields[i].1 = with_field(Some(old), rest, value);
+        }
+        None => fields.push((field.to_string(), with_field(None, rest, value))),
+    }
+    Value::Record(Rc::new(fields))
 }
 
 /// The text of a verbatim body (`@head`, `@style`, `@markdown`, `@raw`).
@@ -2218,7 +2379,7 @@ type Included<'a, 'f> = &'f dyn Fn(&syntax::Node) -> Vec<(&'a [syntax::Node], Op
 /// Whether `name` is a function here: defined so far, or anywhere in the
 /// file and the files it includes.
 fn is_function(name: &str, ctx: &ParseContext) -> bool {
-    ctx.functions.contains_key(name) || ctx.namespace.contains(name)
+    ctx.env.function(name).is_some() || ctx.namespace.contains(name)
 }
 
 /// Whether `name` is one slot name: letters, digits, `-` and `_`,
@@ -2673,7 +2834,7 @@ struct Filler<'a> {
 /// Whether `@slot` is the built-in element here, and not a function
 /// defined so far that took its name.
 fn slot_is_built_in(ctx: &ParseContext) -> bool {
-    !ctx.functions.contains_key("slot")
+    ctx.env.function("slot").is_none()
 }
 
 /// The `@slot NAME` blocks directly under a call, in `block` (under its
@@ -2905,13 +3066,13 @@ fn parse_element_kind(
             "unknown element @{}: @{} is a directive, which goes at the start of its own line",
             name, name
         ))
-    } else if ctx.defines.contains_key(name) {
+    } else if ctx.env.bundle(name).is_some() {
         Some(format!(
             "unknown element @{}: '{}' is an attribute bundle, used as `[${}]` \
              (a function is defined with `@let @{}`)",
             name, name, name, name
         ))
-    } else if ctx.variables.contains_key(name) {
+    } else if ctx.env.value(name).is_some() {
         Some(format!(
             "unknown element @{}: '{}' is a value, used as `${}` \
              (a function is defined with `@let @{}`)",
@@ -2920,9 +3081,11 @@ fn parse_element_kind(
     } else if ctx.namespace.contains(name) {
         ctx.used_functions.insert(name.to_string());
         Some(format!(
-            "unknown element @{}: the function @{} isn't defined yet when this line runs, \
-             so define it above this line",
-            name, name
+            "unknown element @{}: the function @{} isn't visible here. A definition is \
+             visible from its line to the end of its block, and a function's body sees what \
+             is defined above the function, so define @{} above this line, outside the block \
+             it is in",
+            name, name, name
         ))
     } else {
         None
@@ -3021,7 +3184,8 @@ fn suggest_fn_name(input: &str, ctx: &ParseContext) -> Option<String> {
     let input_chars: Vec<char> = input.chars().collect();
     let max_allowed = 2usize.min(input_chars.len().saturating_sub(1));
     let mut best: Option<(usize, &String)> = None;
-    for name in ctx.functions.keys().chain(ctx.namespace.iter()) {
+    let visible: Vec<&String> = ctx.defined_functions.keys().collect();
+    for name in visible.into_iter().chain(ctx.namespace.iter()) {
         let nlen = name.chars().count();
         if nlen.abs_diff(input_chars.len()) > max_allowed {
             continue;
@@ -3036,12 +3200,15 @@ fn suggest_fn_name(input: &str, ctx: &ParseContext) -> Option<String> {
 }
 
 /// Suggest the closest variable name for undefined `$var` references.
-fn suggest_var_name(input: &str, vars: &HashMap<String, String>) -> Option<String> {
+fn suggest_var_name(input: &str, vars: &[&str]) -> Option<String> {
     let input_chars: Vec<char> = input.chars().collect();
     let max_allowed = 2usize.min(input_chars.len().saturating_sub(1));
     let mut best: Option<String> = None;
     let mut best_dist = usize::MAX;
-    for name in vars.keys().filter(|k| !k.ends_with(['#', '"'])) {
+    let mut vars = vars.to_vec();
+    // The same answer every time, whatever the order of the names
+    vars.sort_unstable();
+    for name in vars {
         let nlen = name.chars().count();
         if nlen.abs_diff(input_chars.len()) > max_allowed {
             continue;
@@ -3050,7 +3217,7 @@ fn suggest_var_name(input: &str, vars: &HashMap<String, String>) -> Option<Strin
         let dist = levenshtein_bounded(&input_chars, &name_chars, max_allowed);
         if dist < best_dist && dist <= max_allowed {
             best_dist = dist;
-            best = Some(name.clone());
+            best = Some(name.to_string());
         }
     }
     best
@@ -3532,7 +3699,24 @@ fn parse_attr_list(
     validate: bool,
     text_keys: &[String],
 ) -> Vec<Attribute> {
-    let mut attrs = Vec::new();
+    parse_attrs(tokens, line_num, ctx, validate, text_keys)
+        .into_iter()
+        .map(|(attr, _)| attr)
+        .collect()
+}
+
+/// [`parse_attr_list`], with the value of each attribute whose key is one
+/// of `text_keys` (a call's parameters) as a value with its type (see
+/// [`ParseContext::slot_value`]), so a parameter can get a list or a
+/// record.
+fn parse_attrs(
+    tokens: &[syntax::Attr],
+    line_num: usize,
+    ctx: &mut ParseContext,
+    validate: bool,
+    text_keys: &[String],
+) -> Vec<(Attribute, Option<Value>)> {
+    let mut attrs: Vec<(Attribute, Option<Value>)> = Vec::new();
     let mut seen_keys: Vec<String> = Vec::new();
     let mut chosen = Vec::new();
     choose_attrs(tokens, line_num, ctx, validate, text_keys, &mut chosen);
@@ -3548,17 +3732,14 @@ fn parse_attr_list(
 
         // `$name` (or `${name}`) alone: an attribute bundle, spliced in
         let bundle = key.strip_prefix('$').filter(|_| value.is_none() && !html);
-        let bundle =
-            bundle.and_then(
-                |after| match interp::reference(after, &Vars(&ctx.variables))? {
-                    (interp::Reference::Var(name), len) if len == after.len() => Some(name),
-                    _ => None,
-                },
-            );
+        let bundle = bundle.and_then(|after| match interp::reference(after, &ctx.env)? {
+            (interp::Reference::Var(name), len) if len == after.len() => Some(name),
+            _ => None,
+        });
         if let Some(name) = bundle {
-            if let Some(define_attrs) = ctx.defines.get(&name) {
+            if let Some(define_attrs) = ctx.env.bundle(&name).cloned() {
                 ctx.used_defines.insert(name);
-                attrs.extend(define_attrs.clone());
+                attrs.extend(define_attrs.iter().map(|attr| (attr.clone(), None)));
             } else {
                 not_a_bundle(&name, line, column(0), ctx);
             }
@@ -3593,8 +3774,21 @@ fn parse_attr_list(
         };
         let mut filled = true;
         let mut quoted = None;
+        let mut typed = None;
         let value = match value {
             None => None,
+            // A parameter's value keeps its type
+            Some(value) if !html && text_keys.contains(&key) => {
+                let at = column(token.raw.len() - value.len());
+                let (value, ok) = ctx.slot_value(&value, line, at);
+                filled = ok;
+                if let Value::Quoted(q) = &value {
+                    quoted = Some(q.clone());
+                }
+                let text = value.to_string();
+                typed = Some(value);
+                Some(text)
+            }
             Some(value) => {
                 let at = column(token.raw.len() - value.len());
                 let (text, is_quoted, ok) = ctx.fill_value(&value, line, at, sink);
@@ -3702,7 +3896,7 @@ fn parse_attr_list(
             }
         }
 
-        attrs.push(attr);
+        attrs.push((attr, typed));
     }
 
     attrs
@@ -3711,8 +3905,7 @@ fn parse_attr_list(
 /// `[$name]` where `$name` isn't an attribute bundle.
 fn not_a_bundle(name: &str, line: usize, column: Option<usize>, ctx: &mut ParseContext) {
     track_var_refs(&format!("${}", name), &mut ctx.used_variables);
-    let is_value =
-        interp::name_len(name) > 0 && interp::resolve(name, &Vars(&ctx.variables)).is_some();
+    let is_value = interp::name_len(name) > 0 && interp::resolve(name, &ctx.env).is_some();
     let diagnostic = if is_value {
         Diagnostic::error(
             code::ATTRIBUTE_FROM_VARIABLE,
@@ -3726,7 +3919,8 @@ fn not_a_bundle(name: &str, line: usize, column: Option<usize>, ctx: &mut ParseC
         )
         .subject(name)
     } else {
-        let bundles: Vec<&str> = ctx.defines.keys().map(String::as_str).collect();
+        let mut bundles = ctx.env.bundle_names();
+        bundles.sort_unstable();
         let suggestion = suggest_closest(name, &bundles);
         let message = match suggestion {
             Some(closest) => format!(
@@ -3876,95 +4070,13 @@ fn text_segments(text: &syntax::Text, ctx: &mut ParseContext) -> Vec<TextSegment
     segments
 }
 
-/// The items of a text list: a range `A..B [step N]`, or comma-separated.
-fn text_list_items(list: &str) -> Vec<String> {
-    if let Some((start, rest)) = list.split_once("..") {
-        let (end, step) = match rest.split_once(" step ") {
-            Some((end, step)) => (end.trim(), step.trim().parse::<i64>().unwrap_or(1).max(1)),
-            None => (rest.trim(), 1),
-        };
-        if let (Ok(start), Ok(end)) = (start.trim().parse::<i64>(), end.parse::<i64>()) {
-            return numeric_range(start, end, step);
-        }
-    }
-    list.split(',')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect()
-}
-
-/// Make `$target` (and `$target.key`, and nested lists) a copy of the list
-/// item stored under `source`.
-fn bind_item(vars: &mut HashMap<String, String>, source: &str, target: &str) {
-    let entries = record_entries(vars, source);
-    bind_record(vars, target, &entries);
-}
-
-/// Whether the variable key `key` is `name` or one of its parts (a field,
-/// an item, a list's length, the quoted form).
-fn is_under(key: &str, name: &str) -> bool {
-    key.strip_prefix(name)
-        .is_some_and(|rest| rest.is_empty() || rest.starts_with(['.', '#', '"']))
-}
-
-/// A value with all its parts, as the keys after its name and their
-/// values: a record's fields, a list's items and length.
-fn record_entries(vars: &HashMap<String, String>, name: &str) -> Vec<(String, String)> {
-    vars.iter()
-        .filter(|(key, _)| is_under(key, name))
-        .map(|(key, value)| (key[name.len()..].to_string(), value.clone()))
-        .collect()
-}
-
-/// Make `$target` the value whose parts are `entries` (see
-/// [`record_entries`]), replacing what it was.
-fn bind_record(vars: &mut HashMap<String, String>, target: &str, entries: &[(String, String)]) {
-    vars.retain(|key, _| !is_under(key, target));
-    for (rest, value) in entries {
-        vars.insert(format!("{}{}", target, rest), value.clone());
-    }
-    // A record has no text of its own
-    vars.entry(target.to_string()).or_default();
-}
-
 /// The variable `raw` is, when it is exactly one `$name` or `${name}`.
-fn whole_reference(raw: &str, vars: &HashMap<String, String>) -> Option<String> {
+fn whole_reference(raw: &str, env: &Env) -> Option<String> {
     let after = raw.trim().strip_prefix('$')?;
-    match interp::reference(after, &Vars(vars))? {
+    match interp::reference(after, env)? {
         (interp::Reference::Var(path), len) if len == after.len() => Some(path),
         _ => None,
     }
-}
-
-/// The record or list `raw` is, when it is one variable holding one: a
-/// parameter passed it gets the whole value, not just its text.
-fn whole_record(raw: &str, vars: &HashMap<String, String>) -> Option<String> {
-    whole_reference(raw, vars).filter(|path| interp::Scope::has_fields(&Vars(vars), path))
-}
-
-/// Inclusive integer range from `start` to `end` (counting down when
-/// `start > end`), stepping by `step`. Stops instead of overflowing.
-fn numeric_range(start: i64, end: i64, step: i64) -> Vec<String> {
-    let mut items = Vec::new();
-    let mut n = start;
-    if start <= end {
-        while n <= end {
-            items.push(n.to_string());
-            match n.checked_add(step) {
-                Some(next) => n = next,
-                None => break,
-            }
-        }
-    } else {
-        while n >= end {
-            items.push(n.to_string());
-            match n.checked_sub(step) {
-                Some(next) => n = next,
-                None => break,
-            }
-        }
-    }
-    items
 }
 
 /// The attributes of `tokens` after each whole-attribute `if()` has
@@ -4854,75 +4966,21 @@ fn skip_ws(chars: &[char], mut pos: usize) -> usize {
     pos
 }
 
-/// Flatten a JSON value into variable assignments.
-/// - Top-level object: each key becomes `prefix.key`
-/// - Top-level array: `prefix` becomes comma-separated, `prefix._count` set
-/// - Array of objects: each item becomes space-separated values for @each destructuring
-fn flatten_json(prefix: &str, value: &JsonValue, vars: &mut HashMap<String, String>) {
-    match value {
-        JsonValue::Str(s) => {
-            vars.insert(prefix.to_string(), s.clone());
-        }
-        JsonValue::Number(n) => {
-            vars.insert(prefix.to_string(), n.clone());
-        }
-        JsonValue::Bool(b) => {
-            vars.insert(prefix.to_string(), b.to_string());
-        }
-        JsonValue::Null => {
-            vars.insert(prefix.to_string(), String::new());
-        }
-        JsonValue::Object(pairs) => {
-            for (key, val) in pairs {
-                flatten_json(&format!("{}.{}", prefix, key), val, vars);
-            }
-        }
-        JsonValue::Array(items) => {
-            // A list: its length under `NAME#` (see `lookup`), its text
-            // items joined as its value, and each item as `NAME.INDEX`
-            vars.insert(format!("{}#", prefix), items.len().to_string());
-            let text: Vec<String> = items
-                .iter()
-                .map(json_value_to_string)
-                .filter(|s| !s.is_empty())
-                .collect();
-            vars.insert(prefix.to_string(), text.join(", "));
-            // Also set indexed access: prefix.0, prefix.1, etc.
-            for (i, item) in items.iter().enumerate() {
-                flatten_json(&format!("{}.{}", prefix, i), item, vars);
-            }
-        }
-    }
-}
-
-/// Resolve `$name` for an expression: a list if `name` was loaded from a
-/// JSON array, else its text.
-fn lookup(vars: &HashMap<String, String>, name: &str) -> Option<crate::expr::Value> {
-    use crate::expr::Value;
-    match vars
-        .get(&format!("{}#", name))
-        .and_then(|n| n.parse::<usize>().ok())
-    {
-        Some(len) => Some(Value::List(
-            (0..len)
-                .map(|i| {
-                    vars.get(&format!("{}.{}", name, i))
-                        .cloned()
-                        .unwrap_or_default()
-                })
+/// A JSON value as an htmlang value: an object is a record, an array a
+/// list, a string text (never quoted text), `null` empty. A number keeps
+/// the text it is written with (`1.50`), and reads as a number.
+fn json_value(json: JsonValue) -> Value {
+    match json {
+        JsonValue::Null => Value::empty(),
+        JsonValue::Bool(b) => Value::Bool(b),
+        JsonValue::Number(n) | JsonValue::Str(n) => Value::Str(n),
+        JsonValue::Array(items) => Value::list(items.into_iter().map(json_value).collect()),
+        JsonValue::Object(pairs) => Value::Record(Rc::new(
+            pairs
+                .into_iter()
+                .map(|(key, value)| (key, json_value(value)))
                 .collect(),
         )),
-        None => vars.get(name).cloned().map(Value::Str),
-    }
-}
-
-fn json_value_to_string(v: &JsonValue) -> String {
-    match v {
-        JsonValue::Str(s) => s.clone(),
-        JsonValue::Number(n) => n.clone(),
-        JsonValue::Bool(b) => b.to_string(),
-        JsonValue::Null => String::new(),
-        JsonValue::Array(_) | JsonValue::Object(_) => String::new(),
     }
 }
 

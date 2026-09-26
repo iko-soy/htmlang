@@ -24,7 +24,9 @@ Linux, macOS, and Windows. Your change should pass all three.
     server takes definitions, directives and verbatim bodies from it. It
     also holds `ESCAPES`, the one escape table of every htmlang string.
   - `parser.rs` — evaluates the tree: definitions, data, loops and
-    conditions, and the checks over code that doesn't run.
+    conditions, and the checks over code that doesn't run. Names live in
+    `Env`, one frame per block, so a definition is visible to the end of
+    its block and a function keeps the frames of its definition.
   - `diagnostic.rs` — `Diagnostic` and the stable diagnostic codes.
   - `ast.rs` — the element kinds; every plain HTML element is one row in
     `TAGS`, and every directive one row in `DIRECTIVES` (its argument, its
@@ -34,6 +36,9 @@ Linux, macOS, and Windows. Your change should pass all three.
   - `expr.rs` — the expression language for conditions, computed values and
     `${...}`. It evaluates only what decides the result (the branch `if()`
     takes, the side of `and`/`or` that decides) and only reads the rest.
+  - `value.rs` — the value types (text, number, true/false, list,
+    record) and the rules defined once on them: truthiness, comparison,
+    how numbers and lists print, ranges.
   - `interp.rs` — `$name` and `${...}`: where a name ends and how one slot
     of text (a text run, an attribute's value, an argument, a path) is
     filled in, including what quoted text inserts in CSS and in text. The

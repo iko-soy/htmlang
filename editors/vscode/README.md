@@ -8,7 +8,7 @@ Syntax highlighting, snippets, and language server support for
 - **Syntax highlighting**: `@` elements and directives, `$variables`,
   `[attribute]` lists with state and media prefixes, `if(...)` and its
   `[groups]`, `key=value` HTML attributes, quoted text, escapes (`\,`, `\$`, `\]`), `{@inline}` elements,
-  colors, numbers and `-- comments`.
+  `@each $item in` headers and ranges (`1..5`), colors, numbers and `-- comments`.
 - **Diagnostics**: the compiler's own, each with its code: parse errors,
   unknown elements and attributes with "did you mean" suggestions, undefined
   and unused definitions, and accessibility warnings. The whole file is
@@ -16,12 +16,15 @@ Syntax highlighting, snippets, and language server support for
   `@include` and `@data` paths resolve from the file's folder.
 - **Completion** of elements, directives, layout attributes, CSS properties,
   HTML attributes, prefixes, `if()` (and attributes inside its branches),
-  variables, functions and the parameters a function call hasn't passed yet, the slot names of a call's `@slot`
+  the variables visible where you type (definitions above in the block and
+  the blocks around it, `@each` variables and a function's parameters),
+  functions and the parameters a function call hasn't passed yet, the slot names of a call's `@slot`
   blocks, and elements and functions inside `{@...}` in text. It triggers on `@`, `$`, `[` and `,`.
 - **Hover** documentation for elements, directives, attributes (CSS
   properties link to MDN) and `if()`, function signatures with their slots and
   whether they take content, variable values, and color swatches.
-- **Navigation**: go to definition, find references and rename for
+- **Navigation**: go to definition (the definition a name means at that
+  line), find references and rename for
   `$variables`, bundles and `@let @name` functions. `@include`, `@markdown` and
   `@data` file paths are links.
 - **Code actions**: fixes keyed on diagnostic codes (replace a misspelled

@@ -737,7 +737,7 @@ fn a_known_name_in_the_wrong_place_is_not_its_own_suggestion() {
         .find(|d| d.code == "unknown-element")
         .expect("@b is not defined when @a runs");
     assert!(
-        unknown.message.contains("isn't defined yet"),
+        unknown.message.contains("isn't visible here"),
         "{}",
         unknown.message
     );
@@ -754,7 +754,7 @@ fn a_known_name_in_the_wrong_place_is_not_its_own_suggestion() {
     // its `@let` has run
     for (src, says) in [
         ("@el > @if true\n  x\n", "is a directive"),
-        ("Call {@f}\n@let @f\n  @el\n", "isn't defined yet"),
+        ("Call {@f}\n@let @f\n  @el\n", "isn't visible here"),
     ] {
         let d = parser::parse(src)
             .diagnostics
@@ -1165,4 +1165,176 @@ fn slot_mistakes_no_longer_drop_content_silently() {
         "{:?}",
         result.diagnostics
     );
+}
+
+// --- One value model (typed values, real lists, lexical scope) ---
+
+#[test]
+fn a_comma_list_counts_its_items_not_its_characters() {
+    let out = compile("@let fruits apple, banana, cherry\n@text ${length($fruits)} fruits\n");
+    assert!(out.contains("3 fruits"), "{}", out);
+    // Quoted or escaped, text with commas is one text
+    let out = compile(
+        "@let tagline \"Fast, simple\"\n@let motto a\\, b\n@text ${length($tagline)} ${length($motto)}\n",
+    );
+    assert!(out.contains("12 4"), "{}", out);
+}
+
+#[test]
+fn a_list_prints_as_it_was_written() {
+    let out = compile("@let price 1,299\n@let rgb red,green,blue\n@text $price $rgb\n");
+    assert!(out.contains("1,299 red,green,blue"), "{}", out);
+}
+
+#[test]
+fn rebinding_a_name_leaves_no_stale_fields() {
+    let out = compile(
+        "@data $x [\"a\", \"b\"]\n@let x hello, world, there\n@text ${length($x)} $x.0\n@each $w in $x\n  @text ($w)\n",
+    );
+    assert!(out.contains("3 hello"), "{}", out);
+    assert!(out.contains("(there)"), "{}", out);
+    let out = compile("@data $post {\"title\": \"T\"}\n@let post plain\n@text <$post.title>\n");
+    // `$post` is text now: `.title` isn't a field of it
+    assert!(out.contains("&lt;plain.title&gt;"), "{}", out);
+}
+
+#[test]
+fn a_let_in_an_each_does_not_carry_over() {
+    let src =
+        "@each $i in 1, 2\n  @if $i == 2\n    @text prev=$last\n  @let last $i\n  @text $last\n";
+    assert!(has_code(src, 3, "undefined-variable"), "{:?}", codes(src));
+}
+
+#[test]
+fn bundles_and_functions_do_not_leak_out_of_blocks() {
+    for src in [
+        "@if true\n  @let b [padding 4]\n@el [$b] x\n",
+        "@each $i in 1\n  @let b [padding 4]\n@el [$b] x\n",
+        "@let @f\n  @let b [padding 4]\n  @el [$b] in\n@f\n@el [$b] x\n",
+    ] {
+        let last = src.lines().count();
+        assert!(
+            has_code(src, last, "undefined-variable"),
+            "{}: {:?}",
+            src,
+            codes(src)
+        );
+    }
+    for src in [
+        "@if true\n  @let @g\n    @text g\n@g\n",
+        "@el\n  @let @g\n    @text g\n@g\n",
+    ] {
+        let last = src.lines().count();
+        assert!(
+            has_code(src, last, "unknown-element"),
+            "{}: {:?}",
+            src,
+            codes(src)
+        );
+    }
+}
+
+#[test]
+fn values_in_an_element_s_children_stay_there() {
+    let src = "@el\n  @let v one\n  @text $v\n@text v=$v\n";
+    assert!(has_code(src, 4, "undefined-variable"), "{:?}", codes(src));
+}
+
+#[test]
+fn a_record_goes_to_a_parameter_of_any_name() {
+    let out = compile(
+        "@data $posts [{\"title\": \"A\", \"slug\": \"a\"}]\n@let @post-card [post]\n  @h3 $post.title / $post.slug\n@each $p in $posts\n  @post-card [post $p]\n",
+    );
+    assert!(out.contains("A / a"), "{}", out);
+}
+
+#[test]
+fn a_function_body_does_not_see_the_names_at_its_call() {
+    let src = "@let @f\n  @text $v\n@el\n  @let v 1\n  @f\n";
+    assert!(has_code(src, 2, "undefined-variable"), "{:?}", codes(src));
+    // Nor a definition further down
+    let src = "@let @f\n  @text $later\n@let later 1\n@f\n";
+    assert!(has_code(src, 2, "undefined-variable"), "{:?}", codes(src));
+}
+
+#[test]
+fn a_range_is_a_list_inside_expressions() {
+    let out = compile("@text ${reverse(1..5)}\n@each $n in ${reverse(1..3)}\n  @text <$n>\n");
+    assert!(out.contains("5, 4, 3, 2, 1"), "{}", out);
+    assert!(out.contains("&lt;3&gt;"), "{}", out);
+    let out = compile("@let a 2\n@let b 4\n@text ${$a..$b}\n");
+    assert!(out.contains("2, 3, 4"), "{}", out);
+}
+
+#[test]
+fn zero_is_false_however_it_is_written() {
+    let out = compile(
+        "@let z 0.0\n@let n = 1 - 1\n@text ${if($z, yes, no)} ${if($n, yes, no)} ${if(0, yes, no)}\n",
+    );
+    assert!(out.contains("no no no"), "{}", out);
+}
+
+#[test]
+fn computed_numbers_print_without_float_noise() {
+    let out = compile("@el [width ${100 / 3}%] ${0.1 + 0.2}\n");
+    assert!(out.contains("width:33.3333%"), "{}", out);
+    assert!(out.contains(">0.3<"), "{}", out);
+}
+
+#[test]
+fn list_items_keep_escaped_commas_and_quotes() {
+    let out = compile(
+        "@let items a\\, b, c\n@each $y in $items\n  @text ($y)\n@each $z in \"c, d\", e\n  @text <$z>\n",
+    );
+    assert!(out.contains("(a, b)") && out.contains("(c)"), "{}", out);
+    assert!(
+        out.contains("&lt;c, d&gt;") && out.contains("&lt;e&gt;"),
+        "{}",
+        out
+    );
+}
+
+#[test]
+fn a_text_function_given_a_list_is_an_error() {
+    let result = parser::parse("@let tagline Fast, simple\n@text ${uppercase($tagline)}\n");
+    let d = result
+        .diagnostics
+        .iter()
+        .find(|d| d.code == "invalid-expression")
+        .expect("an error");
+    assert!(d.message.contains("a list of 2 items"), "{}", d.message);
+    assert!(d.message.contains("quote it"), "{}", d.message);
+}
+
+#[test]
+fn each_needs_a_list() {
+    let src = "@each $x in [1, 2]\n  @text $x\n@else\n  @text none\n";
+    let found = parser::parse(src).diagnostics;
+    let d = found
+        .iter()
+        .find(|d| d.code == "invalid-loop")
+        .expect("error");
+    assert_eq!(d.suggestion.as_deref(), Some("1, 2"));
+    let src = "@data $post {\"title\": \"T\"}\n@each $x in $post\n  @text $x\n";
+    assert!(has_code(src, 2, "invalid-loop"), "{:?}", codes(src));
+    let src = "@each $i in 1..5 step 0\n  @text $i\n";
+    assert!(has_code(src, 1, "invalid-expression"), "{:?}", codes(src));
+}
+
+#[test]
+fn a_field_set_with_let_makes_a_record() {
+    let result = parser::parse(
+        "@let t.greeting Hello\n@let t.farewell Bye\n@text $t.greeting $t.farewell\n",
+    );
+    // Used through its fields: not reported unused
+    assert!(
+        !result
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "unused-variable"),
+        "{:?}",
+        result.diagnostics
+    );
+    let out = codegen::generate(&result.document);
+    assert!(out.contains("Hello Bye"), "{}", out);
 }

@@ -452,9 +452,27 @@ is named with `@` and called with it. Only a function has a body, so an
 indented block under a value or a bundle is an error, and so are `@let $x`
 (write `@let x`) and a `@let` without a value.
 
-Values, bundles and functions share one namespace: a `@let` gives its name a
-new meaning, whatever the name meant before. A definition applies from its
-own line onward.
+Values, bundles and functions share one namespace, and one rule says where
+a name is visible: **from the line that defines it to the end of its
+block**. A block is the file, the lines indented under an element, a branch
+of `@if`, one repetition of `@each` or a function's body. A `@let` gives its
+name a new meaning in its block, whatever the name meant before, and hides
+what the name means around the block until the block ends:
+
+```
+@let gap 8
+@el [spacing $gap]
+  @let gap 16
+  @el [padding $gap] Sixteen
+@el [padding $gap] Eight
+```
+
+Parameters, `@each` variables and `@data` names follow the same rule, and
+each repetition of `@each` starts afresh, so a `@let` in one doesn't carry
+over to the next. A function's body sees its parameters and what is
+visible where the function is defined: not the names at a call, and not a
+definition further down, so a function means the same wherever it is
+called. `@let t.greeting Hello` gives the record `$t` the field `greeting`.
 
 ### Variables
 
@@ -491,6 +509,53 @@ A name that isn't defined is an error. A field that a record doesn't have
 is empty, so optional fields of `@data` records work: `@if $post.draft` is
 false, and `${default($post.tag, none)}` gives `none`.
 
+### Values
+
+A value is text, a number, `true` or `false`, a list or a record, and a
+name holds a whole value: a `@let`, a parameter, `@each` and `@data` bind
+one, and binding the name again replaces it. What a `@let` holds is what it
+says:
+
+```
+-- Text, as written
+@let size 16px
+-- Commas make a list, which prints as it was written
+@let fruits apple, banana, cherry
+-- Quoted, or with `\,`, text with commas in it is one text
+@let tagline "Fast, simple"
+@let motto small\, fast
+-- A range of whole numbers
+@let steps 1..9 step 4
+-- One `$name` or `${...}` keeps the type of what it holds
+@data $posts [{"title": "Hello"}, {"title": "Again"}]
+@let first $posts.0
+@let backwards ${reverse($fruits)}
+@text [font-size $size] $fruits: ${length($fruits)}. $tagline: ${length($tagline)}. $motto. $steps
+@text $first.title, $backwards
+```
+
+The last lines give `apple, banana, cherry: 3. Fast, simple: 12. small,
+fast. 1..9 step 4` and `Hello, cherry, banana, apple`. A value that is
+exactly one `$name` or `${...}` keeps its type wherever it goes: a `@let`, a
+function's parameter or default, the list of `@each`. So a record can be
+passed to a function whole (`@post-card [post $p]`), and a list stays a
+list.
+
+- Text written without quotes reads as a number when it is one (`3`,
+  `0.5`), and as false when it is `false` or `0`: that is how htmlang writes
+  numbers and flags (`@let gap 8`, `@card [dot false]`). Quoted text is
+  always text.
+- **False** is `false`, empty text, `0` and an empty list (or record).
+  Everything else is true, including `no` and quoted `"0"`.
+- `==` and `!=` compare numbers as numbers (`1.0 == 1`), lists and records
+  item by item, and anything else as text, exactly (`#FFF` isn't `#fff`).
+  `<`, `>`, `<=` and `>=` compare numbers as numbers and text by character
+  order.
+- A computed number prints without float noise: whole numbers without
+  decimals, others with at most four (`${100 / 3}` is `33.3333`).
+- A list prints as written when the source wrote it, and otherwise as its
+  items joined with `, `. A record has no text of its own.
+
 **Quoted text remembers that it was quoted.** A value written `"..."` (in a
 `@let`, an attribute or a function's argument) keeps its quotes in a CSS
 value, where CSS needs them, and loses them in text, in HTML attribute
@@ -518,7 +583,8 @@ takes no parameters.
 
 A default is filled in at each call that leaves its parameter out, like a
 value passed for it: it may hold spaces, quotes, escapes, `${...}` and
-`$variables`, including the parameters declared before it
+`$variables`. It sees what the body sees: the names visible where the
+function is defined and the parameters declared before it
 (`[title, heading "About $title"]`). A default that uses a parameter
 declared after it is an error.
 
@@ -687,18 +753,21 @@ Conditions and computed values (`@let x = ...`) are expressions:
 
 | | |
 |---|---|
-| Values | numbers, `"strings"` (with `$var` interpolation), `$variables`, `$record.field`, `true`, `false`, and bare words (`dark`, `#fff`) as strings |
+| Values | numbers, `"strings"` (with `$var` interpolation), `$variables` (with their type: a list or a record too), `$record.field`, `true`, `false`, ranges `A..B` and `A..B step N`, and bare words (`dark`, `#fff`) as text |
 | Arithmetic | `+ - * / %` with the usual precedence, unary `-`, `( )` |
-| Comparison | `== != < > <= >=` (numeric when both sides are numbers) |
-| Logic | `and`, `or`, `not`. An empty value, `false` and `0` are false |
+| Comparison | `== != < > <= >=`: numbers as numbers, text exactly, lists and records item by item (see [Values](#values)) |
+| Logic | `and`, `or`, `not`. `false`, empty text, `0` and an empty list are false |
 | Choice | `if(CONDITION, A, B)`, where `B` may be left out (empty) |
 | Tests | `contains(s, x)` (in a text, or as an item of a list), `starts-with(s, x)`, `ends-with(s, x)` |
-| Text | `uppercase(s)`, `lowercase(s)`, `capitalize(s)`, `trim(s)`, `length(s)` (the items of a list, or the characters of a text), `reverse(s)`, `truncate(s, n)`, `replace(s, old, new)`, `default(s, fallback)` |
+| Text | `uppercase(s)`, `lowercase(s)`, `capitalize(s)`, `trim(s)`, `length(s)` (the items of a list, or the characters of a text), `reverse(s)` (a list's items, or a text's characters), `truncate(s, n)`, `replace(s, old, new)`, `default(s, fallback)` (the fallback when `s` is empty text or an empty list) |
 | Color | `lighten(c, pct)`, `darken(c, pct)`, `alpha(c, a)`, `mix(c1, c2, pct)` |
 
 Variables are looked up during evaluation, so a value that contains `==` or
 spaces is still one value. An invalid expression is a compile error, and so
-is an undefined variable.
+is an undefined variable. A text function given a list is an error too,
+instead of a guess: `uppercase()` of `Fast, simple` (a list, because of its
+comma) says so, and the text is written `"Fast, simple"` or `Fast\, simple`.
+A variable's name ends at `..`, so `${$from..$to}` is a range.
 
 Only what decides the result is evaluated: `if()` evaluates the branch it
 takes, and `and` and `or` stop at the side that decides. So
@@ -732,11 +801,14 @@ All control flow runs at compile time.
 ```
 
 `@each $item in LIST` repeats its body for each item. Its variables are
-written with `$`, like `@data $name`. A list can be a list
-loaded with `@data`, a text split on commas, or a range. A range counts down
-when its start is greater than its end, and `step` sets the increment. An
-optional second variable is the index, starting from 0. `@else` gives the
-content to show when the list is empty.
+written with `$`, like `@data $name`. LIST is a value, read like the value
+of a `@let`: items written with commas (a quoted item or one with `\,` is
+one text), a range `A..B` (which counts down when its start is greater than
+its end, and takes `step N`), or one `$name` or `${...}` that holds a list,
+such as one loaded with `@data` or `${reverse(1..5)}`. A text is one item,
+and empty text none. Each item is bound whole, so a record keeps its fields.
+An optional second variable is the index, starting from 0. `@else` gives
+the content to show when the list is empty.
 
 ```
 @let fruits apple, banana, cherry

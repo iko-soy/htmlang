@@ -12,7 +12,7 @@
 //!   it). `$--name` is the value of the custom property `--name`.
 //! - `.field` continues the name only when the value is a record or a list
 //!   (`$post.title`, `$tags.0`). After `@let lang fr`, `$lang.json` is
-//!   `fr.json`.
+//!   `fr.json`, and `$a..$b` is two names.
 //! - `${name}` is the same name, delimited (`${size}px`), and `${EXPR}`
 //!   inserts the value of an expression (see `expr.rs`).
 //! - A `$` before anything else is text: `$5`, `$$`, a `$` at the end.
@@ -22,21 +22,13 @@
 //!   quotes: a CSS value gets them (`content $arrow` is `content:"→ "`),
 //!   text and HTML attribute values don't. See [`Sink`].
 
-use crate::expr::{self, Value};
+use crate::expr;
+use crate::value::Value;
 
 /// The variables in scope, as the evaluator stores them.
 pub trait Scope {
-    /// Whether the name or field path (`post.title`) has a value of its own.
-    fn defined(&self, path: &str) -> bool;
-    /// The value of a name or field path.
-    fn value(&self, path: &str) -> Option<Value>;
-    /// Whether `path` is a record or a list, whose fields `.field` reads.
-    fn has_fields(&self, path: &str) -> bool;
-    /// When the value of `path` is quoted text, the text as CSS writes it,
-    /// quotes included (`"a\"b"` for the text `a"b`).
-    fn quoted(&self, _path: &str) -> Option<String> {
-        None
-    }
+    /// The value of a variable, by its name (without fields).
+    fn get(&self, name: &str) -> Option<Value>;
 }
 
 /// Where a slot's value goes, which decides what quoted text inserts.
@@ -164,17 +156,19 @@ fn path_at(s: &str, scope: &dyn Scope) -> Option<(String, usize)> {
     }
     let mut path = s[..n].to_string();
     let mut len = n;
+    let mut value = scope.get(&path);
     while let Some(rest) = s[len..].strip_prefix('.') {
         let f = word_len(rest, is_name_char);
-        if f == 0 {
+        let Some(field) = value
+            .as_ref()
+            .filter(|_| f > 0)
+            .and_then(|v| v.field(&rest[..f]))
+        else {
             break;
-        }
-        let field = format!("{}.{}", path, &rest[..f]);
-        if !scope.defined(&field) && !scope.has_fields(&path) {
-            break;
-        }
-        path = field;
+        };
+        path = format!("{}.{}", path, &rest[..f]);
         len += 1 + f;
+        value = Some(field);
     }
     Some((path, len))
 }
@@ -205,17 +199,15 @@ pub fn reference<'a>(s: &'a str, scope: &dyn Scope) -> Option<(Reference<'a>, us
     Some((Reference::Var(path), len))
 }
 
-/// The value of a name path, or `None` when it is undefined. A record has
-/// no text of its own, and a field a record doesn't have is empty.
+/// The value of a name path, or `None` when it is undefined. A field that
+/// a record doesn't have is empty.
 pub fn resolve(path: &str, scope: &dyn Scope) -> Option<Value> {
-    if let Some(value) = scope.value(path) {
-        return Some(value);
+    let mut parts = path.split('.');
+    let mut value = scope.get(parts.next()?)?;
+    for field in parts {
+        value = value.field(field)?;
     }
-    if scope.has_fields(path) {
-        return Some(Value::Str(String::new()));
-    }
-    let (record, _) = path.rsplit_once('.')?;
-    scope.has_fields(record).then(|| Value::Str(String::new()))
+    Some(value)
 }
 
 /// Fill in the `$name`s and `${...}`s of one slot's text, for text (see
@@ -260,7 +252,10 @@ pub fn interpolate_for(text: &str, scope: &dyn Scope, sink: Sink) -> (String, Ve
         };
         match reference {
             Reference::Var(path) => match resolve(&path, scope) {
-                Some(value) => out.push_str(&insert(value.to_string(), scope.quoted(&path))),
+                Some(value) => out.push_str(&insert(
+                    value.to_string(),
+                    value.quoted_css().map(str::to_string),
+                )),
                 None => {
                     problems.push(Problem::Undefined {
                         name: path,
@@ -368,46 +363,40 @@ pub(crate) mod tests {
     use super::*;
     use std::collections::HashMap;
 
-    /// Variables stored as the evaluator stores them: a record's fields
-    /// under `name.field`, a list's length under `name#`.
-    pub(crate) struct Map(pub HashMap<String, String>);
+    /// Variables by name: text from `new`, any value from `with`.
+    pub(crate) struct Map(pub HashMap<String, Value>);
 
     impl Map {
         pub(crate) fn new(pairs: &[(&str, &str)]) -> Self {
             Map(pairs
                 .iter()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .map(|(k, v)| (k.to_string(), Value::Str(v.to_string())))
                 .collect())
+        }
+
+        pub(crate) fn with(mut self, name: &str, value: Value) -> Self {
+            self.0.insert(name.to_string(), value);
+            self
         }
     }
 
     impl Scope for Map {
-        fn defined(&self, path: &str) -> bool {
-            self.0.contains_key(path)
+        fn get(&self, name: &str) -> Option<Value> {
+            self.0.get(name).cloned()
         }
-        fn value(&self, path: &str) -> Option<Value> {
-            if let Some(len) = self.0.get(&format!("{}#", path)) {
-                let len: usize = len.parse().unwrap_or(0);
-                return Some(Value::List(
-                    (0..len)
-                        .map(|i| {
-                            self.0
-                                .get(&format!("{}.{}", path, i))
-                                .cloned()
-                                .unwrap_or_default()
-                        })
-                        .collect(),
-                ));
-            }
-            self.0.get(path).cloned().map(Value::Str)
-        }
-        fn has_fields(&self, path: &str) -> bool {
-            self.0.contains_key(&format!("{}#", path))
-                || self
-                    .0
-                    .keys()
-                    .any(|k| k.strip_prefix(path).is_some_and(|r| r.starts_with('.')))
-        }
+    }
+
+    pub(crate) fn text_list(items: &[&str]) -> Value {
+        Value::list(items.iter().map(|s| Value::Str(s.to_string())).collect())
+    }
+
+    pub(crate) fn record(fields: &[(&str, &str)]) -> Value {
+        Value::Record(std::rc::Rc::new(
+            fields
+                .iter()
+                .map(|(k, v)| (k.to_string(), Value::Str(v.to_string())))
+                .collect(),
+        ))
     }
 
     fn vars() -> Map {
@@ -415,14 +404,10 @@ pub(crate) mod tests {
             ("lang", "fr"),
             ("n", "3"),
             ("n-1", "two"),
-            ("post", ""),
-            ("post.title", "Hello"),
-            ("tags#", "2"),
-            ("tags", "a, b"),
-            ("tags.0", "a"),
-            ("tags.1", "b"),
             ("--brand", "#3b82f6"),
         ])
+        .with("post", record(&[("title", "Hello")]))
+        .with("tags", text_list(&["a", "b"]))
     }
 
     fn fill(text: &str) -> String {
@@ -439,6 +424,8 @@ pub(crate) mod tests {
         assert_eq!(fill("$n-1"), "two");
         assert_eq!(fill("$--brand"), "#3b82f6");
         assert_eq!(fill("1..$n"), "1..3");
+        // A name ends at `..`
+        assert_eq!(fill("$n..$n $post.title..x"), "3..3 Hello..x");
     }
 
     #[test]
@@ -474,27 +461,13 @@ pub(crate) mod tests {
         );
     }
 
-    /// Variables as [`Map`] stores them, where `q` holds quoted text.
-    struct Quoting(Map);
-
-    impl Scope for Quoting {
-        fn defined(&self, path: &str) -> bool {
-            self.0.defined(path)
-        }
-        fn value(&self, path: &str) -> Option<Value> {
-            self.0.value(path)
-        }
-        fn has_fields(&self, path: &str) -> bool {
-            self.0.has_fields(path)
-        }
-        fn quoted(&self, path: &str) -> Option<String> {
-            (path == "q").then(|| r#""a\"b""#.to_string())
-        }
-    }
-
     #[test]
     fn quoted_text_keeps_its_quotes_only_in_css() {
-        let scope = Quoting(Map::new(&[("q", r#"a"b"#), ("n", r#"x"y"#)]));
+        let quoted = Value::Quoted(crate::ast::Quoted {
+            text: r#"a"b"#.into(),
+            css: r#""a\"b""#.into(),
+        });
+        let scope = Map::new(&[("n", r#"x"y"#)]).with("q", quoted);
         let fill = |text: &str, sink| interpolate_for(text, &scope, sink).0;
         assert_eq!(fill("$q", Sink::Text), r#"a"b"#);
         assert_eq!(fill("$q", Sink::Css), r#""a\"b""#);

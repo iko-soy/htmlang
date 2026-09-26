@@ -97,7 +97,7 @@ pub(crate) const DIRECTIVES: &[Doc] = &[
     ),
     doc(
         "let",
-        "Defines a value, quoted text (`\"...\"`, which keeps its quotes only in CSS), a computed value (`= expr`) or an attribute bundle (`[...]`), used as `$name`; or, with `@` before the name, a function with parameters `[param, param default]` (a name alone is required) and an indented body. A function is called like an element, on its own line, in a chain or inline in text (`{@name ...}`): `@name [param value]`, or a parameter's name alone for `true`; its other attributes style its root element. They share one namespace, and a function can't take the name of a built-in element or directive.",
+        "Defines a value, quoted text (`\"...\"`, which keeps its quotes only in CSS), a computed value (`= expr`) or an attribute bundle (`[...]`), used as `$name`; or, with `@` before the name, a function with parameters `[param, param default]` (a name alone is required) and an indented body. A value is text, a list (commas make one: `a, b, c`, printed as written), a range (`1..5`), or, when it is one `$name` or `${...}`, whatever that holds (a record, a list). A function is called like an element, on its own line, in a chain or inline in text (`{@name ...}`): `@name [param value]`, or a parameter's name alone for `true`; its other attributes style its root element. They share one namespace. A definition is visible from its line to the end of its block, and a function's body sees its parameters and what is visible where it is defined. A function can't take the name of a built-in element or directive.",
         "@let primary #3b82f6\n@let arrow \"→ \"\n@let gap = 8 * 2\n@let card [padding 20]\n@let @cta [label]\n  @el [$card] $label",
     ),
     doc("include", "Inserts another `.hl` file here, with its definitions.", "@include header.hl"),
@@ -110,10 +110,10 @@ pub(crate) const DIRECTIVES: &[Doc] = &[
     doc("else", "Fallback branch of `@if` or `@each`.", "@else\n  @text None"),
     doc(
         "each",
-        "Repeats its body for each item of a list or range; an optional second variable is the index, from 0. Records from `@data` have fields `$item.key`.",
-        "@each $item, $i in apple, banana\n  @text $i: $item\n@each $post in $posts\n  @text $post.title",
+        "Repeats its body for each item of a list: items written with commas, a range `A..B` (with `step N`), or one `$name` or `${...}` that holds a list. Each item is bound whole, so a record keeps its fields (`$item.key`); an optional second variable is the index, from 0. Each repetition is a block of its own.",
+        "@each $item, $i in apple, banana\n  @text $i: $item\n@each $n in 10..0 step 5\n  @text $n\n@each $post in $posts\n  @text $post.title",
     ),
-    doc("data", "Loads data as variables: a JSON file, inline JSON, a glob of files (a list of records), or `env:NAME`.", "@data $site site.json\n@data $links [{\"label\": \"Home\", \"url\": \"/\"}]"),
+    doc("data", "Loads data into a variable: a JSON file or inline JSON (objects are records, arrays lists), a glob of files (a list of records), or `env:NAME` (text).", "@data $site site.json\n@data $links [{\"label\": \"Home\", \"url\": \"/\"}]"),
 ];
 
 /// htmlang's own attributes, plus CSS properties htmlang treats specially.

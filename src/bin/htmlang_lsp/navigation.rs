@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use tower_lsp::lsp_types::*;
 
-use htmlang::syntax::DefinitionKind;
+use htmlang::syntax::{DefinitionKind, VisibleKind};
 
 use crate::hover::{is_word_byte, variable_at, variable_refs_named, word_at};
 use crate::state::WorkspaceIndex;
@@ -38,10 +38,22 @@ pub(crate) fn definition_at(
 
     let col = (position.character as usize).min(line.len());
     let word = word_at(line, col)?;
-    let range = if let Some(name) = word.strip_prefix('$') {
-        find_definition(text, name)?
-    } else {
-        find_fn_definition(text, word.strip_prefix('@')?)?
+    // The definition the name means at this line, else any of that name
+    let at = position.line as usize + 1;
+    let name = word.strip_prefix('$').or_else(|| word.strip_prefix('@'))?;
+    let function = !word.starts_with('$');
+    let visible = tree
+        .visible_at(at)
+        .into_iter()
+        .rev()
+        .find(|v| {
+            v.name == name && (v.kind == VisibleKind::Let(DefinitionKind::Function)) == function
+        })
+        .map(|v| tree::range(v.span));
+    let range = match (visible, function) {
+        (Some(range), _) => range,
+        (None, false) => find_definition(text, name)?,
+        (None, true) => find_fn_definition(text, name)?,
     };
     Some(GotoDefinitionResponse::Scalar(Location {
         uri: uri.clone(),
@@ -483,6 +495,21 @@ mod tests {
         assert_eq!(found.end, Position::new(0, 10));
         let found = find_definition(text, "tone").expect("parameter");
         assert_eq!(found.start, Position::new(0, 19));
+    }
+
+    #[test]
+    fn a_name_goes_to_the_definition_it_means_at_that_line() {
+        // The inner `x` hides the outer one in its block; after the block,
+        // the outer one is back. A parameter wins inside its function.
+        let text = "@let x 1\n@el\n  @let x 2\n  @text $x\n@text $x\n@let @card [x]\n  @text $x\n";
+        let uri = Url::parse("file:///tmp/none/page.hl").unwrap();
+        let line_of = |position| match definition_at(text, position, &uri) {
+            Some(GotoDefinitionResponse::Scalar(location)) => location.range.start,
+            other => panic!("{:?}", other),
+        };
+        assert_eq!(line_of(Position::new(3, 9)), Position::new(2, 7));
+        assert_eq!(line_of(Position::new(4, 7)), Position::new(0, 5));
+        assert_eq!(line_of(Position::new(6, 9)), Position::new(5, 12));
     }
 
     #[test]

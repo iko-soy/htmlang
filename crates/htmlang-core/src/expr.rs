@@ -16,7 +16,8 @@
 //! or      := and ("or" and)*
 //! and     := not ("and" not)*
 //! not     := "not" not | compare
-//! compare := sum (("==" | "!=" | "<" | ">" | "<=" | ">=") sum)?
+//! compare := range (("==" | "!=" | "<" | ">" | "<=" | ">=") range)?
+//! range   := sum (".." sum ("step" sum)?)?
 //! sum     := product (("+" | "-") product)*
 //! product := unary (("*" | "/" | "%") unary)*
 //! unary   := "-" unary | primary
@@ -24,15 +25,18 @@
 //!          | NAME "(" expr ("," expr)* ")" | "(" expr ")"
 //! ```
 //!
-//! A bare word (`dark`, `red`, `#3b82f6`, `10px`) is a string. A variable
-//! loaded from a JSON array is a list: `length` counts its items and
-//! `contains` tests membership. Functions:
-//! `if(cond, a, b)` (`b` may be left out: empty), tests (`contains(s, x)`, `starts-with(s, x)`,
-//! `ends-with(s, x)`), text (`uppercase`, `lowercase`, `capitalize`, `trim`,
-//! `length`, `reverse`, `truncate(s, n)`, `replace(s, old, new)`,
-//! `default(s, fallback)`) and colors (`lighten(c, pct)`, `darken(c, pct)`,
-//! `alpha(c, a)`, `mix(c1, c2, pct)`). In text, `${expr}` interpolates an
-//! expression.
+//! A bare word (`dark`, `red`, `#3b82f6`, `10px`) is text. Values are
+//! typed (see `value.rs`, which also defines truthiness and comparison):
+//! `$name` keeps whatever it holds, a list or a record included, and
+//! `A..B` (with `step N`) is a list of whole numbers. Functions:
+//! `if(cond, a, b)` (`b` may be left out: empty), tests (`contains(s, x)`,
+//! `starts-with(s, x)`, `ends-with(s, x)`), text (`uppercase`, `lowercase`,
+//! `capitalize`, `trim`, `length`, `reverse`, `truncate(s, n)`,
+//! `replace(s, old, new)`, `default(s, fallback)`) and colors
+//! (`lighten(c, pct)`, `darken(c, pct)`, `alpha(c, a)`, `mix(c1, c2, pct)`).
+//! `length`, `contains` and `reverse` work on the items of a list; the other
+//! text functions take text, and a list is an error (a text with commas in
+//! it is written in quotes or with `\,`, so it isn't a list).
 //!
 //! A `$name` ends as it does in text (see `interp.rs`), so `$post.title`
 //! reads a field and `$a..$b` is two names. An undefined name is an error.
@@ -41,46 +45,7 @@ use std::fmt;
 
 use crate::interp::{self, Problem, Reference, Scope};
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum Value {
-    Num(f64),
-    Str(String),
-    Bool(bool),
-    /// A list's items as text (from a JSON array).
-    List(Vec<String>),
-}
-
-impl Value {
-    /// Empty strings, `false`, `0` and `"false"` / `"0"` are false.
-    pub fn truthy(&self) -> bool {
-        match self {
-            Value::Bool(b) => *b,
-            Value::Num(n) => *n != 0.0,
-            Value::Str(s) => !s.is_empty() && s != "false" && s != "0",
-            Value::List(items) => !items.is_empty(),
-        }
-    }
-
-    fn as_num(&self) -> Option<f64> {
-        match self {
-            Value::Num(n) => Some(*n),
-            Value::Str(s) => s.trim().parse().ok(),
-            Value::Bool(_) | Value::List(_) => None,
-        }
-    }
-}
-
-impl fmt::Display for Value {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Value::Num(n) if n.fract() == 0.0 && n.abs() < 1e15 => write!(f, "{}", *n as i64),
-            Value::Num(n) => write!(f, "{}", n),
-            Value::Str(s) => f.write_str(s),
-            Value::Bool(b) => write!(f, "{}", b),
-            Value::List(items) => f.write_str(&items.join(", ")),
-        }
-    }
-}
+pub use crate::value::Value;
 
 /// Why an expression has no value.
 #[derive(Debug, Clone, PartialEq)]
@@ -172,7 +137,9 @@ impl fmt::Display for Token {
     }
 }
 
-const OPERATORS: &[&str] = &["==", "!=", "<=", ">=", "<", ">", "+", "-", "*", "/", "%"];
+const OPERATORS: &[&str] = &[
+    "..", "==", "!=", "<=", ">=", "<", ">", "+", "-", "*", "/", "%",
+];
 
 /// Read `src` into tokens, each with its byte offset (plus `base`).
 /// Variable names end as in text (see `interp.rs`), and `${...}` is a
@@ -236,7 +203,12 @@ fn tokenize(
             i += op.len();
         } else if is_word_char(c) {
             let start = i;
-            while let Some(c) = src[i..].chars().next().filter(|&c| is_word_char(c)) {
+            // A word ends at `..`, so `1..5` is a range
+            while let Some(c) = src[i..]
+                .chars()
+                .next()
+                .filter(|&c| is_word_char(c) && !src[i..].starts_with(".."))
+            {
                 i += c.len_utf8();
             }
             let word = &src[start..i];
@@ -349,31 +321,45 @@ impl Parser<'_> {
     }
 
     fn compare(&mut self) -> Result<Value, Error> {
-        let left = self.sum()?;
+        let left = self.range()?;
         let Some(op) = self.eat_op(&["==", "!=", "<=", ">=", "<", ">"]) else {
             return Ok(left);
         };
-        let right = self.sum()?;
+        let right = self.range()?;
         if self.skip {
             return Ok(SKIPPED);
         }
-        let numbers = left.as_num().zip(right.as_num());
-        let (l, r) = (left.to_string(), right.to_string());
-        Ok(Value::Bool(match (op, numbers) {
-            ("==", Some((a, b))) => a == b,
-            ("!=", Some((a, b))) => a != b,
-            ("<", Some((a, b))) => a < b,
-            (">", Some((a, b))) => a > b,
-            ("<=", Some((a, b))) => a <= b,
-            (">=", Some((a, b))) => a >= b,
-            ("==", None) => l == r,
-            ("!=", None) => l != r,
-            ("<", None) => l < r,
-            (">", None) => l > r,
-            ("<=", None) => l <= r,
-            (">=", None) => l >= r,
-            _ => unreachable!(),
-        }))
+        Ok(Value::Bool(left.compare(op, &right)?))
+    }
+
+    /// `A..B` or `A..B step N`: the whole numbers from A to B.
+    fn range(&mut self) -> Result<Value, Error> {
+        let start = self.sum()?;
+        if self.eat_op(&[".."]).is_none() {
+            return Ok(start);
+        }
+        let end = self.sum()?;
+        let step = match self.eat_word("step") {
+            true => Some(self.sum()?),
+            false => None,
+        };
+        if self.skip {
+            return Ok(SKIPPED);
+        }
+        let number = |value: &Value| {
+            value.as_num().ok_or_else(|| {
+                Error::Invalid(format!(
+                    "a range goes from one number to another, not from {} (`{}`)",
+                    value.describe(),
+                    value
+                ))
+            })
+        };
+        let step = match &step {
+            Some(step) => number(step)?,
+            None => 1.0,
+        };
+        Ok(crate::value::range(number(&start)?, number(&end)?, step)?)
     }
 
     fn sum(&mut self) -> Result<Value, Error> {
@@ -556,9 +542,28 @@ fn check_call(name: &str, count: usize) -> Result<(), String> {
 }
 
 /// Call a built-in function with the right number of arguments (see
-/// [`check_call`]).
+/// [`check_call`]). The text functions take text (a number or `true` and
+/// `false` count as their text); a list or a record is an error, except
+/// for `length`, `contains`, `reverse` and `default`, which also work on
+/// a list's items.
 fn call(name: &str, args: Vec<Value>) -> Result<Value, String> {
-    let text = |i: usize| args.get(i).map(|v| v.to_string()).unwrap_or_default();
+    let text = |i: usize| -> Result<String, String> {
+        match &args[i] {
+            value @ Value::List(_) => Err(format!(
+                "{}() takes text, but `{}` is {}: to write one text with commas in \
+                 it, quote it or write `\\,`",
+                name,
+                value,
+                value.describe()
+            )),
+            Value::Record(_) => Err(format!(
+                "{}() takes text, but argument {} is a record: use one of its fields",
+                name,
+                i + 1
+            )),
+            value => Ok(value.to_string()),
+        }
+    };
     let num = |i: usize| {
         args.get(i)
             .and_then(Value::as_num)
@@ -567,43 +572,53 @@ fn call(name: &str, args: Vec<Value>) -> Result<Value, String> {
     let color = |rgb: (u8, u8, u8)| Value::Str(format!("#{:02x}{:02x}{:02x}", rgb.0, rgb.1, rgb.2));
     Ok(match name {
         "contains" => Value::Bool(match &args[0] {
-            Value::List(items) => items.contains(&text(1)),
-            other => other.to_string().contains(&text(1)),
+            Value::List(list) => list.items.iter().any(|item| item.equals(&args[1])),
+            _ => text(0)?.contains(&text(1)?),
         }),
-        "starts-with" => Value::Bool(text(0).starts_with(&text(1))),
-        "ends-with" => Value::Bool(text(0).ends_with(&text(1))),
-        "uppercase" => Value::Str(text(0).to_uppercase()),
-        "lowercase" => Value::Str(text(0).to_lowercase()),
+        "starts-with" => Value::Bool(text(0)?.starts_with(&text(1)?)),
+        "ends-with" => Value::Bool(text(0)?.ends_with(&text(1)?)),
+        "uppercase" => Value::Str(text(0)?.to_uppercase()),
+        "lowercase" => Value::Str(text(0)?.to_lowercase()),
         "capitalize" => {
-            let s = text(0);
+            let s = text(0)?;
             let mut chars = s.chars();
             Value::Str(match chars.next() {
                 Some(c) => format!("{}{}", c.to_uppercase(), chars.as_str()),
                 None => String::new(),
             })
         }
-        "trim" => Value::Str(text(0).trim().to_string()),
+        "trim" => Value::Str(text(0)?.trim().to_string()),
         "length" => Value::Num(match &args[0] {
-            Value::List(items) => items.len(),
-            other => other.to_string().chars().count(),
+            Value::List(list) => list.items.len(),
+            Value::Record(fields) => fields.len(),
+            _ => text(0)?.chars().count(),
         } as f64),
-        "reverse" => Value::Str(text(0).chars().rev().collect()),
+        "reverse" => match &args[0] {
+            Value::List(list) => Value::list(list.items.iter().rev().cloned().collect()),
+            _ => Value::Str(text(0)?.chars().rev().collect()),
+        },
         "truncate" => {
-            let (s, n) = (text(0), num(1)? as usize);
+            let (s, n) = (text(0)?, num(1)? as usize);
             Value::Str(if s.chars().count() > n {
                 format!("{}...", s.chars().take(n).collect::<String>())
             } else {
                 s
             })
         }
-        "replace" => Value::Str(text(0).replace(&text(1), &text(2))),
+        "replace" => Value::Str(text(0)?.replace(&text(1)?, &text(2)?)),
         "default" => {
-            let s = text(0);
-            Value::Str(if s.is_empty() { text(1) } else { s })
+            let empty = match &args[0] {
+                Value::List(list) => list.items.is_empty(),
+                Value::Record(_) => false,
+                value => value.to_string().is_empty(),
+            };
+            let mut args = args;
+            args.swap_remove(usize::from(empty))
         }
         "lighten" | "darken" | "alpha" | "mix" => {
-            let Some(rgb) = parse_hex_rgb(&text(0)) else {
-                return Err(format!("{}() needs a hex color, got `{}`", name, text(0)));
+            let c = text(0)?;
+            let Some(rgb) = parse_hex_rgb(&c) else {
+                return Err(format!("{}() needs a hex color, got `{}`", name, c));
             };
             match name {
                 "lighten" => color(lighten_color(rgb, num(1)? / 100.0)),
@@ -613,8 +628,9 @@ fn call(name: &str, args: Vec<Value>) -> Result<Value, String> {
                     Value::Str(format!("#{:02x}{:02x}{:02x}{:02x}", rgb.0, rgb.1, rgb.2, a))
                 }
                 _ => {
-                    let Some(other) = parse_hex_rgb(&text(1)) else {
-                        return Err(format!("mix() needs a hex color, got `{}`", text(1)));
+                    let other = text(1)?;
+                    let Some(other) = parse_hex_rgb(&other) else {
+                        return Err(format!("mix() needs a hex color, got `{}`", other));
                     };
                     color(mix_colors(rgb, other, num(2)? / 100.0))
                 }
@@ -673,21 +689,18 @@ fn mix_colors(c1: (u8, u8, u8), c2: (u8, u8, u8), weight: f64) -> (u8, u8, u8) {
 mod tests {
     use super::*;
 
-    use crate::interp::tests::Map;
+    use crate::interp::tests::{Map, record, text_list};
 
     fn scope() -> Map {
         Map::new(&[
-            ("tags#", "2"),
-            ("tags.0", "rust"),
-            ("tags.1", "web dev"),
             ("count", "3"),
             ("name", "World"),
             ("theme", "dark"),
             ("tricky", "a == b"),
             ("empty", ""),
-            ("post", ""),
-            ("post.title", "Hi"),
         ])
+        .with("tags", text_list(&["rust", "web dev"]))
+        .with("post", record(&[("title", "Hi")]))
     }
 
     fn ev(src: &str) -> Value {
@@ -802,6 +815,34 @@ mod tests {
         assert!(ev("contains($tags, \"web dev\")").truthy());
         assert!(!ev("contains($tags, web)").truthy());
         assert_eq!(ev("$tags").to_string(), "rust, web dev");
+        assert_eq!(ev("reverse($tags)").to_string(), "web dev, rust");
+        assert_eq!(ev("default($tags, none)").to_string(), "rust, web dev");
+        // Text functions don't guess what a list means
+        let error = eval("uppercase($tags)", &scope()).unwrap_err().to_string();
+        assert!(error.contains("a list of 2 items"), "{}", error);
+        assert!(eval("truncate($post, 2)", &scope()).is_err());
+    }
+
+    #[test]
+    fn ranges() {
+        assert_eq!(ev("1..5").to_string(), "1, 2, 3, 4, 5");
+        assert_eq!(ev("reverse(1..5)").to_string(), "5, 4, 3, 2, 1");
+        assert_eq!(ev("length(0..10 step 5)").to_string(), "3");
+        assert_eq!(ev("$count..1").to_string(), "3, 2, 1");
+        assert_eq!(ev("1..$count + 1").to_string(), "1, 2, 3, 4");
+        assert!(ev("contains(1..3, 2)").truthy());
+        assert!(eval("1..x", &scope()).is_err());
+        assert!(eval("1..5 step 0", &scope()).is_err());
+    }
+
+    #[test]
+    fn truthiness_and_comparison_follow_the_types() {
+        let zero = Map::new(&[("z", "0.0"), ("upper", "#FFF")]);
+        assert!(!eval("$z", &zero).unwrap().truthy());
+        assert!(eval("$z == 0", &zero).unwrap().truthy());
+        assert!(!eval("$upper == #fff", &zero).unwrap().truthy());
+        assert_eq!(ev("100 / 3").to_string(), "33.3333");
+        assert!(eval("1..3 < 2", &scope()).is_err());
     }
 
     #[test]

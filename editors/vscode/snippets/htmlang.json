@@ -211,6 +211,14 @@
     ],
     "description": "Loop over a list, with a fallback for an empty one"
   },
+  "Each in a range": {
+    "prefix": "@each range",
+    "body": [
+      "@each \\$${1:i} in ${2:1}..${3:5}",
+      "  $0"
+    ],
+    "description": "Loop over the numbers from a to b (add `step n` to skip)"
+  },
   "If": {
     "prefix": "@if",
     "body": [

@@ -58,8 +58,13 @@ unless you write some, and nothing is added that you didn't ask for.
   attribute's value, a file path), whole attributes come from a bundle or
   from `if()` (`if($active, [font-weight bold, aria-current=page])`), and
   an undefined name is an error.
-- **Data comes in as lists and records.** `@data` loads JSON, and `@each` and
-  `@if` run at compile time.
+- **Values are typed: text, numbers, `true`/`false`, lists and records.**
+  Commas make a list (`@let fruits apple, banana`), `1..5` is a range,
+  `@data` loads JSON as records and lists, and a value passed as one `$name`
+  keeps its type, so a record can go to a function (`@post-card [post $p]`).
+  `@each` and `@if` run at compile time. A definition is visible from its
+  line to the end of its block, and a function sees what is visible where
+  it is defined.
 
 ## Install
 

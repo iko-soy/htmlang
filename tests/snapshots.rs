@@ -3524,14 +3524,12 @@ fn switch_falls_to_default() {
 
 #[test]
 fn switch_with_attrs() {
-    let _html = compile(
-        "@let variant primary\n@if $variant == \"primary\"\n  @let __switch [background blue, color white]\n@else if $variant == \"danger\"\n  @let __switch [background red, color white]\n",
-    );
-    // The @switch should register matched attrs as __switch define
-    let result = htmlang::parser::parse(
-        "@let variant primary\n@if $variant == \"primary\"\n  @let __switch [background blue, color white]\n@else if $variant == \"danger\"\n  @let __switch [background red, color white]\n",
-    );
-    assert!(result.document.defines.contains_key("__switch"));
+    let src = "@let variant primary\n@if $variant == \"primary\"\n  @let __switch [background blue, color white]\n  @el [$__switch] Primary\n@else if $variant == \"danger\"\n  @let __switch [background red, color white]\n  @el [$__switch] Danger\n";
+    let html = compile(src);
+    assert!(html.contains("background:blue"), "{}", html);
+    // A bundle defined in a branch belongs to the branch
+    let result = htmlang::parser::parse(src);
+    assert!(!result.document.defines.contains_key("__switch"));
 }
 
 // -----------------------------------------------------------------------
@@ -4760,17 +4758,23 @@ fn a_definition_inside_a_scope_keeps_one_meaning_per_name() {
         "{}",
         output
     );
-    // A bundle defined inside an @if stays after it, and the value it
-    // replaced stays gone
-    let found = parse_diagnostics("@let x 5\n@if true\n  @let x [padding 4]\n@el [$x] a\n@el $x\n");
+    // A bundle defined inside an @if belongs to the @if: after it, the
+    // name means the value again
+    let found = parse_diagnostics(
+        "@let x 5\n@if true\n  @let x [padding 4]\n  @el [$x] a\n@el [$x] b\n@el $x\n",
+    );
     assert!(
         found
             .iter()
-            .any(|d| d.code == "undefined-variable" && d.line == 5),
+            .any(|d| d.code == "attribute-from-variable" && d.line == 5),
         "{:?}",
         found
     );
-    assert!(!found.iter().any(|d| d.line == 4), "{:?}", found);
+    assert!(
+        !found.iter().any(|d| d.line == 4 || d.line == 6),
+        "{:?}",
+        found
+    );
 }
 
 #[test]
@@ -4942,13 +4946,14 @@ fn unnamed_attributes_are_not_bound_to_parameters_by_position() {
 
 #[test]
 fn a_default_is_filled_in_at_the_call() {
-    // With the variables of the call's time, spaces, quotes and escapes
+    // At each call, with the names visible where the function is defined
+    // (a later `@let brand` doesn't change it), spaces, quotes and escapes
     let out = compile(
-        "@let brand red\n@let @card [tone $brand, label \"Hello there, \\$5\"]\n  @el [color $tone] $label\n@card\n@let brand blue\n@card\n",
+        "@let brand red\n@let @card [tone $brand, label \"Hello there, \\$5\"]\n  @el [color $tone] $label $tone\n@card\n@let brand blue\n@card\n@text $brand\n",
     );
     assert!(out.contains("color:red"), "{}", out);
-    assert!(out.contains("color:blue"), "{}", out);
-    assert!(out.contains("Hello there, $5"), "{}", out);
+    assert_eq!(out.matches("Hello there, $5 red").count(), 2, "{}", out);
+    assert!(!out.contains("color:blue"), "{}", out);
     // With the parameters before it, and if()
     let out = compile(
         "@let @card [title, heading \"About $title\", note ${if($title, yes, no)}]\n  @el $heading $note\n@card [title htmlang]\n",
@@ -5732,4 +5737,65 @@ fn css_if_in_a_value_is_css() {
         "@el [before:content \"see if(this)\", font-family \"if(a)\", grid-template-areas 'a if(b)']\n  x\n",
     );
     assert!(d.is_empty(), "{:?}", d);
+}
+
+#[test]
+fn snapshot_values_and_scope() {
+    snapshot_test("values_and_scope");
+}
+
+#[test]
+fn a_whole_value_keeps_its_type() {
+    // A field that holds a record, a computed list, a default that is a list
+    let out = compile(
+        "@data $posts [{\"title\": \"A\", \"tags\": [\"x\", \"y\"]}]\n@let first $posts.0\n@let evens = 0..6 step 2\n@let @tags [items $first.tags]\n  @each $t in $items\n    @text <$t>\n@text $first.title ${length($evens)} $evens\n@tags\n",
+    );
+    assert!(out.contains("A 4 0, 2, 4, 6"), "{}", out);
+    assert!(
+        out.contains("&lt;x&gt;") && out.contains("&lt;y&gt;"),
+        "{}",
+        out
+    );
+}
+
+#[test]
+fn quoted_items_of_a_list_keep_their_quotes_in_css() {
+    let out = compile("@let fonts \"Open Sans\", serif\n@el [font-family $fonts] $fonts\n");
+    assert!(out.contains("font-family:\"Open Sans\", serif"), "{}", out);
+}
+
+#[test]
+fn a_parameter_hides_what_its_name_means_outside_in_the_body() {
+    // One namespace: the parameter `spacer` hides the function @spacer
+    let found = parse_diagnostics("@let @card [spacer]\n  @row\n    @spacer\n@card [spacer x]\n");
+    assert!(
+        found
+            .iter()
+            .any(|d| d.code == "unknown-element" && d.message.contains("is a value")),
+        "{:?}",
+        found
+    );
+    // A function calls itself by its name, even where a value of that name
+    // is visible where it is defined
+    let out = compile(
+        "@let @count [n]\n  @text $n\n  @if $n > 1\n    @count [n ${$n - 1}]\n@count [n 3]\n",
+    );
+    assert!(
+        out.contains(">3<") && out.contains(">2<") && out.contains(">1<"),
+        "{}",
+        out
+    );
+}
+
+#[test]
+fn the_document_holds_the_file_s_own_top_level_names() {
+    let result = htmlang::parser::parse(
+        "@let a 1\n@let b [padding 4]\n@el [$b]\n  @let c 2\n  @text $a $c\n",
+    );
+    assert_eq!(
+        result.document.variables.get("a").map(String::as_str),
+        Some("1")
+    );
+    assert!(!result.document.variables.contains_key("c"));
+    assert!(result.document.defines.contains_key("b"));
 }

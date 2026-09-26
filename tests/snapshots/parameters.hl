@@ -9,6 +9,8 @@
 @card [title Full, tone #f9fafb]
 @card [title Plain]
   Children.
+-- A default sees the names visible where @card is defined: this later
+-- @let doesn't change it
 @let brand #fef3c7
 @card [title "A, b and \$c"]
 
