@@ -1,6 +1,6 @@
 @page Attributes
-@el [width 200, height 100, padding 10 20, background #fff, color #333, border 1 #ccc, rounded 8, opacity 0.9]
-  @text [bold, italic, underline, size 16, font monospace] Styled
+@el [width 200, height 100, padding 10 20, background #fff, color #333, border 1 solid #ccc, border-radius 8, opacity 0.9]
+  @text [font-weight bold, font-style italic, text-decoration underline, font-size 16, font-family monospace] Styled
 @row [wrap, column-gap 10, row-gap 5, spacing 8]
   @el [min-width 50, max-width 200, min-height 30, max-height 100]
 @column [overflow hidden, position relative, z-index 10]

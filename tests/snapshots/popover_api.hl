@@ -2,5 +2,5 @@
 
 @button [popovertarget=my-popover] Toggle Info
 
-@el [popover, id=my-popover, padding 20, background white, rounded 8, border 1 #ccc]
+@el [popover, id=my-popover, padding 20, background white, border-radius 8, border 1 solid #ccc]
   @text This is a popover panel

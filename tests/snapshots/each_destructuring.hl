@@ -3,5 +3,5 @@
 @data $name-role [{"name": "Alice", "role": "Admin"}, {"name": "Bob", "role": "User"}, {"name": "Carol", "role": "Editor"}]
 @each $item in $name-role
   @row [spacing 10]
-    @text [bold] $item.name
+    @text [font-weight bold] $item.name
     @text $item.role

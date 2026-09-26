@@ -1,7 +1,7 @@
 @page Data Test
 @data $site test_data.json
 
-@text [bold, size 24] $site.title
+@text [font-weight bold, font-size 24] $site.title
 @text Version: $site.version
 
 @each $tag in $site.tags

@@ -1,5 +1,5 @@
 @let badge $label $color=blue
-  @el [padding 4 8, background $color, rounded 4]
+  @el [padding 4 8, background $color, border-radius 4]
     @text $label
 
 @badge [label Hello]

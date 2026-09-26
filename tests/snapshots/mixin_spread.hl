@@ -1,10 +1,10 @@
 @page Mixin Test
 
-@let card-style [padding 20, rounded 8, background #f3f4f6]
+@let card-style [padding 20, border-radius 8, background #f3f4f6]
 @let interactive [cursor pointer, hover:background #e5e7eb, transition all 0.15s ease]
 
 @el [$card-style, $interactive]
   Hello mixin world
 
-@el [$card-style, border 1 #ccc]
+@el [$card-style, border 1 solid #ccc]
   Using $define syntax too

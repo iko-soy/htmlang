@@ -14,8 +14,8 @@
     "prefix": "@let-fn",
     "body": [
       "@let ${1:component} \\$${2:title}",
-      "  @el [${3:padding 20, background white, rounded 8}]",
-      "    @text [bold] \\$$2",
+      "  @el [${3:padding 20, background white, border-radius 8}]",
+      "    @text [font-weight bold] \\$$2",
       "    @children",
       "",
       "@$1 [$2 ${4:Hello}]",
@@ -29,7 +29,7 @@
       "@let ${1:layout} \\$${2:title}",
       "  @column [${3:max-width 800, center-x, padding 40}]",
       "    @slot ${4:header}",
-      "      @text [bold, size 32] \\$$2",
+      "      @text [font-weight bold, font-size 32] \\$$2",
       "    @slot ${5:content}",
       "    @slot ${6:footer}",
       "",
@@ -42,8 +42,8 @@
   "Card component": {
     "prefix": "@card",
     "body": [
-      "@el [padding ${1:20}, background ${2:white}, rounded ${3:8}, border 1 ${4:#e5e7eb}, hover:border 1 ${5:\\$primary}, transition all 0.15s ease]",
-      "  @text [bold, size ${6:18}] ${7:Title}",
+      "@el [padding ${1:20}, background ${2:white}, border-radius ${3:8}, border 1 solid ${4:#e5e7eb}, hover:border 1 solid ${5:\\$primary}, transition all 0.15s ease]",
+      "  @text [font-weight bold, font-size ${6:18}] ${7:Title}",
       "  $0"
     ],
     "description": "Card with border, hover effect, and title"
@@ -63,9 +63,9 @@
   "Navigation bar": {
     "prefix": "@navbar",
     "body": [
-      "@nav [padding-x ${1:20}, padding-y ${2:12}, background ${3:#1a1a2e}]",
+      "@nav [padding-inline ${1:20}, padding-block ${2:12}, background ${3:#1a1a2e}]",
       "  @row [spacing ${4:20}, align-items center]",
-      "    @text [bold, color ${5:white}, size ${6:18}] ${7:Logo}",
+      "    @text [font-weight bold, color ${5:white}, font-size ${6:18}] ${7:Logo}",
       "    @el [width fill]",
       "    @data \\$links [{\"label\": \"${8:Home}\", \"url\": \"/\"}, {\"label\": \"About\", \"url\": \"/about\"}]",
       "    @each \\$link in \\$links",
@@ -127,8 +127,8 @@
     "body": [
       "@form [method=${1:post}, spacing ${2:16}] ${3:/submit}",
       "  @label [for=${4:email}] ${5:Email}",
-      "  @input [type=${6:email}, name=$4, id=$4, required, padding 8, border 1 #d1d5db, rounded 4]",
-      "  @button [type=submit, padding 10, background ${7:\\$primary}, color white, rounded 4, bold]",
+      "  @input [type=${6:email}, name=$4, id=$4, required, padding 8, border 1 solid #d1d5db, border-radius 4]",
+      "  @button [type=submit, padding 10, background ${7:\\$primary}, color white, border-radius 4, font-weight bold]",
       "    ${8:Submit}",
       "  $0"
     ],
@@ -146,11 +146,11 @@
     "prefix": "@hero",
     "body": [
       "@column [center-x, center-y, min-height ${1:80vh}, padding ${2:40}, spacing ${3:20}]",
-      "  @text [bold, size ${4:48}, text-align center] ${5:Hero Title}",
+      "  @text [font-weight bold, font-size ${4:48}, text-align center] ${5:Hero Title}",
       "  @paragraph [max-width ${6:600}, text-align center, color ${7:#666}, line-height 1.6]",
       "    ${8:Hero description text}",
-      "  @el [padding 12 24, background ${9:\\$primary}, rounded 8] > @link ${10:#}",
-      "    @text [color white, bold] ${11:Get Started}",
+      "  @el [padding 12 24, background ${9:\\$primary}, border-radius 8] > @link ${10:#}",
+      "    @text [color white, font-weight bold] ${11:Get Started}",
       "  $0"
     ],
     "description": "Hero section with title, description, and CTA"
@@ -237,7 +237,7 @@
     "prefix": "@address",
     "body": [
       "@address",
-      "  @text [bold] ${1:Name}",
+      "  @text [font-weight bold] ${1:Name}",
       "  @link mailto:${2:email@example.com} $2",
       "  $0"
     ],

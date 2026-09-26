@@ -29,7 +29,7 @@ Children are indented under their parent. Attributes are comma-separated inside
 @el [
   padding 20,
   background white,
-  rounded 8,
+  border-radius 8,
   box-shadow 0 2px 4px rgba(0,0,0,0.1)
 ]
   Content
@@ -39,7 +39,7 @@ An attribute is either a **style**, written `key value` (`padding 20`,
 `color red`), or an **HTML attribute**, written `key=value` (`id=main`,
 `type=email`, `aria-label=Close`). Boolean HTML attributes are written bare
 (`required`, `disabled`, `open`). A comma inside `(...)` or `"..."` does not
-split attributes, so a font stack is written `font "Inter, sans-serif"`.
+split attributes, so a font stack is written `font-family "Inter, sans-serif"`.
 
 ### Text
 
@@ -48,8 +48,8 @@ attributes is its content, and `{...}` puts elements inside a line of text:
 
 ```
 @paragraph
-  This is {@text [bold] important} and this is a {@link https://example.com link}.
-@text [bold, size 24, color #333] Hello world
+  This is {@text [font-weight bold] important} and this is a {@link https://example.com link}.
+@text [font-weight bold, font-size 24, color #333] Hello world
 @section [padding 8] Text after the attributes is content too.
 ```
 
@@ -70,7 +70,7 @@ line: `--` later in a line is ordinary text.
 gets the indented children.
 
 ```
-@el [padding 16, background blue, rounded 8] > @link https://example.com
+@el [padding 16, background blue, border-radius 8] > @link https://example.com
   @text [color white] Get Started
 ```
 
@@ -181,39 +181,34 @@ Use them like elements; your own `@let` with the same name takes precedence.
 
 ## Attributes
 
-### Layout and sizing
+### Layout
+
+htmlang's own attributes are about layout, in the spirit of elm-ui: how an
+element sits in its row or column.
 
 | Attribute | Effect |
 |---|---|
 | `spacing N` | Gap between children |
-| `padding N` / `padding Y X` / `padding T R B L` | Padding (also `padding-x`, `padding-y`) |
-| `margin ...` | Margin, same forms as padding (also `margin-x`, `margin-y`) |
 | `width fill` / `width N` / `width shrink` | Take remaining space, exact size, or fit content |
 | `height fill` / `height N` / `height shrink` | Same for height |
 | `center-x`, `center-y` | Center within the parent |
 | `align-left`, `align-right`, `align-top`, `align-bottom` | Align within the parent |
 | `wrap` | Let a row wrap |
 | `grid-cols N`, `grid-rows N`, `col-span N`, `row-span N` | Grid layout |
-| `hidden` | `display: none` |
 
 ### Style
 
-| Attribute | Effect |
-|---|---|
-| `border N COLOR` (also `border-top` etc.) | Solid border |
-| `rounded N` | Border radius |
-| `bold`, `italic`, `underline` | Text style |
-| `size N` | Font size |
-| `font NAME` | Font family |
-| `line-clamp N` | Cut text off after N lines |
+Everything else is CSS: **any standard CSS property** is an attribute, with
+the same name and value: `padding 20`, `font-weight bold`, `font-size 18`,
+`border 1 solid #e5e7eb`, `border-radius 8`, `background red`,
+`display none`, `grid-template-areas "a b"`, and so on. `line-clamp N` also
+adds the `-webkit-box` declarations browsers still need to cut text off after
+N lines.
 
-**Any standard CSS property** can also be used as an attribute, with the same
-name and value: `background red`, `opacity 0.5`, `cursor pointer`,
-`z-index 10`, `margin-top 16`, `grid-template-areas "a b"`, and so on.
-
-**Units.** For lengths, a bare number is pixels (`padding 20` is `20px`).
-Values with a unit, keywords and CSS functions are passed through: `width 50%`,
-`margin 0 auto`, `max-width min(100%, 800px)`.
+**Units.** For lengths, a bare number is pixels (`padding 20` is `20px`,
+`border 1 solid red` is `1px solid red`). Values with a unit, keywords and CSS
+functions are passed through: `width 50%`, `margin 0 auto`,
+`max-width min(100%, 800px)`.
 
 ### HTML attributes
 
@@ -225,7 +220,7 @@ share a name without clashing:
 
 ```
 @image [width=800, width 200, alt=A photo] photo.jpg
-@select [size=4, size 18]
+@select [size=4, font-size 18]
   @option One
 ```
 
@@ -262,7 +257,7 @@ attribute out.
 
 ```
 @let active true
-@el [background if($active, blue, gray), if($active, bold), padding if($active, 12)]
+@el [background if($active, blue, gray), if($active, font-weight bold), padding if($active, 12)]
   Conditionally styled
 ```
 
@@ -278,11 +273,11 @@ attribute out.
 -- A quoted string, with $variables interpolated
 @let greeting "Hello $primary"
 -- An attribute bundle, used as [$card]
-@let card [padding 20, background white, rounded 8]
+@let card [padding 20, background white, border-radius 8]
 -- A function: a @let with an indented body
 @let panel $title $tone=neutral
   @el [$card]
-    @text [bold] $title
+    @text [font-weight bold] $title
     @children
 
 @panel [title Welcome]
@@ -307,7 +302,7 @@ A function is called like an element:
 @let note $kind=info
   @style
     .title { font-weight: bold; }
-  @el [padding 12, rounded 6, background #eff6ff]
+  @el [padding 12, border-radius 6, background #eff6ff]
     @text [class=title] $kind
     @children
 
@@ -500,6 +495,9 @@ removed form with its replacement.
 | `$a ~ " " ~ $b` | `"$a $b"` |
 | `@each $x in LIST [page N]` | Split the list, or filter it with `@if` |
 | `...$bundle` | `$bundle` |
+| `bold`, `italic`, `underline`, `hidden` | `font-weight bold`, `font-style italic`, `text-decoration underline`, `display none` |
+| `size`, `font`, `rounded`, `padding-x/y`, `margin-x/y` | `font-size`, `font-family`, `border-radius`, `padding-inline/block`, `margin-inline/block` |
+| `border N COLOR` (solid implied) | `border N solid COLOR` |
 | `@each $a, $b in A x, B y` (items split on spaces) | Records: `@data $rows [{"a": "A", "b": "x"}, ...]` and `@each $row in $rows` with `$row.a` |
 | `$_index` | `@each $item, $i in ...` |
 | `$posts._count`, `$posts._keys`, `$posts.STEM.key` | `length($posts)`; nothing; `@each $post in $posts` with `$post.file` |

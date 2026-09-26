@@ -11,5 +11,5 @@
   @item Step three
 
 @list
-  @item [padding 10, background #f0f0f0, rounded 4]
-    @text [bold] Styled item
+  @item [padding 10, background #f0f0f0, border-radius 4]
+    @text [font-weight bold] Styled item

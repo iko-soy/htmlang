@@ -81,7 +81,7 @@ fn range_at_integer_limit_terminates() {
 
 #[test]
 fn reset_css_is_layered_below_generated_rules() {
-    let out = compile("@page T\n@link [color red, underline] /x Home");
+    let out = compile("@page T\n@link [color red, text-decoration underline] /x Home");
     assert!(
         out.contains("@layer hl-reset,htmlang;@layer hl-reset{"),
         "reset must be layered so class rules can override it: {}",
@@ -91,7 +91,7 @@ fn reset_css_is_layered_below_generated_rules() {
 
 #[test]
 fn px_values_are_not_doubled() {
-    let out = compile("@el [padding 10px, margin 0 auto, max-width none, blur 4px] x");
+    let out = compile("@el [padding 10px, margin 0 auto, max-width none, filter blur(4px)] x");
     assert!(out.contains("padding:10px"), "{}", out);
     assert!(out.contains("margin:0 auto"), "{}", out);
     assert!(out.contains("max-width:none"), "{}", out);
@@ -100,7 +100,7 @@ fn px_values_are_not_doubled() {
 
 #[test]
 fn minify_keeps_significant_spaces() {
-    let result = parser::parse("@page T\n@paragraph\n  Built with {@text [bold] htmlang}.");
+    let result = parser::parse("@page T\n@paragraph\n  Built with {@text [font-weight bold] htmlang}.");
     let out = codegen::generate_minified(&result.document);
     assert!(out.contains("Built with <span"), "{}", out);
 }
@@ -141,7 +141,7 @@ fn image_with_css_width_gets_no_intrinsic_height() {
         r#"<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000"></svg>"#,
     )
     .unwrap();
-    let out = compile(&format!("@image [width 200, alt x] {}", svg.display()));
+    let out = compile(&format!("@image [width 200, alt=x] {}", svg.display()));
     assert!(!out.contains("height=\"1000\""), "{}", out);
 }
 
@@ -158,7 +158,7 @@ fn source_map_uses_real_output_lines() {
 
 #[test]
 fn bracket_in_text_does_not_join_lines() {
-    let out = compile("@column\n  Use [ to open a list\n  @text [bold] Second\n  @text Third");
+    let out = compile("@column\n  Use [ to open a list\n  @text [font-weight bold] Second\n  @text Third");
     assert!(out.contains("Use [ to open a list"), "{}", out);
     assert!(out.contains(">Second<"), "{}", out);
     assert!(out.contains(">Third<"), "{}", out);
@@ -229,7 +229,7 @@ fn quoted_let_values_are_not_evaluated_as_arithmetic() {
 
 #[test]
 fn quoted_font_stack_is_one_attribute() {
-    let out = compile("@el [font \"Inter, sans-serif\", bold] x");
+    let out = compile("@el [font-family \"Inter, sans-serif\", font-weight bold] x");
     assert!(out.contains("font-family:Inter, sans-serif"), "{}", out);
     assert!(out.contains("font-weight:bold"), "{}", out);
 }
@@ -294,7 +294,7 @@ fn html_attributes_use_equals_and_are_all_emitted() {
 
 #[test]
 fn html_attribute_and_style_with_the_same_name_are_distinct() {
-    let out = compile("@select [size=4, size 20]\n  @option A");
+    let out = compile("@select [size=4, font-size 20]\n  @option A");
     assert!(out.contains("size=\"4\""), "{}", out);
     assert!(out.contains("font-size:20px"), "{}", out);
     let out = compile("@image [width=800, width 200, alt=x] a.png");
@@ -346,7 +346,7 @@ fn invalid_expressions_are_errors() {
 
 #[test]
 fn htmlang_attributes_sharing_html_names_do_not_warn() {
-    let result = parser::parse("@row [size 18, wrap, hidden]\n  @text x");
+    let result = parser::parse("@row [font-size 18, wrap, display none]\n  @text x");
     assert!(
         result.diagnostics.is_empty(),
         "unexpected diagnostics: {:?}",
@@ -396,7 +396,7 @@ fn inline_svg_resolves_from_the_page_and_keeps_attributes() {
 #[test]
 fn inline_element_attributes_can_continue_on_the_next_line() {
     let result = htmlang::parser::parse(
-        "@paragraph\n  Press {@kbd [\n    padding 2 6, rounded 4\n  ] Ctrl+K} to search.\n",
+        "@paragraph\n  Press {@kbd [\n    padding 2 6, border-radius 4\n  ] Ctrl+K} to search.\n",
     );
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     let html = htmlang::codegen::generate(&result.document);
@@ -427,4 +427,16 @@ fn raw_takes_an_indented_body() {
         "{:?}",
         result.diagnostics
     );
+}
+
+#[test]
+fn style_aliases_point_to_css() {
+    let result = parser::parse("@el [bold, size 18, font-weight bold]\n  x");
+    let messages: Vec<&str> = result.diagnostics.iter().map(|d| d.message.as_str()).collect();
+    assert!(messages.iter().any(|m| m.contains("`font-weight bold`")), "{:?}", messages);
+    assert!(messages.iter().any(|m| m.contains("`font-size`")), "{:?}", messages);
+    // Border shorthands get px like other lengths
+    let out = compile("@el [border 1 solid red, border-radius 4 4 0 0] x");
+    assert!(out.contains("border:1px solid red"), "{}", out);
+    assert!(out.contains("border-radius:4px 4px 0 0"), "{}", out);
 }

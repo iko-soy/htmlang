@@ -1,4 +1,4 @@
-@text [underline, text-underline-offset 4, text-decoration-thickness 2]
+@text [text-decoration underline, text-underline-offset 4, text-decoration-thickness 2]
   Styled underline
 
 @el [column-count 3, column-width 200, column-rule 1px solid #ccc]

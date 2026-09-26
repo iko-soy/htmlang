@@ -1,10 +1,10 @@
 @page Variables
 @let primary #3b82f6
 @let gap 20
-@let card-style [padding 20, rounded 8, background white]
+@let card-style [padding 20, border-radius 8, background white]
 
 @column [spacing $gap]
   @el [$card-style]
     @text [color $primary] Hello
-  @el [$card-style, border 1 $primary]
+  @el [$card-style, border 1 solid $primary]
     @text World

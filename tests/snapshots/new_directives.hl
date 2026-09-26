@@ -17,4 +17,4 @@
   </script>
 
 @column [spacing 10]
-  @text [font Inter] Hello with custom fonts
+  @text [font-family Inter] Hello with custom fonts

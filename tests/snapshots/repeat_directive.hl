@@ -1,2 +1,2 @@
 @each $_, $index in 1..3
-  @text [bold] Item $index
+  @text [font-weight bold] Item $index

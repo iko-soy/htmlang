@@ -6,8 +6,8 @@
 @let bg-subtle #f8fafc
 
 @let feature $title $body
-  @column [padding 24, background white, rounded 12, border 1 #e2e8f0, spacing 8]
-    @text [bold, size 18, color $ink] $title
+  @column [padding 24, background white, border-radius 12, border 1 solid #e2e8f0, spacing 8]
+    @text [font-weight bold, font-size 18, color $ink] $title
     @paragraph [color $muted, line-height 1.6]
       $body
 
@@ -15,33 +15,33 @@
   -- Hero
   @section [
     padding 80,
-    padding-x 24,
+    padding-inline 24,
     background $bg-subtle,
     text-align center,
     spacing 24
   ]
-    @text [bold, size 48, color $ink] Build faster with less CSS.
-    @paragraph [max-width 560, center-x, color $muted, line-height 1.6, size 18]
+    @text [font-weight bold, font-size 48, color $ink] Build faster with less CSS.
+    @paragraph [max-width 560, center-x, color $muted, line-height 1.6, font-size 18]
       Launchpad turns your static pages into a polished product in minutes.
       Ship faster, iterate smaller, sleep at night.
     @row [center-x, spacing 12]
       @link [
-        padding 14, padding-x 24, rounded 8,
-        background $primary, color white, bold,
+        padding 14, padding-inline 24, border-radius 8,
+        background $primary, color white, font-weight bold,
         transition all 0.15s ease
       ] /signup
         Start free
       @link [
-        padding 14, padding-x 24, rounded 8,
-        border 1 #e2e8f0, color $ink, bold,
+        padding 14, padding-inline 24, border-radius 8,
+        border 1 solid #e2e8f0, color $ink, font-weight bold,
         transition all 0.15s ease
       ] /demo
         Watch demo
 
   -- Features
-  @section [padding 80, padding-x 24, max-width 1100, center-x, spacing 40]
+  @section [padding 80, padding-inline 24, max-width 1100, center-x, spacing 40]
     @column [spacing 8, text-align center]
-      @text [bold, size 32, color $ink] Everything you need
+      @text [font-weight bold, font-size 32, color $ink] Everything you need
       @text [color $muted] Opinionated where it matters, flexible where it counts.
     @row [wrap, gap 20]
       @feature [
@@ -58,13 +58,13 @@
       ]
 
   -- CTA
-  @section [padding 60, padding-x 24, background $primary, color white, text-align center, spacing 16]
-    @text [bold, size 28] Ready to launch?
+  @section [padding 60, padding-inline 24, background $primary, color white, text-align center, spacing 16]
+    @text [font-weight bold, font-size 28] Ready to launch?
     @paragraph [max-width 520, center-x, line-height 1.6]
       Join thousands of teams building their marketing sites with htmlang.
     @link [
-      padding 14, padding-x 28, rounded 8,
-      background white, color $primary, bold,
+      padding 14, padding-inline 28, border-radius 8,
+      background white, color $primary, font-weight bold,
       transition all 0.15s ease
     ] /signup
       Start for free

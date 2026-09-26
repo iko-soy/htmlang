@@ -7,7 +7,7 @@
 
 @let nav-link $label $href
   @link [
-    padding 8, padding-x 12, rounded 6, color $ink,
+    padding 8, padding-inline 12, border-radius 6, color $ink,
     hover:background #f1f5f9, transition all 0.1s ease
   ] $href
     $label
@@ -15,15 +15,15 @@
 @row [min-height 100vh]
   -- Sidebar
   @aside [
-    width 240, padding 32, padding-x 20,
-    background #fafafa, border-right 1 #e5e7eb, spacing 4
+    width 240, padding 32, padding-inline 20,
+    background #fafafa, border-right 1 solid #e5e7eb, spacing 4
   ]
-    @text [bold, size 13, color $muted, text-transform uppercase, letter-spacing 1] Introduction
+    @text [font-weight bold, font-size 13, color $muted, text-transform uppercase, letter-spacing 1] Introduction
     @nav-link [label Overview, href #overview]
     @nav-link [label Installation, href #install]
     @nav-link [label First page, href #first-page]
     @text [
-      bold, size 13, color $muted, text-transform uppercase, letter-spacing 1,
+      font-weight bold, font-size 13, color $muted, text-transform uppercase, letter-spacing 1,
       margin-block-start 20
     ] Guides
     @nav-link [label Layout, href #layout]
@@ -31,40 +31,40 @@
     @nav-link [label Functions, href #functions]
 
   -- Prose
-  @main [padding 48, padding-x 56, max-width 800, spacing 24]
-    @text [bold, size 36, color $ink] Getting started
+  @main [padding 48, padding-inline 56, max-width 800, spacing 24]
+    @text [font-weight bold, font-size 36, color $ink] Getting started
 
-    @paragraph [color $ink, line-height 1.7, size 17]
+    @paragraph [color $ink, line-height 1.7, font-size 17]
       htmlang is a minimalist layout language that compiles to a single static
       HTML file. This guide walks through the essentials in about five minutes.
 
-    @text [bold, size 24, color $ink] Installation
+    @text [font-weight bold, font-size 24, color $ink] Installation
 
-    @pre [background $code-bg, padding 16, rounded 8, overflow-x auto]
+    @pre [background $code-bg, padding 16, border-radius 8, overflow-x auto]
       cargo install --path .
 
-    @text [bold, size 24, color $ink] Your first page
+    @text [font-weight bold, font-size 24, color $ink] Your first page
 
     @paragraph [color $ink, line-height 1.7]
-      Create a file called {@code [background $code-bg, padding 2 6, rounded 4] hello.hl} with:
+      Create a file called {@code [background $code-bg, padding 2 6, border-radius 4] hello.hl} with:
 
-    @pre [background $code-bg, padding 16, rounded 8, overflow-x auto]
+    @pre [background $code-bg, padding 16, border-radius 8, overflow-x auto]
       @page Hello
       @column [padding 40, spacing 16]
-        @text [bold, size 32] Hi there
+        @text [font-weight bold, font-size 32] Hi there
 
     @paragraph [color $ink, line-height 1.7]
       Compile it:
 
-    @pre [background $code-bg, padding 16, rounded 8, overflow-x auto]
+    @pre [background $code-bg, padding 16, border-radius 8, overflow-x auto]
       htmlang hello.hl
 
     @paragraph [color $ink, line-height 1.7]
-      You now have {@code [background $code-bg, padding 2 6, rounded 4] hello.html},
+      You now have {@code [background $code-bg, padding 2 6, border-radius 4] hello.html},
       a single self-contained file with embedded CSS. No dependencies, no
       JavaScript, no build step beyond the one command you just ran.
 
-    @text [bold, size 24, color $ink] Next steps
+    @text [font-weight bold, font-size 24, color $ink] Next steps
 
     @list [spacing 8]
       @item

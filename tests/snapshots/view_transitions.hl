@@ -1,6 +1,6 @@
 @page View Transitions
 @column [spacing 20, padding 20]
-  @el [view-transition-name hero, padding 20, background #3b82f6, color white, rounded 8]
+  @el [view-transition-name hero, padding 20, background #3b82f6, color white, border-radius 8]
     Hero element
   @el [view-transition-name sidebar, padding 10]
     Sidebar element

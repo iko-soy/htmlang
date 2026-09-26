@@ -465,7 +465,7 @@ mod tests {
     #[test]
     fn idempotent_at_wrap_threshold() {
         // Build a line long enough to cross MAX_LINE_WIDTH after the first format.
-        let src = "@row [padding 20, background white, rounded 8, border 1 #e5e7eb, color #333, shadow 0 2px 4px rgba(0,0,0,0.1)]\n  child\n";
+        let src = "@row [padding 20, background white, border-radius 8, border 1 solid #e5e7eb, color #333, box-shadow 0 2px 4px rgba(0,0,0,0.1)]\n  child\n";
         let a = format(src);
         let b = format(&a);
         assert_eq!(a, b, "formatter must be idempotent across runs");
@@ -473,7 +473,7 @@ mod tests {
 
     #[test]
     fn preserves_trailing_comment() {
-        let src = "@text [bold] hello -- greeting\n";
+        let src = "@text [font-weight bold] hello -- greeting\n";
         let out = format(src);
         assert!(
             out.contains("-- greeting"),
@@ -483,7 +483,7 @@ mod tests {
 
     #[test]
     fn bracket_inside_string_is_ignored() {
-        let src = "@text [content \"a [b] c\", bold] hi\n";
+        let src = "@text [content \"a [b] c\", font-weight bold] hi\n";
         let out = format(src);
         // Single-line emission — no multi-line bracket block should be triggered.
         assert_eq!(out.lines().count(), 1, "got:\n{out}");
@@ -498,7 +498,7 @@ mod tests {
 
     #[test]
     fn apostrophe_does_not_swallow_file() {
-        let src = "@button [aria-label Don't click, padding 10] Go\n@text after\n";
+        let src = "@button [aria-label=Don't click, padding 10] Go\n@text after\n";
         assert_eq!(format(src), src);
     }
 
@@ -510,14 +510,14 @@ mod tests {
 
     #[test]
     fn bracket_in_text_does_not_join_lines() {
-        let src = "@column\n  Use [ to open a list\n  @text [bold] Second\n";
+        let src = "@column\n  Use [ to open a list\n  @text [font-weight bold] Second\n";
         assert_eq!(format(src), src);
     }
 
     #[test]
     fn commas_inside_parens_stay_in_value() {
-        let src = "@el [shadow 0 1px 3px rgba(0,0,0,0.1),bold] hi\n";
-        assert_eq!(format(src), "@el [shadow 0 1px 3px rgba(0,0,0,0.1), bold] hi\n");
+        let src = "@el [box-shadow 0 1px 3px rgba(0,0,0,0.1),font-weight bold] hi\n";
+        assert_eq!(format(src), "@el [box-shadow 0 1px 3px rgba(0,0,0,0.1), font-weight bold] hi\n");
     }
 
     #[test]

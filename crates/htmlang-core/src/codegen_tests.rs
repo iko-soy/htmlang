@@ -47,7 +47,7 @@ mod tests {
 
     #[test]
     fn dev_mode_is_deterministic_across_runs() {
-        let src = "@row [spacing 10]\n  @text [bold] a\n  @text [italic] b\n";
+        let src = "@row [spacing 10]\n  @text [font-weight bold] a\n  @text [font-style italic] b\n";
         let r1 = parse(src);
         let r2 = parse(src);
         assert_eq!(generate_dev(&r1.document), generate_dev(&r2.document));

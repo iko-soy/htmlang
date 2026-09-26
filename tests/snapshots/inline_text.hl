@@ -1,5 +1,5 @@
 @page Inline Text
 @paragraph
-  This is {@text [bold] bold} and {@text [italic, color red] styled} text.
+  This is {@text [font-weight bold] bold} and {@text [font-style italic, color red] styled} text.
 @paragraph
-  Multiple {@text [underline] inline} elements {@text [size 20] here}.
+  Multiple {@text [text-decoration underline] inline} elements {@text [font-size 20] here}.

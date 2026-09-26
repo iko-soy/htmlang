@@ -1,7 +1,7 @@
 @page New Elements 2
 
 @dialog [id=modal, open]
-  @text [bold] Dialog Title
+  @text [font-weight bold] Dialog Title
   @text Dialog content here
   @button Close
 

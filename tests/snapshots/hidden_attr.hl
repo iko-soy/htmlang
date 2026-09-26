@@ -1,6 +1,6 @@
 @page Hidden Test
 
-@el [hidden]
+@el [display none]
   @text This is hidden
 
 @el [padding 10]

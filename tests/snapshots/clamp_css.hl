@@ -1,4 +1,4 @@
 @page Clamp CSS Test
 
-@el [size clamp(16px, 2vw, 24px), width min(100%, 800px), padding max(10px, 2vw)]
+@el [font-size clamp(16px, 2vw, 24px), width min(100%, 800px), padding max(10px, 2vw)]
   Fluid typography and sizing

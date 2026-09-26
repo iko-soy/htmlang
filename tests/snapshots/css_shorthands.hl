@@ -24,10 +24,10 @@
       @el [width 200, padding 20] Item 3
 
   -- Skeleton
-  @el [width fill, height 20, rounded 4, $skeleton]
+  @el [width fill, height 20, border-radius 4, $skeleton]
 
   -- Gradient
-  @el [background linear-gradient(#3b82f6,#8b5cf6), padding 20, rounded 8]
+  @el [background linear-gradient(#3b82f6,#8b5cf6), padding 20, border-radius 8]
     @text [color white] Gradient background
-  @el [background linear-gradient(45deg,#ff6b6b,#feca57), padding 20, rounded 8]
+  @el [background linear-gradient(45deg,#ff6b6b,#feca57), padding 20, border-radius 8]
     @text [color white] Angled gradient

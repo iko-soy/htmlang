@@ -7,7 +7,7 @@
 
 @layout
   @slot header
-    @text [bold] Custom Header
+    @text [font-weight bold] Custom Header
   @slot footer
     @text Footer content
   @text Main body

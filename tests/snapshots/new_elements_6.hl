@@ -2,7 +2,7 @@
   @text JavaScript is required for this page.
 
 @address
-  @text [bold] John Doe
+  @text [font-weight bold] John Doe
   @link mailto:john@example.com john@example.com
 
 @search

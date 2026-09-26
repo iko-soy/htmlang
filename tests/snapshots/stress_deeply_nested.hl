@@ -5,100 +5,100 @@
 @let --radius 8
 
 @let deep-card $title
-  @el [background white, dark:background #1e293b, rounded $--radius, padding 16, border 1 $--border]
-    @text [bold, size 16] $title
+  @el [background white, dark:background #1e293b, border-radius $--radius, padding 16, border 1 solid $--border]
+    @text [font-weight bold, font-size 16] $title
     @children
 
 @let inner-panel $label
-  @el [background #f8fafc, dark:background #0f172a, rounded 6, padding 12, margin-top 8]
-    @text [size 13, color #64748b] $label
+  @el [background #f8fafc, dark:background #0f172a, border-radius 6, padding 12, margin-top 8]
+    @text [font-size 13, color #64748b] $label
     @children
 
 @column [spacing 20, padding 24]
 
-  @el [background #f0f9ff, rounded 12, padding 20, border 1 #bae6fd]
-    @text [bold, size 20, color #0369a1] Level 1 - App Shell
+  @el [background #f0f9ff, border-radius 12, padding 20, border 1 solid #bae6fd]
+    @text [font-weight bold, font-size 20, color #0369a1] Level 1 - App Shell
     @row [spacing 16, margin-top 16]
-      @el [background white, rounded 8, padding 16, border 1 $--border, width fill]
-        @text [bold, size 16, color #1e293b] Level 2 - Sidebar
+      @el [background white, border-radius 8, padding 16, border 1 solid $--border, width fill]
+        @text [font-weight bold, font-size 16, color #1e293b] Level 2 - Sidebar
         @column [spacing 8, margin-top 12]
-          @el [background #f1f5f9, rounded 6, padding 12]
-            @text [size 14, color #475569] Level 3 - Nav Group
+          @el [background #f1f5f9, border-radius 6, padding 12]
+            @text [font-size 14, color #475569] Level 3 - Nav Group
             @column [spacing 4, margin-top 8]
-              @el [padding 8 12, hover:background #e2e8f0, rounded 4, transition all 0.15s]
-                @text [size 13, color #64748b] Level 4 - Nav Item
+              @el [padding 8 12, hover:background #e2e8f0, border-radius 4, transition all 0.15s]
+                @text [font-size 13, color #64748b] Level 4 - Nav Item
                 @row [spacing 6, margin-top 4, align-items center]
-                  @el [width 6, height 6, rounded 50%, background #10b981]
-                  @el [padding 4 8, background #dbeafe, rounded 4]
-                    @text [size 11, color #1d4ed8] Level 5 - Badge
+                  @el [width 6, height 6, border-radius 50%, background #10b981]
+                  @el [padding 4 8, background #dbeafe, border-radius 4]
+                    @text [font-size 11, color #1d4ed8] Level 5 - Badge
                     @el [display inline-block, margin-left 4]
-                      @text [size 10, color #3b82f6] Level 6 - Badge Detail
+                      @text [font-size 10, color #3b82f6] Level 6 - Badge Detail
                       @el [margin-top 2]
-                        @text [size 9, color #93c5fd] Level 7 - Sub Detail
-                        @el [padding 2 4, background #eff6ff, rounded 2, margin-top 1]
-                          @text [size 8, color #bfdbfe] Level 8 - Deepest Badge
+                        @text [font-size 9, color #93c5fd] Level 7 - Sub Detail
+                        @el [padding 2 4, background #eff6ff, border-radius 2, margin-top 1]
+                          @text [font-size 8, color #bfdbfe] Level 8 - Deepest Badge
 
-              @el [padding 8 12, hover:background #e2e8f0, rounded 4]
-                @text [size 13, color #64748b] Level 4 - Second Nav Item
-                @el [margin-top 4, padding 6, background #f0fdf4, rounded 4]
-                  @text [size 12, color #166534] Level 5 - Status
+              @el [padding 8 12, hover:background #e2e8f0, border-radius 4]
+                @text [font-size 13, color #64748b] Level 4 - Second Nav Item
+                @el [margin-top 4, padding 6, background #f0fdf4, border-radius 4]
+                  @text [font-size 12, color #166534] Level 5 - Status
                   @row [spacing 4, margin-top 2]
-                    @el [padding 2 6, background #bbf7d0, rounded 2]
-                      @text [size 10, color #15803d] Level 6 - Online
-                    @el [padding 2 6, background #fef3c7, rounded 2]
-                      @text [size 10, color #92400e] Level 6 - Away
+                    @el [padding 2 6, background #bbf7d0, border-radius 2]
+                      @text [font-size 10, color #15803d] Level 6 - Online
+                    @el [padding 2 6, background #fef3c7, border-radius 2]
+                      @text [font-size 10, color #92400e] Level 6 - Away
 
-          @el [background #f1f5f9, rounded 6, padding 12]
-            @text [size 14, color #475569] Level 3 - Second Group
+          @el [background #f1f5f9, border-radius 6, padding 12]
+            @text [font-size 14, color #475569] Level 3 - Second Group
             @column [spacing 4, margin-top 8]
               @each $item in Settings,Profile,Security
-                @el [padding 8 12, hover:background #e2e8f0, rounded 4]
-                  @text [size 13, color #64748b] $item
+                @el [padding 8 12, hover:background #e2e8f0, border-radius 4]
+                  @text [font-size 13, color #64748b] $item
 
-      @el [background white, rounded 8, padding 16, border 1 $--border, width fill]
-        @text [bold, size 16, color #1e293b] Level 2 - Main Content
+      @el [background white, border-radius 8, padding 16, border 1 solid $--border, width fill]
+        @text [font-weight bold, font-size 16, color #1e293b] Level 2 - Main Content
         @column [spacing 12, margin-top 12]
           @deep-card [title Level 3 - Dashboard Card]
             @inner-panel [label Level 4 - Chart Area]
               @row [spacing 8, margin-top 8]
-                @el [width fill, background #eff6ff, rounded 4, padding 8]
-                  @text [size 12, color #1d4ed8, bold] Level 5 - Metric A
-                  @el [margin-top 4, height 60, background #dbeafe, rounded 4, padding 8]
-                    @text [size 20, bold, color #1e40af] Level 6 - Value
+                @el [width fill, background #eff6ff, border-radius 4, padding 8]
+                  @text [font-size 12, color #1d4ed8, font-weight bold] Level 5 - Metric A
+                  @el [margin-top 4, height 60, background #dbeafe, border-radius 4, padding 8]
+                    @text [font-size 20, font-weight bold, color #1e40af] Level 6 - Value
                     @el [margin-top 2]
-                      @text [size 10, color #3b82f6] Level 7 - Trend
+                      @text [font-size 10, color #3b82f6] Level 7 - Trend
                       @row [spacing 2, margin-top 2]
-                        @el [width 4, height 12, background #93c5fd, rounded 1]
-                        @el [width 4, height 18, background #60a5fa, rounded 1]
-                        @el [width 4, height 8, background #93c5fd, rounded 1]
-                        @el [width 4, height 22, background #3b82f6, rounded 1]
-                          @el [width 2, height 2, rounded 50%, background white, margin-top 1]
-                            @text [size 6, color white] Level 8 - Spark Dot
-                @el [width fill, background #f0fdf4, rounded 4, padding 8]
-                  @text [size 12, color #166534, bold] Level 5 - Metric B
-                  @el [margin-top 4, height 60, background #dcfce7, rounded 4, padding 8]
-                    @text [size 20, bold, color #166534] Level 6 - Value
+                        @el [width 4, height 12, background #93c5fd, border-radius 1]
+                        @el [width 4, height 18, background #60a5fa, border-radius 1]
+                        @el [width 4, height 8, background #93c5fd, border-radius 1]
+                        @el [width 4, height 22, background #3b82f6, border-radius 1]
+                          @el [width 2, height 2, border-radius 50%, background white, margin-top 1]
+                            @text [font-size 6, color white] Level 8 - Spark Dot
+                @el [width fill, background #f0fdf4, border-radius 4, padding 8]
+                  @text [font-size 12, color #166534, font-weight bold] Level 5 - Metric B
+                  @el [margin-top 4, height 60, background #dcfce7, border-radius 4, padding 8]
+                    @text [font-size 20, font-weight bold, color #166534] Level 6 - Value
                     @el [margin-top 2]
-                      @text [size 10, color #16a34a] Level 7 - Change
-                      @el [padding 1 4, background #bbf7d0, rounded 2, display inline-block]
-                        @text [size 8, color #15803d] Level 8 - Delta
+                      @text [font-size 10, color #16a34a] Level 7 - Change
+                      @el [padding 1 4, background #bbf7d0, border-radius 2, display inline-block]
+                        @text [font-size 8, color #15803d] Level 8 - Delta
 
           @deep-card [title Level 3 - Form Card]
             @inner-panel [label Level 4 - Form Section]
               @column [spacing 8, margin-top 8]
-                @el [padding 8, border 1 $--border, rounded 4]
-                  @text [size 12, color #64748b, margin-bottom 4] Level 5 - Field Group
-                  @input [type=text, placeholder=Name, padding 6 10, rounded 4, border 1 $--border, width fill]
-                  @el [margin-top 4, padding 4 8, background #fef2f2, rounded 4]
-                    @text [size 11, color #991b1b] Level 6 - Validation Error
+                @el [padding 8, border 1 solid $--border, border-radius 4]
+                  @text [font-size 12, color #64748b, margin-bottom 4] Level 5 - Field Group
+                  @input [type=text, placeholder=Name, padding 6 10, border-radius 4, border 1 solid $--border, width fill]
+                  @el [margin-top 4, padding 4 8, background #fef2f2, border-radius 4]
+                    @text [font-size 11, color #991b1b] Level 6 - Validation Error
                     @el [margin-top 2]
-                      @text [size 10, color #dc2626] Level 7 - Error Detail
-                      @el [margin-top 1, padding 2 4, background #fee2e2, rounded 2]
-                        @text [size 9, color #b91c1c] Level 8 - Error Code
+                      @text [font-size 10, color #dc2626] Level 7 - Error Detail
+                      @el [margin-top 1, padding 2 4, background #fee2e2, border-radius 2]
+                        @text [font-size 9, color #b91c1c] Level 8 - Error Code
 
-                @el [padding 8, border 1 $--border, rounded 4]
-                  @text [size 12, color #64748b, margin-bottom 4] Level 5 - Select Group
-                  @select [padding 6 10, rounded 4, border 1 $--border, width fill]
+                @el [padding 8, border 1 solid $--border, border-radius 4]
+                  @text [font-size 12, color #64748b, margin-bottom 4] Level 5 - Select Group
+                  @select [padding 6 10, border-radius 4, border 1 solid $--border, width fill]
                     @option [value=a] Option A
                     @option [value=b] Option B
                     @option [value=c] Option C
@@ -108,77 +108,77 @@
               @column [spacing 6, margin-top 8]
                 @let top-categories Electronics,Clothing,Books
                 @each $cat in $top-categories
-                  @el [padding 8, border 1 $--border, rounded 4, hover:background #f8fafc]
-                    @text [size 14, bold, color #1e293b] Level 5 - $cat
+                  @el [padding 8, border 1 solid $--border, border-radius 4, hover:background #f8fafc]
+                    @text [font-size 14, font-weight bold, color #1e293b] Level 5 - $cat
                     @column [spacing 4, margin-top 6, margin-left 12]
-                      @el [padding 6, background #f8fafc, rounded 4]
+                      @el [padding 6, background #f8fafc, border-radius 4]
                         @row [spacing 8, align-items center]
-                          @el [width 8, height 8, rounded 2, background $--primary]
-                          @text [size 12, color #475569] Level 6 - Subcategory
+                          @el [width 8, height 8, border-radius 2, background $--primary]
+                          @text [font-size 12, color #475569] Level 6 - Subcategory
                         @el [margin-top 4, margin-left 16]
-                          @text [size 11, color #94a3b8] Level 7 - Item
-                          @el [margin-left 12, margin-top 2, padding 2 6, background #eff6ff, rounded 2]
-                            @text [size 10, color #3b82f6] Level 8 - Variant
+                          @text [font-size 11, color #94a3b8] Level 7 - Item
+                          @el [margin-left 12, margin-top 2, padding 2 6, background #eff6ff, border-radius 2]
+                            @text [font-size 10, color #3b82f6] Level 8 - Variant
 
-  @el [background #fefce8, rounded 12, padding 20, border 1 #fde68a, margin-top 20]
-    @text [bold, size 20, color #854d0e] Level 1 - Settings Panel
+  @el [background #fefce8, border-radius 12, padding 20, border 1 solid #fde68a, margin-top 20]
+    @text [font-weight bold, font-size 20, color #854d0e] Level 1 - Settings Panel
     @column [spacing 12, margin-top 16]
-      @el [background white, rounded 8, padding 16, border 1 $--border]
-        @text [bold, size 16, color #1e293b] Level 2 - Account Settings
+      @el [background white, border-radius 8, padding 16, border 1 solid $--border]
+        @text [font-weight bold, font-size 16, color #1e293b] Level 2 - Account Settings
         @column [spacing 8, margin-top 12]
-          @el [background #f8fafc, rounded 6, padding 12]
-            @text [size 14, color #475569] Level 3 - Profile Section
-            @el [margin-top 8, padding 10, border 1 $--border, rounded 6]
-              @text [size 13, color #1e293b] Level 4 - Avatar Upload
-              @el [margin-top 6, width 80, height 80, rounded 50%, background #e2e8f0, display flex, align-items center, justify-content center]
-                @text [size 24, color #94a3b8, bold] Level 5 - Initials
-                @el [position absolute, bottom 0, right 0, width 24, height 24, rounded 50%, background $--primary, display flex, align-items center, justify-content center]
-                  @text [size 10, color white] Level 6 - Edit Icon
+          @el [background #f8fafc, border-radius 6, padding 12]
+            @text [font-size 14, color #475569] Level 3 - Profile Section
+            @el [margin-top 8, padding 10, border 1 solid $--border, border-radius 6]
+              @text [font-size 13, color #1e293b] Level 4 - Avatar Upload
+              @el [margin-top 6, width 80, height 80, border-radius 50%, background #e2e8f0, display flex, align-items center, justify-content center]
+                @text [font-size 24, color #94a3b8, font-weight bold] Level 5 - Initials
+                @el [position absolute, bottom 0, right 0, width 24, height 24, border-radius 50%, background $--primary, display flex, align-items center, justify-content center]
+                  @text [font-size 10, color white] Level 6 - Edit Icon
                   @el [margin-top 1]
-                    @text [size 8, color #bfdbfe] Level 7 - Tooltip
-                    @el [padding 1 3, background #1e3a5f, rounded 2, margin-top 1]
-                      @text [size 7, color white] Level 8 - Tooltip Arrow
+                    @text [font-size 8, color #bfdbfe] Level 7 - Tooltip
+                    @el [padding 1 3, background #1e3a5f, border-radius 2, margin-top 1]
+                      @text [font-size 7, color white] Level 8 - Tooltip Arrow
 
-          @el [background #f8fafc, rounded 6, padding 12]
-            @text [size 14, color #475569] Level 3 - Preferences
+          @el [background #f8fafc, border-radius 6, padding 12]
+            @text [font-size 14, color #475569] Level 3 - Preferences
             @column [spacing 6, margin-top 8]
               @each $pref in Language,Timezone,Currency
-                @row [spacing 8, align-items center, padding 6 8, border 1 $--border, rounded 4]
-                  @text [size 13, color #1e293b, width fill] Level 4 - $pref
-                  @el [padding 4 12, background #f1f5f9, rounded 4]
-                    @text [size 12, color #64748b] Level 5 - Current Value
+                @row [spacing 8, align-items center, padding 6 8, border 1 solid $--border, border-radius 4]
+                  @text [font-size 13, color #1e293b, width fill] Level 4 - $pref
+                  @el [padding 4 12, background #f1f5f9, border-radius 4]
+                    @text [font-size 12, color #64748b] Level 5 - Current Value
 
-      @el [background white, rounded 8, padding 16, border 1 $--border]
-        @text [bold, size 16, color #1e293b] Level 2 - Notification Preferences
+      @el [background white, border-radius 8, padding 16, border 1 solid $--border]
+        @text [font-weight bold, font-size 16, color #1e293b] Level 2 - Notification Preferences
         @column [spacing 6, margin-top 12]
           @let channels Email,Push,SMS,Slack
           @each $channel in $channels
-            @row [spacing 8, align-items center, padding 8, border-bottom 1 $--border]
-              @text [size 14, color #1e293b, width fill] $channel Notifications
-              @el [width 36, height 20, rounded 10, background $--primary, padding 2]
-                @el [width 16, height 16, rounded 50%, background white, margin-left 16]
+            @row [spacing 8, align-items center, padding 8, border-bottom 1 solid $--border]
+              @text [font-size 14, color #1e293b, width fill] $channel Notifications
+              @el [width 36, height 20, border-radius 10, background $--primary, padding 2]
+                @el [width 16, height 16, border-radius 50%, background white, margin-left 16]
 
-  @el [background #fdf2f8, rounded 12, padding 20, border 1 #fbcfe8, margin-top 20]
-    @text [bold, size 20, color #9d174d] Level 1 - Monitoring
+  @el [background #fdf2f8, border-radius 12, padding 20, border 1 solid #fbcfe8, margin-top 20]
+    @text [font-weight bold, font-size 20, color #9d174d] Level 1 - Monitoring
     @row [spacing 16, margin-top 16]
       @each $service in API,Database,Cache,Queue
-        @el [background white, rounded 8, padding 12, border 1 $--border, width fill]
-          @text [bold, size 14, color #1e293b] Level 2 - $service
-          @el [margin-top 8, background #f0fdf4, rounded 6, padding 8]
-            @text [size 12, color #166534] Level 3 - Healthy
+        @el [background white, border-radius 8, padding 12, border 1 solid $--border, width fill]
+          @text [font-weight bold, font-size 14, color #1e293b] Level 2 - $service
+          @el [margin-top 8, background #f0fdf4, border-radius 6, padding 8]
+            @text [font-size 12, color #166534] Level 3 - Healthy
             @el [margin-top 4]
               @row [spacing 4]
-                @el [width fill, height 4, background #86efac, rounded 2]
-                @el [width fill, height 4, background #4ade80, rounded 2]
-                @el [width fill, height 4, background #22c55e, rounded 2]
-                @el [width fill, height 4, background #86efac, rounded 2]
+                @el [width fill, height 4, background #86efac, border-radius 2]
+                @el [width fill, height 4, background #4ade80, border-radius 2]
+                @el [width fill, height 4, background #22c55e, border-radius 2]
+                @el [width fill, height 4, background #86efac, border-radius 2]
               @el [margin-top 4]
-                @text [size 11, color #16a34a] Level 4 - Uptime 99.9%
+                @text [font-size 11, color #16a34a] Level 4 - Uptime 99.9%
                 @el [margin-top 2]
-                  @text [size 10, color #22c55e] Level 5 - Response 42ms
-                  @el [margin-top 2, padding 2 6, background #dcfce7, rounded 2]
-                    @text [size 9, color #15803d] Level 6 - p99 120ms
+                  @text [font-size 10, color #22c55e] Level 5 - Response 42ms
+                  @el [margin-top 2, padding 2 6, background #dcfce7, border-radius 2]
+                    @text [font-size 9, color #15803d] Level 6 - p99 120ms
                     @el [margin-top 1]
-                      @text [size 8, color #4ade80] Level 7 - Throughput 1.2k/s
-                      @el [padding 1 3, background #bbf7d0, rounded 1, margin-top 1]
-                        @text [size 7, color #166534] Level 8 - Peak 2.4k/s
+                      @text [font-size 8, color #4ade80] Level 7 - Throughput 1.2k/s
+                      @el [padding 1 3, background #bbf7d0, border-radius 1, margin-top 1]
+                        @text [font-size 7, color #166534] Level 8 - Peak 2.4k/s

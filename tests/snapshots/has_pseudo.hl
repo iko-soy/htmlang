@@ -2,5 +2,5 @@
 @column [spacing 20, padding 20]
   @el [padding 20, background white, has(.active):background #dbeafe, has(img):padding 0]
     Content
-  @el [border 1 #e5e7eb, has(.selected):border 2 #3b82f6, rounded 8]
+  @el [border 1 solid #e5e7eb, has(.selected):border 2 solid #3b82f6, border-radius 8]
     Container

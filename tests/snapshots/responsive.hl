@@ -1,5 +1,5 @@
 @page Responsive
 @row [spacing 10, sm:spacing 20, lg:spacing 40]
   @el [width fill, sm:width 200, md:width 300, lg:width 400, xl:width 500]
-    @text [size 14, md:size 18, lg:size 24] Responsive text
+    @text [font-size 14, md:font-size 18, lg:font-size 24] Responsive text
   @el [padding 10, sm:padding 20]

@@ -1,9 +1,9 @@
 @page Dark Mode
 
 @el [background white, dark:background #1a1a2e, color #333, dark:color #eee, padding 20]
-  @text [size 24, bold] Hello World
+  @text [font-size 24, font-weight bold] Hello World
 
-@el [border 1 #ccc, dark:border 1 #444, rounded 8, padding 16]
+@el [border 1 solid #ccc, dark:border 1 solid #444, border-radius 8, padding 16]
   @text Theme-aware card
 
 @el [background #f0f0f0, dark:background #333, print:display none, padding 10]

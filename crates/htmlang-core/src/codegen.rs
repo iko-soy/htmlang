@@ -1736,19 +1736,6 @@ fn attrs_to_css(
                     push_css(&mut css, "padding", &css_px_multi(v));
                 }
             }
-            "padding-x" => {
-                if let Some(v) = val {
-                    // Logical property covers both inline sides in one
-                    // declaration; for symmetric values this is visually
-                    // identical to padding-left/right in LTR and RTL.
-                    push_css(&mut css, "padding-inline", &css_px(v));
-                }
-            }
-            "padding-y" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "padding-block", &css_px(v));
-                }
-            }
             "padding-top" => {
                 if let Some(v) = val {
                     push_css(&mut css, "padding-top", &css_px(v));
@@ -1860,68 +1847,6 @@ fn attrs_to_css(
                 _ => push_css(&mut css, "margin-top", "auto"),
             },
 
-            // Style
-            "border" => {
-                if let Some(v) = val {
-                    let parts: Vec<&str> = v.splitn(2, ' ').collect();
-                    if parts.len() == 2 {
-                        push_css(
-                            &mut css,
-                            "border",
-                            &format!("{} solid {}", css_px(parts[0]), parts[1]),
-                        );
-                    } else {
-                        push_css(
-                            &mut css,
-                            "border",
-                            &format!("{} solid currentColor", css_px(parts[0])),
-                        );
-                    }
-                }
-            }
-            "border-top" | "border-bottom" | "border-left" | "border-right" => {
-                if let Some(v) = val {
-                    let parts: Vec<&str> = v.splitn(2, ' ').collect();
-                    if parts.len() == 2 {
-                        push_css(
-                            &mut css,
-                            effective_key,
-                            &format!("{} solid {}", css_px(parts[0]), parts[1]),
-                        );
-                    } else {
-                        push_css(
-                            &mut css,
-                            effective_key,
-                            &format!("{} solid currentColor", css_px(parts[0])),
-                        );
-                    }
-                }
-            }
-            "rounded" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "border-radius", &css_px(v));
-                }
-            }
-            "bold" => push_css(&mut css, "font-weight", "bold"),
-            "italic" => push_css(&mut css, "font-style", "italic"),
-            "underline" => push_css(&mut css, "text-decoration", "underline"),
-            "size" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "font-size", &css_px(v));
-                }
-            }
-            "font" => {
-                if let Some(v) = val {
-                    // `font "Inter, sans-serif"` quotes a whole font stack so
-                    // its commas don't split the attribute list.
-                    let v = match v.strip_prefix('"').and_then(|v| v.strip_suffix('"')) {
-                        Some(stack) if stack.contains(',') => stack,
-                        _ => v,
-                    };
-                    push_css(&mut css, "font-family", v);
-                }
-            }
-
             // Typography
             "line-height" => {
                 if let Some(v) = val {
@@ -1955,9 +1880,6 @@ fn attrs_to_css(
                     push_css(&mut css, "left", &css_px(v));
                 }
             }
-
-            // Display & visibility
-            "hidden" => push_css(&mut css, "display", "none"),
 
             // Effects
 
@@ -2132,17 +2054,6 @@ fn attrs_to_css(
                     push_css(&mut css, "margin", &css_px_multi(v));
                 }
             }
-            "margin-x" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "margin-inline", &css_px(v));
-                }
-            }
-            "margin-y" => {
-                if let Some(v) = val {
-                    push_css(&mut css, "margin-block", &css_px(v));
-                }
-            }
-
             // Container queries
             "container" => {
                 push_css(&mut css, "container-type", "inline-size");
@@ -2253,6 +2164,18 @@ fn attrs_to_css(
 
             // Any other standard CSS property is copied through, with `px`
             // added to bare numbers where the property takes a length.
+            // `font-family "Inter, sans-serif"`: the quotes only keep the
+            // stack's commas from splitting the attribute list.
+            "font-family" => {
+                if let Some(v) = val {
+                    let v = match v.strip_prefix('"').and_then(|v| v.strip_suffix('"')) {
+                        Some(stack) if stack.contains(',') => stack,
+                        _ => v,
+                    };
+                    push_css(&mut css, "font-family", v);
+                }
+            }
+
             key if crate::vocab::is_css_property(key) => {
                 if let Some(v) = val {
                     if crate::vocab::is_length_property(key) {

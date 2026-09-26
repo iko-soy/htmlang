@@ -1299,13 +1299,13 @@ fn css_margin() {
 fn css_margin_x() {
     // margin-x emits the `margin-inline` logical shorthand (single property,
     // covers both inline sides, stays symmetric under RTL).
-    let output = compile("@page T\n@el [margin-x 10]");
+    let output = compile("@page T\n@el [margin-inline 10]");
     assert!(output.contains("margin-inline:10px"));
 }
 
 #[test]
 fn css_margin_y() {
-    let output = compile("@page T\n@el [margin-y 10]");
+    let output = compile("@page T\n@el [margin-block 10]");
     assert!(output.contains("margin-block:10px"));
 }
 
@@ -1560,7 +1560,7 @@ fn snapshot_lang_directive() {
 
 #[test]
 fn focus_visible_generates_pseudo() {
-    let output = compile("@page T\n@el [focus-visible:border 2 blue]");
+    let output = compile("@page T\n@el [focus-visible:border 2 solid blue]");
     assert!(output.contains(":focus-visible"));
     assert!(output.contains("border:2px solid blue"));
 }
@@ -1633,7 +1633,7 @@ fn fragment_no_wrapper() {
 
 #[test]
 fn hidden_generates_display_none() {
-    let output = compile("@page T\n@el [hidden]");
+    let output = compile("@page T\n@el [display none]");
     assert!(output.contains("display:none"));
 }
 
@@ -1744,7 +1744,7 @@ fn favicon_fallback_href() {
 #[test]
 fn no_warning_new_pseudo_prefixes() {
     let diags = parse_diagnostics(
-        "@el [focus-visible:border 2 blue, disabled:opacity 0.5, checked:background green]",
+        "@el [focus-visible:border 2 solid blue, disabled:opacity 0.5, checked:background green]",
     );
     assert!(
         !diags
@@ -1772,7 +1772,7 @@ fn no_warning_child_selectors() {
 #[test]
 fn no_warning_new_css_attrs() {
     let diags = parse_diagnostics(
-        "@el [overflow-x hidden, overflow-y auto, inset 0, accent-color blue, hidden]",
+        "@el [overflow-x hidden, overflow-y auto, inset 0, accent-color blue, display none]",
     );
     assert!(
         !diags
@@ -3522,13 +3522,13 @@ fn target_pseudo() {
 
 #[test]
 fn valid_invalid_pseudo() {
-    let output = compile("@input [type=email, valid:border 2 green]");
+    let output = compile("@input [type=email, valid:border 2 solid green]");
     assert!(output.contains(":valid"), "valid pseudo: {}", output);
 }
 
 #[test]
 fn text_underline_offset_property() {
-    let output = compile("@text [underline, text-underline-offset 4] Link");
+    let output = compile("@text [text-decoration underline, text-underline-offset 4] Link");
     assert!(
         output.contains("text-underline-offset:4px"),
         "text-underline-offset: {}",
@@ -3595,7 +3595,7 @@ fn snapshot_mixin_spread() {
 
 #[test]
 fn mixin_expands_in_attrs() {
-    let output = compile("@let card [padding 20, rounded 8]\n@el [$card]\n  Hi");
+    let output = compile("@let card [padding 20, border-radius 8]\n@el [$card]\n  Hi");
     assert!(
         output.contains("padding:20px"),
         "mixin should expand padding: {}",
@@ -3610,7 +3610,7 @@ fn mixin_expands_in_attrs() {
 
 #[test]
 fn mixin_with_dollar_syntax() {
-    let output = compile("@let card [padding 20, rounded 8]\n@el [$card]\n  Hi");
+    let output = compile("@let card [padding 20, border-radius 8]\n@el [$card]\n  Hi");
     assert!(
         output.contains("padding:20px"),
         "mixin with $ syntax should expand: {}",
@@ -3668,7 +3668,7 @@ fn snapshot_clamp_css() {
 
 #[test]
 fn clamp_passthrough() {
-    let output = compile("@el [size clamp(16px, 2vw, 24px)]");
+    let output = compile("@el [font-size clamp(16px, 2vw, 24px)]");
     assert!(
         output.contains("font-size:clamp(16px, 2vw, 24px)"),
         "clamp should pass through: {}",
@@ -3848,7 +3848,7 @@ fn switch_with_attrs() {
 
 #[test]
 fn minified_output_is_smaller() {
-    let input = "@page Test\n@column [padding 20]\n  @text [bold] Hello World\n  @paragraph\n    Some text here\n";
+    let input = "@page Test\n@column [padding 20]\n  @text [font-weight bold] Hello World\n  @paragraph\n    Some text here\n";
     let result = htmlang::parser::parse(input);
     let normal = htmlang::codegen::generate(&result.document);
     let minified = htmlang::codegen::generate_minified(&result.document);
@@ -4134,7 +4134,7 @@ fn test_children_fallback_content() {
 
 #[test]
 fn test_spread_define() {
-    let html = compile("@let btn [padding 12, bold]\n@el [$btn]\n  Click");
+    let html = compile("@let btn [padding 12, font-weight bold]\n@el [$btn]\n  Click");
     assert!(
         html.contains("padding:12px"),
         "spread define should apply padding"
@@ -4410,7 +4410,7 @@ fn image_auto_preload() {
 
 #[test]
 fn source_map_generation() {
-    let input = "@page Test\n@text [bold] Hello";
+    let input = "@page Test\n@text [font-weight bold] Hello";
     let result = htmlang::parser::parse(input);
     let map = htmlang::codegen::generate_source_map(&result.document, "test.hl");
     assert!(

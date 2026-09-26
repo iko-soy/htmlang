@@ -1,6 +1,6 @@
 @page New CSS
 
-@el [margin 10, margin-x 20, margin-y 30]
+@el [margin 10, margin-inline 20, margin-block 30]
   @text Margins
 
 @image [width 200, height 200, object-fit cover, object-position center] photo.jpg

@@ -7,9 +7,9 @@
 
   -- Carousel
   @carousel [gap 16]
-    @el [width 200, padding 20, background #f3f4f6, rounded 8]
+    @el [width 200, padding 20, background #f3f4f6, border-radius 8]
       Slide 1
-    @el [width 200, padding 20, background #f3f4f6, rounded 8]
+    @el [width 200, padding 20, background #f3f4f6, border-radius 8]
       Slide 2
 
   -- Chip

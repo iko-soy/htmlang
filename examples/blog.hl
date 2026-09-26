@@ -7,24 +7,24 @@
 @let card [
   padding 24,
   background white,
-  rounded 10,
-  border 1 #e5e7eb,
+  border-radius 10,
+  border 1 solid #e5e7eb,
   box-shadow 0 1px 3px rgba(0,0,0,0.05),
   transition all 0.15s ease
 ]
 
 @let post $title $date $excerpt
   @article [$card, spacing 8]
-    @text [bold, size 20, color $ink] $title
-    @text [size 13, color $muted] $date
+    @text [font-weight bold, font-size 20, color $ink] $title
+    @text [font-size 13, color $muted] $date
     @paragraph [color $ink, line-height 1.6]
       $excerpt
-    @link [color $primary, bold] /posts/$title
+    @link [color $primary, font-weight bold] /posts/$title
       Read more
 
 @column [max-width 720, center-x, padding 40, spacing 32]
   @header [spacing 8]
-    @text [bold, size 36, color $ink] My Blog
+    @text [font-weight bold, font-size 36, color $ink] My Blog
     @text [color $muted] Thoughts on static HTML, layout, and nice defaults.
 
   @main [spacing 20]
@@ -44,5 +44,5 @@
       excerpt "Dev-loop ergonomics beat feature counts. Here's the setup I use."
     ]
 
-  @footer [padding-y 24, text-align center, color $muted, size 13]
+  @footer [padding-block 24, text-align center, color $muted, font-size 13]
     Built with htmlang.

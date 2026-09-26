@@ -15,7 +15,7 @@
 
 -- Outlined, fully rounded label.
 @let chip
-  @text [display inline-flex, align-items center, column-gap 4px, padding 4px 12px, border-radius 9999px, font-size 0.875rem, border 1 currentColor]
+  @text [display inline-flex, align-items center, column-gap 4px, padding 4px 12px, border-radius 9999px, font-size 0.875rem, border 1 solid currentColor]
     @children
 
 -- Circular frame for an image or initials.

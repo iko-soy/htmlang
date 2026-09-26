@@ -3,4 +3,4 @@
 @el [color-scheme light dark, padding 20]
   @text Adapts to system theme
 
-@input [appearance none, padding 10, border 1 #ccc, rounded 4]
+@input [appearance none, padding 10, border 1 solid #ccc, border-radius 4]

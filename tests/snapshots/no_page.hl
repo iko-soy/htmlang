@@ -1,2 +1,2 @@
 @el [padding 10, background #fff]
-  @text [bold] Fragment without @page
+  @text [font-weight bold] Fragment without @page

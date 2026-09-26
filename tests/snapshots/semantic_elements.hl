@@ -1,7 +1,7 @@
 @page Semantic Elements
 
 @header [padding 20, background #f0f0f0]
-  @text [bold, size 24] My Site
+  @text [font-weight bold, font-size 24] My Site
 
 @nav [spacing 10]
   @link / Home
@@ -9,12 +9,12 @@
   @link /contact Contact
 
 @main [padding 20]
-  @article [padding 16, border 1 #ddd, rounded 8]
-    @text [bold] Article Title
+  @article [padding 16, border 1 solid #ddd, border-radius 8]
+    @text [font-weight bold] Article Title
     @paragraph Some article content here
 
   @section [padding 16]
-    @text [bold] Section Title
+    @text [font-weight bold] Section Title
     @paragraph Section content
 
 @aside [padding 16, background #f8f8f8]

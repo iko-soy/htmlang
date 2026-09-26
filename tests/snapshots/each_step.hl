@@ -8,8 +8,8 @@
 -- Step with large range
 @row [spacing 8]
   @each $n in 0..100 step 25
-    @el [width 50, height 50, background #3b82f6, rounded 4]
-      @text [color white, size 12] $n
+    @el [width 50, height 50, background #3b82f6, border-radius 4]
+      @text [color white, font-size 12] $n
 
 -- Reverse range with step
 @column [spacing 4]

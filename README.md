@@ -11,15 +11,15 @@ A minimalist layout language inspired by [elm-ui](https://package.elm-lang.org/p
 @let primary #3b82f6
 
 @let card $title
-  @el [padding 20, background white, rounded 8, border 1 #e5e7eb, hover:border 1 $primary, transition all 0.15s ease]
-    @text [bold] $title
+  @el [padding 20, background white, border-radius 8, border 1 solid #e5e7eb, hover:border 1 solid $primary, transition all 0.15s ease]
+    @text [font-weight bold] $title
     @children
 
 @column [max-width 800, center-x, padding 40, spacing 20]
-  @text [bold, size 32] Hello
+  @text [font-weight bold, font-size 32] Hello
 
   @paragraph
-    Built with {@text [bold, color $primary] htmlang}.
+    Built with {@text [font-weight bold, color $primary] htmlang}.
 
   @row [wrap, spacing 10]
     @card [title Simple]
@@ -97,10 +97,10 @@ Prefixes apply a style conditionally:
 ```
 @let primary #3b82f6
 @let gap = 8 * 2
-@let card [padding 20, rounded 8]
+@let card [padding 20, border-radius 8]
 @let button $label
   @el [$card, background $primary]
-    @text [color white, bold] $label
+    @text [color white, font-weight bold] $label
     @children
 
 @button [label Click me, padding 12]

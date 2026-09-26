@@ -6,4 +6,4 @@
 @el [user-select none, padding 10]
   @text Cannot select this
 
-@input [appearance none, border 1 #ccc, rounded 4, padding 8]
+@input [appearance none, border 1 solid #ccc, border-radius 4, padding 8]

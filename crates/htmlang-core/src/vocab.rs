@@ -10,11 +10,9 @@
 /// htmlang's own attributes (those that are neither a CSS property nor an
 /// HTML attribute).
 pub const HTMLANG_ATTRIBUTES: &[&str] = &[
-    "align-bottom", "align-left", "align-right", "align-top", "bold",
-    "center-x", "center-y", "col-span", "grid-cols", "grid-rows",
-    "hidden", "inline", "italic", "margin-x", "margin-y", "ordered", "padding-x", "padding-y",
-    "responsive", "rounded", "row-span", "size", "spacing", "underline",
-    "wrap",
+    "align-bottom", "align-left", "align-right", "align-top", "center-x", "center-y",
+    "col-span", "grid-cols", "grid-rows", "inline", "ordered", "responsive", "row-span",
+    "spacing", "wrap",
 ];
 
 /// Standard CSS properties, sorted. Any of these can be written as an
@@ -153,6 +151,9 @@ pub fn is_length_property(name: &str) -> bool {
         "top", "right", "bottom", "left", "width", "height", "font-size", "block-size",
         "inline-size", "min-block-size", "max-block-size", "min-inline-size", "max-inline-size",
         "text-indent", "flex-basis", "perspective", "text-decoration-thickness",
+        // Shorthands that start with a width: `border 1 solid red`
+        "border", "border-top", "border-right", "border-bottom", "border-left", "border-block",
+        "border-inline", "outline", "column-rule",
     ];
     EXACT.contains(&name)
         || PREFIXES.iter().any(|p| name.starts_with(p))

@@ -1,4 +1,4 @@
 @page Chain
 @el [padding 10] > @link https://example.com
-  @text [bold] Click
+  @text [font-weight bold] Click
 @row [spacing 5] > @el [padding 20] > @text [color red] Deep chain

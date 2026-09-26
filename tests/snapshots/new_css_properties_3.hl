@@ -3,7 +3,7 @@
 @column [spacing 20]
   @text [font-weight 600] Semi-bold text
   @text [font-style oblique] Oblique text
-  @text [text-wrap balance, size 32] A heading that wraps nicely
+  @text [text-wrap balance, font-size 32] A heading that wraps nicely
   @el [will-change transform, transition transform 0.3s ease]
     Optimized for animation
   @el [touch-action none]

@@ -151,12 +151,17 @@ pub fn upgrade(input: &str) -> Upgrade {
     let mut i = 0;
     // A file may define its own function named like an old alias (e.g.
     // `@let divider`); calls to it must not be renamed.
-    // (Lines inside `"""` strings don't count: they're text.)
+    // (Lines inside `"""` strings and verbatim bodies don't count: they're
+    // text.)
     let mut user_defined: Vec<&str> = Vec::new();
     let mut j = 0;
     while j < lines.len() {
         if let Some(end) = triple_quote_end(&lines, j) {
             j = end;
+            continue;
+        }
+        if VERBATIM_BODIES.iter().any(|d| starts_directive(lines[j].trim(), d)) {
+            j = block_end(&lines, j);
             continue;
         }
         if let Some(name) = lines[j]
@@ -358,7 +363,11 @@ fn upgrade_lists(text: &str, manual: &mut Vec<(usize, String)>) -> (String, usiz
             i += added;
             continue;
         }
-        if vars.len() > 2 || (vars.len() == 2 && list.starts_with('$')) {
+        // (A second variable named like an index already is one.)
+        let index_name = vars
+            .get(1)
+            .is_some_and(|v| ["i", "j", "k", "n", "idx", "index", "pos", "position", "num"].contains(&v.as_str()));
+        if vars.len() > 2 || (vars.len() == 2 && list.starts_with('$') && !index_name) {
             manual.push((
                 i + 1,
                 format!(
@@ -1380,6 +1389,8 @@ fn rewrite_attr_list(list: &str, element_attrs: bool) -> String {
             }
             _ => body,
         };
+        // Style aliases that became their CSS properties
+        let body = if element_attrs { css_alias_or_choice(&body).unwrap_or(body) } else { body };
         // Renamed keys (keeping any `hover:` / `md:` style prefix)
         let key_end = body.find(char::is_whitespace).unwrap_or(body.len());
         let (key, value) = body.split_at(key_end);
@@ -1397,6 +1408,70 @@ fn rewrite_attr_list(list: &str, element_attrs: bool) -> String {
         }
     }
     out
+}
+
+/// `css_alias`, also inside the branches of a whole-attribute
+/// `if(cond, a, b)`.
+fn css_alias_or_choice(attr: &str) -> Option<String> {
+    let Some(inner) = attr.trim_end().strip_prefix("if(").and_then(|a| a.strip_suffix(')')) else {
+        return css_alias(attr);
+    };
+    let args = split_top_level_commas(inner);
+    let [condition, branches @ ..] = args.as_slice() else {
+        return None;
+    };
+    let branches: Vec<String> =
+        branches.iter().map(|b| css_alias(b.trim()).unwrap_or_else(|| b.trim().to_string())).collect();
+    let new = format!("if({}, {})", condition.trim(), branches.join(", "));
+    (new != attr.trim_end()).then_some(new)
+}
+
+/// A style alias as the CSS it stood for (keeping any `hover:` / `md:`
+/// prefix): `bold` → `font-weight bold`, `size 18` → `font-size 18`,
+/// `border 1 red` → `border 1 solid red`. `None` if `attr` isn't one.
+fn css_alias(attr: &str) -> Option<String> {
+    let (key, value) = match attr.split_once(' ') {
+        Some((key, value)) => (key, Some(value.trim())),
+        None => (attr.trim(), None),
+    };
+    let (prefix, base) = key.rsplit_once(':').map_or(("", key), |(p, b)| (p, b));
+    let prefix = if prefix.is_empty() { String::new() } else { format!("{prefix}:") };
+    let css = match (base, value) {
+        ("bold", None) => "font-weight bold".to_string(),
+        ("italic", None) => "font-style italic".to_string(),
+        ("underline", None) => "text-decoration underline".to_string(),
+        ("hidden", None) => "display none".to_string(),
+        ("size", Some(v)) => format!("font-size {v}"),
+        ("rounded", Some(v)) => format!("border-radius {v}"),
+        ("padding-x", Some(v)) => format!("padding-inline {v}"),
+        ("padding-y", Some(v)) => format!("padding-block {v}"),
+        ("margin-x", Some(v)) => format!("margin-inline {v}"),
+        ("margin-y", Some(v)) => format!("margin-block {v}"),
+        // `font Inter` named a family; a CSS `font` shorthand has a size
+        ("font", Some(v)) if !v.split_whitespace().any(|t| t.starts_with(|c: char| c.is_ascii_digit())) => {
+            format!("font-family {v}")
+        }
+        ("border" | "border-top" | "border-right" | "border-bottom" | "border-left", Some(v)) => {
+            const STYLES: &[&str] = &[
+                "none", "hidden", "dotted", "dashed", "solid", "double", "groove", "ridge",
+                "inset", "outset",
+            ];
+            let mut parts = v.split_whitespace();
+            let width = parts.next()?;
+            let is_width = width.starts_with(|c: char| c.is_ascii_digit())
+                || ["thin", "medium", "thick"].contains(&width);
+            let rest: Vec<&str> = parts.collect();
+            if !is_width || width == "0" || rest.first().is_some_and(|s| STYLES.contains(s)) {
+                return None;
+            }
+            match rest.as_slice() {
+                [] => format!("{base} {width} solid"),
+                rest => format!("{base} {width} solid {}", rest.join(" ")),
+            }
+        }
+        _ => return None,
+    };
+    Some(format!("{prefix}{css}"))
 }
 
 /// Does the attribute list at the start of `rest` (if any) have `key`?
@@ -1637,7 +1712,7 @@ mod tests {
     fn directives() {
         assert_eq!(up("@unless $x\n  hi"), "@if not $x\n  hi");
         assert_eq!(up("@fn card $t\n  @text $t"), "@let card $t\n  @text $t");
-        assert_eq!(up("@define c [bold]\n@mixin m [italic]"), "@let c [bold]\n@let m [italic]");
+        assert_eq!(up("@define c [bold]\n@mixin m [italic]"), "@let c [font-weight bold]\n@let m [font-style italic]");
         assert_eq!(up("@for $i in 1..3\n  $i"), "@each $i in 1..3\n  $i");
         assert_eq!(up("@use \"lib.hl\" a, b"), "@include lib.hl");
         assert_eq!(up("@import theme.hl\n@import \"ui.hl\" as ui\n@ui.card [x $ui.gap]"), "@include theme.hl\n@include \"ui.hl\"\n@card [x $gap]");
@@ -1686,7 +1761,7 @@ mod tests {
         assert_eq!(up("@el [\n  animate spin 1s\n]"), "@el [\n  animation spin 1s\n]");
         assert_eq!(up("@text $name|upper|len"), "@text ${length(uppercase($name))}");
         // Text that merely mentions a renamed word is untouched.
-        assert_eq!(up("@text [bold] please animate this"), "@text [bold] please animate this");
+        assert_eq!(up("@text [opacity 1] please animate this"), "@text [opacity 1] please animate this");
     }
 
     #[test]
@@ -1824,6 +1899,32 @@ mod tests {
             up("@svg [width 24, color red, class icon] a.svg"),
             "@image [inline, width 24, color red, class=icon] a.svg"
         );
+    }
+
+    #[test]
+    fn definitions_in_verbatim_bodies_are_text() {
+        assert_eq!(
+            up("@raw\n  @let button $x\n@button [bold] Go\n"),
+            "@raw\n  @let button $x\n@button [font-weight bold] Go\n"
+        );
+    }
+
+    #[test]
+    fn style_aliases_become_css() {
+        assert_eq!(
+            up("@el [bold, hover:underline, size 18, rounded 8, padding-x 4, md:hidden, font \"Inter, sans-serif\"]\n"),
+            "@el [font-weight bold, hover:text-decoration underline, font-size 18, border-radius 8, padding-inline 4, md:display none, font-family \"Inter, sans-serif\"]\n"
+        );
+        assert_eq!(
+            up("@el [border 1 #e5e7eb, focus:border-top 2px $c, border 0, border 1px dashed red, font 16px Inter]\n"),
+            "@el [border 1 solid #e5e7eb, focus:border-top 2px solid $c, border 0, border 1px dashed red, font 16px Inter]\n"
+        );
+        // HTML attributes and function parameters are left alone
+        assert_eq!(up("@select [size=4]\n@let card $size\n  @el\n@card [size 3]\n"), "@select [size=4]\n@let card $size\n  @el\n@card [size 3]\n");
+        assert_eq!(up("@el [if($on, bold, italic)]\n"), "@el [if($on, font-weight bold, font-style italic)]\n");
+        // Idempotent
+        let once = up("@el [bold, border 1 red]\n");
+        assert_eq!(up(&once), once);
     }
 
     #[test]

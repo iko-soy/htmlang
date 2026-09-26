@@ -1,6 +1,6 @@
 @page Basic Elements
 @row [spacing 10]
-  @text [bold] Hello
+  @text [font-weight bold] Hello
   @text World
 @column [spacing 5]
   @el [padding 10]

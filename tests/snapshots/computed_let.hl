@@ -3,5 +3,5 @@
 @let large = $base * 2
 @let gap = $base + 4
 @column [spacing $gap, padding 20]
-  @text [size $base] Base size
-  @text [size $large] Large size
+  @text [font-size $base] Base size
+  @text [font-size $large] Large size

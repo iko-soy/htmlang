@@ -907,7 +907,7 @@ mod tests {
 
     #[test]
     fn owning_element_finds_element_on_same_line() {
-        let text = "@input [type text, ";
+        let text = "@input [type=text, ";
         // Cursor at end of line — inside the unclosed `[`.
         assert_eq!(
             owning_element(text, pos(0, text.len() as u32)),
@@ -966,7 +966,7 @@ mod tests {
             }
         };
         assert_eq!(insert("spacing"), "spacing ");
-        assert_eq!(insert("bold"), "bold");
+        assert_eq!(insert("wrap"), "wrap");
         assert_eq!(insert("opacity"), "opacity ");
         assert_eq!(insert("type="), "type=");
         assert_eq!(insert("required"), "required");

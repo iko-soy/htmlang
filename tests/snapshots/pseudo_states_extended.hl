@@ -1,6 +1,6 @@
 @page Pseudo States Extended
 
-@el [padding 10, focus-visible:border 2 blue, focus-within:background #eee]
+@el [padding 10, focus-visible:border 2 solid blue, focus-within:background #eee]
   @input [type=text, placeholder=Name]
 
 @el [disabled:opacity 0.5, checked:background green]

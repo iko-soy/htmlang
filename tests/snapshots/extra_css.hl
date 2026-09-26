@@ -7,7 +7,7 @@
     Styled
   @el [letter-spacing 2, text-transform uppercase, white-space nowrap]
     Typography
-  @el [border-bottom 1 #ccc, border-top 2 red]
+  @el [border-bottom 1 solid #ccc, border-top 2 solid red]
     Borders
   @el [display grid, grid-cols 3, gap 10]
     @el [col-span 2]
