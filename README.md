@@ -1,35 +1,54 @@
 # htmlang
 
-A minimalist layout language inspired by [elm-ui](https://package.elm-lang.org/packages/mdgriffith/elm-ui/latest/) that compiles to static HTML.
-
-`@` means structure. Bare lines mean content. No CSS required.
-
-## Example
+A small layout language that compiles to static HTML. The layout model comes
+from [elm-ui](https://package.elm-lang.org/packages/mdgriffith/elm-ui/latest/):
+rows and columns, spacing between children, and elements that fill or center
+themselves. Styling uses CSS properties under their CSS names, and every other
+element uses its HTML name.
 
 ```
 @page My Site
-@let primary #3b82f6
+@let --brand #3b82f6
 
 @let card $title
-  @el [padding 20, background white, border-radius 8, border 1 solid #e5e7eb, hover:border 1 solid $primary, transition all 0.15s ease]
-    @text [font-weight bold] $title
+  @article [padding 20, spacing 8, border 1 solid #e5e7eb, border-radius 8, hover:border-color var(--brand)]
+    @h3 $title
     @children
 
-@el [max-width 800, center-x, padding 40, spacing 20]
-  @text [font-weight bold, font-size 32] Hello
-
+@el [max-width 800, center-x, padding 40, spacing 24]
+  @h1 [font-size 32] Hello
   @paragraph
-    Built with {@text [font-weight bold, color $primary] htmlang}.
-
-  @row [wrap, spacing 10]
+    Built with {@text [font-weight bold, color var(--brand)] htmlang}.
+  @row [spacing 16, wrap]
     @card [title Simple]
-      Write layouts without CSS
-    @card [title Fast]
-      Compiles to a single HTML file
+      Layout without writing a stylesheet.
+    @card [title Static]
+      One HTML file, with its CSS inside.
 ```
 
-This compiles to one self-contained `.html` file with flexbox layout and
-generated CSS classes. No JavaScript, no external dependencies.
+Each page compiles to one self-contained `.html` file. It has no JavaScript
+unless you write some, and nothing is added that you didn't ask for.
+
+## The language in brief
+
+- **`@` starts structure, and any other line is content.** Indentation nests
+  elements. Text after an element's attributes is its content, and `{...}`
+  puts an element inside a line of text.
+- **Layout comes from elm-ui.** `@el` lays out its children in a column and
+  `@row` in a row, and every other container is a column too. Layout
+  attributes (`spacing`, `width fill`, `center-x`, `align-right`, `wrap`) say
+  how an element sits inside its parent.
+- **Styling is CSS.** Any other attribute is a CSS property with its CSS
+  name and value: `padding 20`, `border 1 solid #eee`,
+  `grid-template-columns 1fr 2fr`. In lengths, a bare number means pixels.
+  Prefixes make a style conditional: `hover:`, `md:`, `dark:`, `first:`.
+- **HTML stays HTML.** Elements have their HTML names (`@nav`, `@ul`, `@form`,
+  `@details`), and HTML attributes are written `key=value` (`id=main`,
+  `type=email`) or bare (`required`).
+- **`@let` defines everything.** It defines values, computed values,
+  attribute bundles and functions. A layout is just a function with slots.
+- **Data comes in as lists and records.** `@data` loads JSON, and `@each` and
+  `@if` run at compile time.
 
 ## Install
 
@@ -40,15 +59,15 @@ cargo install --path .
 ## Usage
 
 ```
-htmlang page.hl              # compile page.hl -> page.html
+htmlang page.hl              # compile page.hl to page.html
 htmlang page.hl -o out.html  # choose the output file
-htmlang -w page.hl           # recompile on change
 htmlang serve .              # dev server with live reload
+htmlang build src -o dist    # compile a whole site
 ```
 
 | Command | Purpose |
 |---|---|
-| `build <dir> [-o out] [--minify] [--strict]` | Compile every `.hl` file under a directory |
+| `build <dir> [-o out] [--minify] [--strict]` | Compile every `.hl` file under a directory (into `out/` by default) |
 | `serve [dir\|file] [-p PORT] [--open]` | Dev server with live reload |
 | `watch [dir\|file] [-o out]` | Recompile on change, without a server |
 | `check <file\|dir> [--format json]` | Report diagnostics without writing output |
@@ -56,67 +75,73 @@ htmlang serve .              # dev server with live reload
 | `fmt <file.hl>` | Format a file in place |
 | `lsp` | Run the language server over stdio |
 
-Compiling directly also takes `--dev`, `--strict`, `--partial`,
-`--format json`, `-s` / `--serve`, `-p` / `--port` and `--open`.
+Compiling a file directly also takes `-w` / `--watch`, `--dev` (readable
+output and source maps), `--strict`, `--partial` (a fragment, without the
+document wrapper), `--format json`, `-s` / `--serve`, `-p` / `--port` and
+`--open`.
 
-## Editor support
+## A short tour
 
-A VS Code extension with syntax highlighting and LSP integration is in
-[`editors/vscode`](editors/vscode). The language server (`htmlang-lsp`) provides
-diagnostics, completions, hover documentation, go to definition, rename and
-formatting.
-
-## Language tour
-
-Elements are laid out with `@el` (a column) and `@row`; `@text`, `@paragraph`,
-`@link` and `@image` hold content, and every other HTML element is available by
-name (`@nav`, `@section`, `@table`, `@input`, ...).
-
-Attributes are styles, written `key value`, or HTML attributes, written
-`key=value`:
+Layout attributes place an element. Everything else is CSS, and `key=value`
+is an HTML attribute:
 
 ```
--- gap between children, padding, and an HTML id
-@row [spacing 20, padding 16, id=toolbar]
-  -- take the remaining space; center the text
-  @el [width fill, text-align center] Search
-  @input [type=search, placeholder=Find..., width 240]
+@row [spacing 12, align-items center, padding 12 20, border-bottom 1 solid #e5e7eb, id=toolbar]
+  @text [font-weight 700] Acme
+  @spacer
+  @input [type=search, placeholder=Search, aria-label=Search, width 240, padding 6 10]
+  @button [type=submit, padding 6 14, hover:background #f3f4f6] Go
 ```
 
-Any standard CSS property works as a style (`opacity 0.5`, `margin-top 16`).
-Prefixes apply a style conditionally:
+A prefix applies a style only in a state, from a screen width up, or under a
+media condition:
 
 ```
-@el [background #3b82f6, hover:background #2563eb, md:padding 32, dark:background #1e3a8a]
+@el [padding 16, md:padding 32, background #3b82f6, hover:background #2563eb, dark:background #1e3a8a]
   @text [color white] Click me
 ```
 
-`@let` defines values, computed values, attribute bundles and functions:
+`@let` defines values, bundles and functions. A function is called like an
+element: its parameters are attributes, and any other attributes style its
+root element.
 
 ```
-@let primary #3b82f6
+@let --primary #3b82f6
 @let gap = 8 * 2
-@let card [padding 20, border-radius 8]
-@let button $label
-  @el [$card, background $primary]
-    @text [color white, font-weight bold] $label
-    @children
+@let rounded [border-radius 8, overflow hidden]
 
-@button [label Click me, padding 12]
+@let button $label $href=#
+  @link [$rounded, padding 10 16, background var(--primary), color white] $href
+    $label
+
+@row [spacing $gap]
+  @button [label Sign up]
+  @button [label Learn more, href /about, background #64748b]
 ```
 
-Functions are used like elements: extra attributes (here `padding 12`) style
-their root element.
-
-Control flow runs at compile time:
+Data, loops and conditions run at compile time:
 
 ```
-@let items Home, About, Contact
-@row [spacing 8]
-  @each $item in $items
-    @if $item != About
-      @link /${lowercase($item)} $item
+@data $links [
+  {"label": "Home", "url": "/"},
+  {"label": "Blog", "url": "/blog"},
+  {"label": "About us", "url": "/about"}
+]
+@let current /blog
+
+@nav
+  @row [spacing 16]
+    @each $link in $links
+      @link [if($link.url == $current, font-weight bold)] $link.url $link.label
 ```
 
-See [DESIGN.md](DESIGN.md) for the full language: files and data (`@include`,
-layouts, `@data`), page metadata, expressions and CSS.
+The [`examples/`](examples) directory has complete pages (a landing page, a
+blog, a docs page, and a tour of the whole language). [DESIGN.md](DESIGN.md)
+is the language reference.
+
+## Editor support
+
+The VS Code extension in [`editors/vscode`](editors/vscode) provides syntax
+highlighting, snippets, and the language server (`htmlang-lsp`). The server
+gives diagnostics, completions, hover documentation, go to definition, rename
+and formatting.

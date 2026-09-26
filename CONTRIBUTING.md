@@ -33,8 +33,10 @@ Linux, macOS, and Windows. Your change should pass all three.
 - `editors/vscode/` — VS Code extension.
 - `tests/snapshots.rs` — integration / snapshot tests for the compiler.
 - `tests/regressions.rs` — one test per fixed bug.
-- `tests/docs.rs` — compiles every example in `DESIGN.md` and `README.md`.
-- `examples/` — sample `.hl` files used as smoke tests and documentation.
+- `tests/docs.rs` — compiles every example in `DESIGN.md` and `README.md`,
+  and every page in `examples/`.
+- `examples/` — complete pages: a landing page, a blog, a docs page, and a
+  tour of the whole language (`demo.hl`).
 
 ## Adding a feature
 
@@ -47,7 +49,8 @@ Linux, macOS, and Windows. Your change should pass all three.
    thread a feature through the parser and codegen when it needs to be, and
    describe it in the LSP's `docs.rs`.
 3. Document it in `DESIGN.md` (the examples there are compiled by the tests).
-   If it's user-facing, also update `README.md`.
+   If it's user-facing, also update `README.md`, and show it in
+   `examples/demo.hl` if the tour has a section it belongs in.
 4. If it changes the CLI surface, update the `--help` output.
 
 ## Style

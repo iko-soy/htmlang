@@ -77,7 +77,7 @@
     },
     "element": {
       "name": "entity.name.tag.htmlang",
-      "match": "@(?:row|column|el|text|paragraph|image|link|raw|children|slot|fragment|script|nav|header|footer|main|section|article|aside|address|search|form|details|summary|dialog|figure|figcaption|blockquote|cite|fieldset|legend|noscript|datalist|list|item|dl|dt|dd|table|thead|tbody|tr|td|th|select|picture|progress|meter|output|canvas|button|label|option|textarea|time|mark|abbr|code|kbd|pre|h1|h2|h3|h4|h5|h6|input|hr|source|video|audio|iframe|grid|stack|in-front|behind)(?![a-zA-Z0-9_-])"
+      "match": "@(?:row|el|text|paragraph|image|link|raw|children|slot|fragment|script|nav|header|footer|main|section|article|aside|address|search|form|details|summary|dialog|figure|figcaption|blockquote|cite|fieldset|legend|noscript|datalist|ul|ol|li|dl|dt|dd|table|thead|tbody|tr|td|th|select|picture|progress|meter|output|canvas|button|label|option|textarea|time|mark|abbr|code|kbd|pre|h1|h2|h3|h4|h5|h6|input|hr|source|video|audio|iframe|grid|in-front|behind)(?![a-zA-Z0-9_-])"
     },
     "function-call": {
       "name": "entity.name.function.htmlang",
@@ -132,7 +132,7 @@
     },
     "attribute-name": {
       "name": "support.type.property-name.htmlang",
-      "match": "\\b(?:spacing|padding|padding-x|padding-y|width|height|min-width|max-width|min-height|max-height|center-x|center-y|align-left|align-right|align-top|align-bottom|background|color|border|rounded|bold|italic|underline|size|font|transition|cursor|opacity|text-align|line-height|overflow|position|z-index|wrap|gap|margin|hidden)\\b"
+      "match": "\\b(?:spacing|center-x|center-y|align-left|align-right|align-top|align-bottom|wrap|grid-cols|grid-rows|col-span|row-span|inline|padding|margin|width|height|min-width|max-width|min-height|max-height|background|color|border|border-radius|font-size|font-weight|font-family|line-height|text-align|display|gap|flex|position|overflow|opacity|cursor|transition|transform|box-shadow|z-index)\\b"
     },
     "inline-element": {
       "name": "meta.inline-element.htmlang",

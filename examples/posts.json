@@ -1,0 +1,27 @@
+[
+  {
+    "slug": "tight-feedback-loops",
+    "title": "Tight feedback loops",
+    "date": "2026-04-16",
+    "display_date": "April 16, 2026",
+    "tags": ["tooling", "workflow"],
+    "summary": "Dev-loop ergonomics beat feature counts. Here's the setup I use: a watcher, a browser, and nothing else.",
+    "featured": true
+  },
+  {
+    "slug": "why-flexbox-is-enough",
+    "title": "Why flexbox is enough",
+    "date": "2026-04-10",
+    "display_date": "April 10, 2026",
+    "tags": ["css", "layout"],
+    "summary": "Most page layouts are rows and columns. A walk through the cases where flexbox wins, and the few where grid does."
+  },
+  {
+    "slug": "first-post",
+    "title": "First post",
+    "date": "2026-04-02",
+    "display_date": "April 2, 2026",
+    "tags": ["meta"],
+    "summary": "A short introduction: what this blog is about, why it's a handful of static files, and what comes next."
+  }
+]

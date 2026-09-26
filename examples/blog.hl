@@ -1,48 +1,88 @@
--- A minimal blog template: header + list of posts + post template.
-@page [lang en] My Blog
-@let primary #3b82f6
-@let ink #1f2937
-@let muted #6b7280
+-- A blog index: a layout function with named slots, posts loaded from JSON,
+-- and loops and conditions over records.
+@page [lang en] Notes on the Web
+@meta description Short essays on static HTML, layout and tooling.
 
-@let card [
-  padding 24,
-  background white,
-  border-radius 10,
-  border 1 solid #e5e7eb,
-  box-shadow 0 1px 3px rgba(0,0,0,0.05),
-  transition all 0.15s ease
-]
+@let --ink #1f2937
+@let --muted #6b7280
+@let --accent #3b82f6
+@let --line #e5e7eb
 
-@let post $title $date $excerpt
-  @article [$card, spacing 8]
-    @text [font-weight bold, font-size 20, color $ink] $title
-    @text [font-size 13, color $muted] $date
-    @paragraph [color $ink, line-height 1.6]
-      $excerpt
-    @link [color $primary, font-weight bold] /posts/$title
-      Read more
+-- Posts are records: $post.title, $post.tags, ...
+@data $posts posts.json
 
-@el [max-width 720, center-x, padding 40, spacing 32]
-  @header [spacing 8]
-    @text [font-weight bold, font-size 36, color $ink] My Blog
-    @text [color $muted] Thoughts on static HTML, layout, and nice defaults.
+-- A layout is an ordinary function. @slot blocks are filled by name; the
+-- rest of the caller's content replaces @children.
+@let site
+  @el [max-width 720, center-x, padding 48 24, spacing 40, color var(--ink), line-height 1.6]
+    @header [spacing 4]
+      @link [font-weight 800, font-size 28, letter-spacing -0.5] / Notes on the Web
+      @slot tagline
+        @text [color var(--muted)] Short essays.
+    @main [spacing 40]
+      @children
+    @footer [padding-block-start 24, border-top 1 solid var(--line), color var(--muted), font-size 14]
+      @slot footer
+        Built with htmlang.
 
-  @main [spacing 20]
-    @post [
-      title First post,
-      date April 16 2026,
-      excerpt "A short introduction to how I think about static site generators."
-    ]
-    @post [
-      title Why flexbox is enough,
-      date April 10 2026,
-      excerpt "Most layouts don't need CSS Grid. A walk through the cases where flexbox wins."
-    ]
-    @post [
-      title Tight feedback loops,
-      date April 2 2026,
-      excerpt "Dev-loop ergonomics beat feature counts. Here's the setup I use."
-    ]
+-- A pill for each tag
+@let tag $name
+  @link [
+    padding 2 10,
+    border-radius 999,
+    background #eff6ff,
+    color var(--accent),
+    font-size 13,
+    hover:background #dbeafe
+  ] /tags/$name
+    #$name
 
-  @footer [padding-block 24, text-align center, color $muted, font-size 13]
-    Built with htmlang.
+-- A post summary. `featured` is optional: a parameter with a default
+@let post-card $post $featured=false
+  @article [
+    spacing 8,
+    padding if($featured, 24, 0),
+    border-radius 12,
+    if($featured, background #f8fafc),
+    if($featured, border 1 solid var(--line))
+  ]
+    @if $featured
+      @text [font-size 12, font-weight 700, text-transform uppercase, letter-spacing 1, color var(--accent)] Featured
+    @h2 [font-size 22, line-height 1.3]
+      @link [hover:color var(--accent)] /posts/$post.slug $post.title
+    @row [spacing 8, align-items center, wrap, font-size 14, color var(--muted)]
+      @time [datetime=$post.date] $post.display_date
+      @text ·
+      @each $name in $post.tags
+        @tag [name $name]
+    @paragraph [color var(--muted), line-clamp 2] $post.summary
+
+-- Multi-line content: a function whose body is text
+@let about
+  I write about building for the web with as little machinery as possible:
+  plain HTML, a little CSS, and tools that {@text [font-style italic] stay out of the way}.
+
+@site
+  @slot tagline
+    @paragraph [color var(--muted)]
+      @about
+
+  @section [spacing 32]
+    @each $post in $posts
+      @post-card [post $post, featured ${default($post.featured, false)}]
+    @else
+      @text [color var(--muted)] Nothing here yet.
+
+  @section [spacing 12]
+    @h2 [font-size 18] Tooling posts
+    @ul [spacing 4, list-style disc, padding-inline-start 20, children:display list-item]
+      @each $post in $posts
+        @if contains($post.tags, tooling)
+          @li
+            @link [color var(--accent), hover:text-decoration underline] /posts/$post.slug $post.title
+
+  @slot footer
+    @row [spacing 16]
+      @text ${length($posts)} posts
+      @spacer
+      @link [hover:color var(--ink)] /feed.xml RSS

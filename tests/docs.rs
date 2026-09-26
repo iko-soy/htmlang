@@ -1,5 +1,5 @@
-//! Compile every htmlang example in the docs, so they can't drift from the
-//! language. A fenced block without a language tag is htmlang unless it is a
+//! Compile every htmlang example in the docs and in `examples/`, so they
+//! can't drift from the language. A fenced block without a language tag is htmlang unless it is a
 //! shell session (lines starting with `htmlang ` / `cargo `) or the syntax
 //! template in DESIGN.md. Blocks whose first line is `-- name.hl` are written
 //! to disk first so `@include` between them resolves.
@@ -41,6 +41,22 @@ fn is_htmlang(block: &str) -> bool {
         || first.starts_with("@element "))
 }
 
+/// The diagnostics that make an example wrong rather than just imperfect.
+fn problems(result: &parser::ParseResult) -> Vec<String> {
+    result
+        .diagnostics
+        .iter()
+        .filter(|d| {
+            d.severity == Severity::Error
+                || d.message.contains("unknown")
+                || d.message.contains("undefined variable")
+                || d.message.contains("is an HTML attribute")
+                || d.message.contains("no single root")
+        })
+        .map(|d| format!("line {}: {}", d.line, d.message))
+        .collect()
+}
+
 fn check_doc(file: &str) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let markdown = std::fs::read_to_string(root.join(file)).unwrap();
@@ -63,19 +79,7 @@ fn check_doc(file: &str) {
 
     let mut failures = Vec::new();
     for block in &blocks {
-        let result = parser::parse_with_base(block, Some(&dir));
-        let problems: Vec<String> = result
-            .diagnostics
-            .iter()
-            .filter(|d| {
-                d.severity == Severity::Error
-                    || d.message.contains("unknown")
-                    || d.message.contains("undefined variable")
-                    || d.message.contains("is an HTML attribute")
-                    || d.message.contains("no single root")
-            })
-            .map(|d| format!("line {}: {}", d.line, d.message))
-            .collect();
+        let problems = problems(&parser::parse_with_base(block, Some(&dir)));
         if !problems.is_empty() {
             failures.push(format!("{}\n=> {}", block, problems.join("\n=> ")));
         }
@@ -97,4 +101,26 @@ fn design_md_examples_compile() {
 #[test]
 fn readme_examples_compile() {
     check_doc("README.md");
+}
+
+#[test]
+fn examples_compile() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples");
+    let mut failures = Vec::new();
+    for entry in std::fs::read_dir(&dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_none_or(|e| e != "hl") {
+            continue;
+        }
+        let source = std::fs::read_to_string(&path).unwrap();
+        let problems = problems(&parser::parse_with_base(&source, Some(&dir)));
+        if !problems.is_empty() {
+            failures.push(format!("{}\n=> {}", path.display(), problems.join("\n=> ")));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "examples don't compile cleanly:\n\n{}",
+        failures.join("\n\n")
+    );
 }

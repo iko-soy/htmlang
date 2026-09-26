@@ -1,171 +1,235 @@
 {
-  "Page boilerplate": {
+  "Page": {
     "prefix": "@page",
     "body": [
-      "@page ${1:My Page}",
-      "@let primary ${2:#3b82f6}",
+      "@page [lang ${1:en}] ${2:My Page}",
+      "@let --${3:brand} ${4:#3b82f6}",
       "",
-      "@el [max-width ${3:800}, center-x, padding ${4:40}, spacing ${5:20}]",
+      "@el [max-width ${5:800}, center-x, padding ${6:40}, spacing ${7:20}]",
       "  $0"
     ],
-    "description": "Page boilerplate with title, variables, and layout"
+    "description": "A page with a title, tokens and a centered column"
   },
-  "Function component": {
+  "Page metadata": {
+    "prefix": "@page-meta",
+    "body": [
+      "@page [lang ${1:en}, favicon ${2:favicon.png}] ${3:My Page}",
+      "@meta description ${4:Page description}",
+      "@meta og:title $3",
+      "@head",
+      "  <link rel=\"canonical\" href=\"${5:https://example.com/}\">",
+      "$0"
+    ],
+    "description": "A page with a description, Open Graph tags and a canonical link"
+  },
+  "Design tokens": {
+    "prefix": "@let-tokens",
+    "body": [
+      "@let --${1:brand} ${2:#3b82f6}",
+      "@let --${3:ink} ${4:#0f172a}",
+      "@let --${5:muted} ${6:#64748b}",
+      "$0"
+    ],
+    "description": "CSS custom properties: var(--name) at run time, \\$--name at compile time"
+  },
+  "Attribute bundle": {
+    "prefix": "@let-bundle",
+    "body": [
+      "@let ${1:card} [${2:padding 20, background white, border 1 solid #e5e7eb, border-radius 8}]",
+      "$0"
+    ],
+    "description": "A named list of attributes, used as [\\$name]"
+  },
+  "Function": {
     "prefix": "@let-fn",
     "body": [
-      "@let ${1:component} \\$${2:title}",
-      "  @el [${3:padding 20, background white, border-radius 8}]",
+      "@let ${1:card} \\$${2:title}",
+      "  @el [${3:padding 20, spacing 8, border 1 solid #e5e7eb, border-radius 8}]",
       "    @text [font-weight bold] \\$$2",
       "    @children",
       "",
       "@$1 [$2 ${4:Hello}]",
       "  $0"
     ],
-    "description": "Reusable function component with @children slot"
+    "description": "A function with a parameter and @children"
   },
-  "Function with named slots": {
+  "Function with slots": {
     "prefix": "@let-slots",
     "body": [
-      "@let ${1:layout} \\$${2:title}",
-      "  @el [${3:max-width 800, center-x, padding 40}]",
-      "    @slot ${4:header}",
-      "      @text [font-weight bold, font-size 32] \\$$2",
-      "    @slot ${5:content}",
-      "    @slot ${6:footer}",
+      "@let ${1:panel} \\$${2:title}",
+      "  @article [${3:padding 20, spacing 12}]",
+      "    @row [align-items center]",
+      "      @h2 \\$$2",
+      "      @spacer",
+      "      @slot ${4:actions}",
+      "    @children",
+      "    @slot ${5:footer}",
+      "      @text ${6:Default footer}",
       "",
-      "@$1 [$2 ${7:My Page}]",
-      "  @slot $5",
+      "@$1 [$2 ${7:Title}]",
+      "  @slot $4",
+      "    $0",
+      "  Content"
+    ],
+    "description": "A function with named slots and default content"
+  },
+  "Scoped style": {
+    "prefix": "@let-style",
+    "body": [
+      "@let ${1:note}",
+      "  @style",
+      "    & { ${2:border-left: 4px solid #3b82f6;} }",
+      "  @el [${3:padding 12 16}]",
+      "    @children",
+      "$0"
+    ],
+    "description": "A function with a stylesheet scoped to its root element"
+  },
+  "Layout": {
+    "prefix": "@layout",
+    "body": [
+      "@include ${1:layout.hl}",
+      "@${2:layout}",
+      "  @slot ${3:header}",
       "    $0"
     ],
-    "description": "Function with named slots for multi-region layouts"
+    "description": "Render the page inside a layout function from another file"
   },
-  "Card component": {
-    "prefix": "@card",
+  "Row": {
+    "prefix": "@row",
     "body": [
-      "@el [padding ${1:20}, background ${2:white}, border-radius ${3:8}, border 1 solid ${4:#e5e7eb}, hover:border 1 solid ${5:\\$primary}, transition all 0.15s ease]",
-      "  @text [font-weight bold, font-size ${6:18}] ${7:Title}",
+      "@row [spacing ${1:16}, align-items ${2:center}]",
       "  $0"
     ],
-    "description": "Card with border, hover effect, and title"
+    "description": "A row with spacing"
   },
   "Responsive row": {
     "prefix": "@responsive-row",
     "body": [
-      "@row [wrap, spacing ${1:20}]",
-      "  @el [width fill, min-width ${2:300}]",
+      "@row [spacing ${1:20}, wrap]",
+      "  @el [flex 1 1 ${2:280}px]",
       "    ${3:Column 1}",
-      "  @el [width fill, min-width $2]",
+      "  @el [flex 1 1 $2px]",
       "    ${4:Column 2}",
-      "  $0"
+      "$0"
     ],
-    "description": "Responsive wrapping row layout"
+    "description": "A row of columns that wraps on narrow screens"
   },
-  "Navigation bar": {
-    "prefix": "@navbar",
-    "body": [
-      "@nav [padding-inline ${1:20}, padding-block ${2:12}, background ${3:#1a1a2e}]",
-      "  @row [spacing ${4:20}, align-items center]",
-      "    @text [font-weight bold, color ${5:white}, font-size ${6:18}] ${7:Logo}",
-      "    @el [width fill]",
-      "    @data \\$links [{\"label\": \"${8:Home}\", \"url\": \"/\"}, {\"label\": \"About\", \"url\": \"/about\"}]",
-      "    @each \\$link in \\$links",
-      "      @link \\$link.url",
-      "        @text [color ${9:#a8b2d1}, hover:color white] \\$link.label",
-      "    $0"
-    ],
-    "description": "Navigation bar with logo and links"
-  },
-  "Each loop": {
-    "prefix": "@each",
-    "body": [
-      "@each \\$${1:item} in ${2:items}",
-      "  $0",
-      "@else",
-      "  @text [color #888] No items found."
-    ],
-    "description": "Each loop with @else fallback"
-  },
-  "Conditional": {
-    "prefix": "@if",
-    "body": [
-      "@if ${1:condition}",
-      "  $0",
-      "@else",
-      "  "
-    ],
-    "description": "If/else conditional block"
-  },
-  "Grid layout": {
+  "Grid": {
     "prefix": "@grid",
     "body": [
-      "@grid [grid-cols ${1:3}, gap ${2:20}]",
-      "  @el [padding ${3:20}]",
-      "    ${4:Item 1}",
-      "  @el [padding $3]",
-      "    ${5:Item 2}",
-      "  @el [padding $3]",
-      "    ${6:Item 3}",
-      "  $0"
+      "@grid [grid-cols ${1:3}, spacing ${2:20}, ${3:md:grid-cols 4}]",
+      "  @el ${4:One}",
+      "  @el ${5:Two}",
+      "  @el ${6:Three}",
+      "$0"
     ],
-    "description": "CSS Grid layout with columns"
+    "description": "A grid with equal columns"
   },
   "Grid with named areas": {
     "prefix": "@grid-areas",
     "body": [
-      "@grid [grid-template-areas \"${1:header header}\" \"${2:sidebar main}\" \"${3:footer footer}\", gap ${4:20}]",
-      "  @el [grid-area ${5:header}]",
-      "    ${6:Header}",
-      "  @el [grid-area ${7:sidebar}]",
-      "    ${8:Sidebar}",
-      "  @el [grid-area ${9:main}]",
+      "@grid [grid-template-columns ${1:240px 1fr}, grid-template-areas \"${2:header header}\" \"${3:sidebar main}\", spacing ${4:20}]",
+      "  @header [grid-area header]",
+      "    ${5:Header}",
+      "  @aside [grid-area sidebar]",
+      "    ${6:Sidebar}",
+      "  @main [grid-area main]",
       "    $0"
     ],
-    "description": "CSS Grid with named template areas"
+    "description": "A grid with named template areas"
   },
-  "Form with inputs": {
-    "prefix": "@form",
+  "Navigation bar": {
+    "prefix": "@navbar",
     "body": [
-      "@form [method=${1:post}, spacing ${2:16}] ${3:/submit}",
-      "  @label [for=${4:email}] ${5:Email}",
-      "  @input [type=${6:email}, name=$4, id=$4, required, padding 8, border 1 solid #d1d5db, border-radius 4]",
-      "  @button [type=submit, padding 10, background ${7:\\$primary}, color white, border-radius 4, font-weight bold]",
-      "    ${8:Submit}",
-      "  $0"
-    ],
-    "description": "Form with labeled input and submit button"
-  },
-  "Dark mode toggle": {
-    "prefix": "@darkmode",
-    "body": [
-      "@el [background ${1:white}, dark:background ${2:#1a1a2e}, color ${3:#333}, dark:color ${4:#eee}, transition all 0.2s ease]",
-      "  $0"
-    ],
-    "description": "Element with light/dark mode styles"
-  },
-  "Hero section": {
-    "prefix": "@hero",
-    "body": [
-      "@el [center-x, center-y, min-height ${1:80vh}, padding ${2:40}, spacing ${3:20}]",
-      "  @text [font-weight bold, font-size ${4:48}, text-align center] ${5:Hero Title}",
-      "  @paragraph [max-width ${6:600}, text-align center, color ${7:#666}, line-height 1.6]",
-      "    ${8:Hero description text}",
-      "  @el [padding 12 24, background ${9:\\$primary}, border-radius 8] > @link ${10:#}",
-      "    @text [color white, font-weight bold] ${11:Get Started}",
-      "  $0"
-    ],
-    "description": "Hero section with title, description, and CTA"
-  },
-  "Theme tokens": {
-    "prefix": "@let-tokens",
-    "body": [
-      "@let --primary ${1:#3b82f6}",
-      "@let --secondary ${2:#10b981}",
-      "@let --radius ${3:8}",
+      "@data \\$${1:links} [",
+      "  {\"label\": \"${2:Home}\", \"url\": \"/\"},",
+      "  {\"label\": \"${3:About}\", \"url\": \"/about\"}",
+      "]",
+      "@header [padding ${4:12 24}, border-bottom 1 solid #e5e7eb]",
+      "  @row [spacing ${5:20}, align-items center]",
+      "    @text [font-weight bold] ${6:Logo}",
+      "    @spacer",
+      "    @nav",
+      "      @row [spacing $5]",
+      "        @each \\$link in \\$$1",
+      "          @link [hover:text-decoration underline] \\$link.url \\$link.label",
       "$0"
     ],
-    "description": "Design tokens as CSS custom properties (use as $--primary)"
+    "description": "A header with a logo, a spacer and links from data"
   },
-  "Keyframes animation": {
+  "Hero": {
+    "prefix": "@hero",
+    "body": [
+      "@section [padding ${1:96 24}, spacing ${2:24}, text-align center]",
+      "  @h1 [font-size ${3:48}] ${4:Headline}",
+      "  @paragraph [max-width ${5:600}, center-x, color #64748b, line-height 1.6]",
+      "    ${6:A sentence about the product.}",
+      "  @link [center-x, padding 12 24, border-radius 8, background ${7:#3b82f6}, color white, font-weight bold] ${8:/signup}",
+      "    ${9:Get started}",
+      "$0"
+    ],
+    "description": "A centered hero section with a call to action"
+  },
+  "Form": {
+    "prefix": "@form",
+    "body": [
+      "@form [method=${1:post}, spacing ${2:12}] ${3:/submit}",
+      "  @label [for=${4:email}] ${5:Email}",
+      "  @input [type=${6:email}, name=$4, id=$4, required, padding 8, border 1 solid #d1d5db, border-radius 4]",
+      "  @button [type=submit, padding 10 16, border 0, border-radius 4, background ${7:#3b82f6}, color white, font-weight bold] ${8:Submit}",
+      "$0"
+    ],
+    "description": "A form with a labeled input and a submit button"
+  },
+  "Search": {
+    "prefix": "@search",
+    "body": [
+      "@search",
+      "  @form [spacing 8] ${1:/search}",
+      "    @input [type=search, name=q, aria-label=Search, placeholder=${2:Search}]",
+      "    @button [type=submit] ${3:Go}",
+      "$0"
+    ],
+    "description": "A search form"
+  },
+  "Data": {
+    "prefix": "@data",
+    "body": [
+      "@data \\$${1:items} ${2:items.json}",
+      "$0"
+    ],
+    "description": "Load JSON: records are \\$name.key, arrays are lists"
+  },
+  "Each": {
+    "prefix": "@each",
+    "body": [
+      "@each \\$${1:item} in \\$${2:items}",
+      "  $0",
+      "@else",
+      "  @text Nothing here yet."
+    ],
+    "description": "Loop over a list, with a fallback for an empty one"
+  },
+  "If": {
+    "prefix": "@if",
+    "body": [
+      "@if ${1:\\$condition}",
+      "  $0",
+      "@else",
+      "  "
+    ],
+    "description": "A conditional with an else branch"
+  },
+  "Dark mode": {
+    "prefix": "@dark",
+    "body": [
+      "@el [background ${1:white}, color ${2:#111827}, dark:background ${3:#111827}, dark:color ${4:#f9fafb}]",
+      "  $0"
+    ],
+    "description": "Light and dark colors on one element"
+  },
+  "Keyframes": {
     "prefix": "@keyframes",
     "body": [
       "@style",
@@ -177,70 +241,7 @@
       "@el [animation $1 ${2:0.3s} ${3:ease}]",
       "  $0"
     ],
-    "description": "Keyframe animation with element usage"
-  },
-  "Include/Import": {
-    "prefix": "@include",
-    "body": [
-      "@include ${1:components.hl}",
-      "$0"
-    ],
-    "description": "Include another file (a library of @let definitions emits nothing)"
-  },
-  "Layout": {
-    "prefix": "@layout",
-    "body": [
-      "@include ${1:layout.hl}",
-      "@${2:layout}",
-      "  @slot ${3:header}",
-      "    $0"
-    ],
-    "description": "Render the page inside a layout function"
-  },
-  "Script (external)": {
-    "prefix": "@script-src",
-    "body": [
-      "@script [src=${1:app.js}, ${2:defer}]",
-      "$0"
-    ],
-    "description": "External script tag with src attribute"
-  },
-  "Script (inline)": {
-    "prefix": "@script",
-    "body": [
-      "@script",
-      "  $0"
-    ],
-    "description": "Inline script block"
-  },
-  "Noscript fallback": {
-    "prefix": "@noscript",
-    "body": [
-      "@noscript",
-      "  @text ${1:JavaScript is required for this page.}",
-      "  $0"
-    ],
-    "description": "Fallback content when JavaScript is disabled"
-  },
-  "Address block": {
-    "prefix": "@address",
-    "body": [
-      "@address",
-      "  @text [font-weight bold] ${1:Name}",
-      "  @link mailto:${2:email@example.com} $2",
-      "  $0"
-    ],
-    "description": "Contact address block"
-  },
-  "Search form": {
-    "prefix": "@search",
-    "body": [
-      "@search",
-      "  @input [type=search, placeholder=${1:Search...}]",
-      "  @button [type=submit] ${2:Go}",
-      "  $0"
-    ],
-    "description": "Search form with input and submit button"
+    "description": "A keyframe animation in @style, used by an element"
   },
   "Font face": {
     "prefix": "@font-face",
@@ -249,9 +250,9 @@
       "  @font-face { font-family: '${1:Inter}'; src: url('${2:fonts/inter.woff2}') format('woff2'); font-display: swap; }",
       "$0"
     ],
-    "description": "Custom font face in an @style block"
+    "description": "A custom font in @style"
   },
-  "JSON-LD structured data": {
+  "JSON-LD": {
     "prefix": "@json-ld",
     "body": [
       "@head",
@@ -260,16 +261,30 @@
       "  </script>",
       "$0"
     ],
-    "description": "JSON-LD structured data in @head"
+    "description": "Structured data in @head"
   },
-  "Page metadata": {
-    "prefix": "@page-meta",
+  "Include": {
+    "prefix": "@include",
     "body": [
-      "@page [lang ${1:en}, canonical ${2:https://example.com/page}, favicon ${3:/favicon.png}] ${4:My Page}",
-      "@meta description ${5:Page description}",
-      "@meta og:title $4",
+      "@include ${1:components.hl}",
       "$0"
     ],
-    "description": "Page with language, canonical URL, favicon and meta tags"
+    "description": "Include another file (a file of @let definitions outputs nothing)"
+  },
+  "Script": {
+    "prefix": "@script",
+    "body": [
+      "@script",
+      "  $0"
+    ],
+    "description": "An inline script"
+  },
+  "External script": {
+    "prefix": "@script-src",
+    "body": [
+      "@script [src=${1:app.js}, ${2:defer}]",
+      "$0"
+    ],
+    "description": "A script loaded from a file"
   }
 }

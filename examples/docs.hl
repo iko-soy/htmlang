@@ -1,75 +1,140 @@
--- A documentation page: sidebar nav + prose content + code samples.
-@page [lang en] Docs · Getting Started
-@let ink #0f172a
-@let muted #64748b
-@let primary #3b82f6
-@let code-bg #f1f5f9
+-- A documentation page: a sidebar built from data, prose in htmlang and in
+-- Markdown, code samples, a table, and a component with scoped styles.
+@page [lang en] Getting started · htmlang docs
 
-@let nav-link $label $href
-  @link [
-    padding 8, padding-inline 12, border-radius 6, color $ink,
-    hover:background #f1f5f9, transition all 0.1s ease
-  ] $href
-    $label
+@let --ink #0f172a
+@let --muted #64748b
+@let --accent #3b82f6
+@let --line #e5e7eb
+@let --code-bg #f1f5f9
 
-@row [min-height 100vh]
+-- The page this file renders, used to highlight it in the sidebar
+@let current install
+
+@data $sections [
+  {"title": "Introduction", "pages": [
+    {"id": "overview", "label": "Overview"},
+    {"id": "install", "label": "Getting started"},
+    {"id": "first-page", "label": "Your first page"}
+  ]},
+  {"title": "Guides", "pages": [
+    {"id": "layout", "label": "Layout"},
+    {"id": "styling", "label": "Styling"},
+    {"id": "functions", "label": "Functions"},
+    {"id": "data", "label": "Data and loops"}
+  ]}
+]
+
+-- Code samples: @raw keeps the lines exactly as written, @ and all
+@let code-block
+  @pre [padding 16, background var(--code-bg), border-radius 8, font-size 14, line-height 1.5, overflow-x auto]
+    @children
+
+-- A callout with its own stylesheet. The @style rules are scoped to the
+-- function's root element; & is the root itself.
+@let callout $kind=Note
+  @style
+    & { border-inline-start: 4px solid var(--accent); }
+    .label { font-weight: 700; color: var(--accent); }
+  @aside [padding 12 16, spacing 4, background #eff6ff, border-radius 6]
+    @text [class=label] $kind
+    @children
+
+@row [min-height 100vh, color var(--ink)]
   -- Sidebar
   @aside [
-    width 240, padding 32, padding-inline 20,
-    background #fafafa, border-right 1 solid #e5e7eb, spacing 4
+    width 260,
+    flex-shrink 0,
+    padding 32 20,
+    spacing 24,
+    background #fafafa,
+    border-right 1 solid var(--line),
+    display none,
+    md:display flex
   ]
-    @text [font-weight bold, font-size 13, color $muted, text-transform uppercase, letter-spacing 1] Introduction
-    @nav-link [label Overview, href #overview]
-    @nav-link [label Installation, href #install]
-    @nav-link [label First page, href #first-page]
-    @text [
-      font-weight bold, font-size 13, color $muted, text-transform uppercase, letter-spacing 1,
-      margin-block-start 20
-    ] Guides
-    @nav-link [label Layout, href #layout]
-    @nav-link [label Styling, href #styling]
-    @nav-link [label Functions, href #functions]
+    @link [font-weight 800, font-size 18] / htmlang
+    @nav [spacing 20]
+      @each $section in $sections
+        @el [spacing 4]
+          @text [font-size 12, font-weight 700, color var(--muted), text-transform uppercase, letter-spacing 1] $section.title
+          @each $item in $section.pages
+            @link [
+              padding 6 12,
+              border-radius 6,
+              hover:background var(--code-bg),
+              if($item.id == $current, background var(--code-bg)),
+              if($item.id == $current, font-weight 600),
+              if($item.id == $current, aria-current=page)
+            ] /docs/$item.id $item.label
 
-  -- Prose
-  @main [padding 48, padding-inline 56, max-width 800, spacing 24]
-    @text [font-weight bold, font-size 36, color $ink] Getting started
+  -- Content
+  @main [width fill, padding 48 24, md:padding 48 56]
+    @article [max-width 760, spacing 20, line-height 1.7]
+      @el [spacing 8]
+        @text [font-size 14, color var(--muted)] Introduction
+        @h1 [font-size 40, line-height 1.2] Getting started
 
-    @paragraph [color $ink, line-height 1.7, font-size 17]
-      htmlang is a minimalist layout language that compiles to a single static
-      HTML file. This guide walks through the essentials in about five minutes.
+      @paragraph [font-size 18]
+        htmlang is a small layout language that compiles to static HTML. This
+        guide takes about five minutes: install the compiler, write a page,
+        and see it in the browser.
 
-    @text [font-weight bold, font-size 24, color $ink] Installation
+      @h2 [id=install, font-size 24, margin-block-start 16] Install
+      @code-block
+        @raw
+          cargo install --path .
 
-    @pre [background $code-bg, padding 16, border-radius 8, overflow-x auto]
-      cargo install --path .
+      @h2 [id=first-page, font-size 24, margin-block-start 16] Your first page
+      @paragraph
+        Create a file called {@code hello.hl}:
+      @code-block
+        @raw
+          @page Hello
+          @el [padding 40, spacing 16]
+            @h1 Hi there
+            @paragraph
+              This is {@text [font-weight bold] htmlang}.
+      @paragraph
+        Then start the dev server and open the page. It recompiles and reloads
+        whenever you save; press {@kbd [padding 1 6, border 1 solid var(--line), border-radius 4, font-size 14] Ctrl+C} to stop it.
+      @code-block
+        @raw
+          htmlang serve .
 
-    @text [font-weight bold, font-size 24, color $ink] Your first page
+      @callout [kind Tip]
+        @paragraph
+          The output is one {@code .html} file with its CSS inside and no
+          JavaScript, so you can open it straight from disk.
 
-    @paragraph [color $ink, line-height 1.7]
-      Create a file called {@code [background $code-bg, padding 2 6, border-radius 4] hello.hl} with:
+      @h2 [font-size 24, margin-block-start 16] Commands
+      @table [border-collapse collapse, width 100%, font-size 15]
+        @thead
+          @tr [border-bottom 2 solid var(--line), text-align left]
+            @th [padding 8] Command
+            @th [padding 8] What it does
+        @tbody
+          @tr [border-bottom 1 solid var(--line)]
+            @td [padding 8] htmlang page.hl
+            @td [padding 8] Compile one file to page.html
+          @tr [border-bottom 1 solid var(--line)]
+            @td [padding 8] htmlang serve .
+            @td [padding 8] Serve a folder with live reload
+          @tr [border-bottom 1 solid var(--line)]
+            @td [padding 8] htmlang build src -o dist
+            @td [padding 8] Compile a whole site
+          @tr
+            @td [padding 8] htmlang check page.hl
+            @td [padding 8] Report problems without writing output
 
-    @pre [background $code-bg, padding 16, border-radius 8, overflow-x auto]
-      @page Hello
-      @el [padding 40, spacing 16]
-        @text [font-weight bold, font-size 32] Hi there
+      -- Longer prose can be Markdown
+      @markdown
+        ## Next steps
 
-    @paragraph [color $ink, line-height 1.7]
-      Compile it:
+        - Read about **layout**: `@row`, `@el`, `spacing` and `width fill`.
+        - Style anything with CSS properties: `[padding 20, color navy]`.
+        - Turn repeated markup into functions with `@let`.
 
-    @pre [background $code-bg, padding 16, border-radius 8, overflow-x auto]
-      htmlang hello.hl
-
-    @paragraph [color $ink, line-height 1.7]
-      You now have {@code [background $code-bg, padding 2 6, border-radius 4] hello.html},
-      a single self-contained file with embedded CSS. No dependencies, no
-      JavaScript, no build step beyond the one command you just ran.
-
-    @text [font-weight bold, font-size 24, color $ink] Next steps
-
-    @ul [spacing 8]
-      @li
-        @link [color $primary] /docs/layout Learn the layout model
-      @li
-        @link [color $primary] /docs/styling Customize styling
-      @li
-        @link [color $primary] /docs/functions Extract reusable components
+      @row [spacing 12, padding-block-start 24, border-top 1 solid var(--line), font-weight 600]
+        @link [color var(--accent)] /docs/overview ← Overview
+        @spacer
+        @link [color var(--accent)] /docs/first-page Your first page →

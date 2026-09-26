@@ -1,335 +1,272 @@
--- A comprehensive tour of htmlang: layout, style, components, and control flow.
-@page [lang en] htmlang Demo
+-- A one-page tour of htmlang. Each section shows one part of the language:
+-- layout, text, CSS styles, functions, expressions, control flow and HTML.
+@page [lang en] htmlang tour
 @meta description A one-page tour of htmlang.
-@meta og:title htmlang
-@meta og:type website
+@meta og:title htmlang tour
 
--- Design tokens become both $vars and CSS custom properties
-@let primary #3b82f6
-@let --primary #3b82f6
-@meta theme-color #3b82f6
-@let ink #0f172a
+-- Values
+@let --brand #3b82f6
 @let --ink #0f172a
-@let muted #64748b
 @let --muted #64748b
-@let subtle #f8fafc
+@let --line #e5e7eb
 @let --subtle #f8fafc
 
--- Computed @let with arithmetic
-@let base 8
-@let gap = $base * 2
-@let gutter = $gap + $base
+-- Computed values: `=` makes the rest an expression
+@let unit 8
+@let gap = $unit * 2
+@let gutter = $gap + $unit
 
--- Reusable attribute bundle
+-- Attribute bundles
 @let card [
   padding $gap,
   background white,
-  border-radius $base,
-  border 1 solid #e5e7eb,
-  box-shadow 0 1px 3px rgba(0,0,0,0.05)
+  border 1 solid var(--line),
+  border-radius $unit,
+  dark:background #111827,
+  dark:border-color #1f2937
 ]
+@let label [font-size 12, font-weight 700, color var(--muted), text-transform uppercase, letter-spacing 1]
 
--- Composable style group (used with spread)
-@let interactive [
-  cursor pointer,
-  hover:box-shadow 0 4px 12px rgba(0,0,0,0.08),
-  transition all 0.2s ease
-]
+-- A section of the tour: a function with a parameter, a default, and children
+@let chapter $title $number=
+  @section [spacing $gap, padding-block $gutter, border-top 1 solid var(--line)]
+    @row [spacing $unit, align-items baseline]
+      @if $number
+        @text [color var(--brand), font-weight 700] $number.
+      @h2 [font-size 26] $title
+    @children
 
--- Keyframes and other CSS go in @style
+-- Plain CSS: keyframes, and anything else a stylesheet can hold
 @style
-  @keyframes fade-up {
-    from { opacity: 0; transform: translateY(8px); }
-    to { opacity: 1; transform: translateY(0); }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: none; }
   }
 
--- Raw HTML escape hatch
-@raw
-  <noscript><style>.needs-js{display:none}</style></noscript>
-
--- Component with default parameter + @children slot
-@let card $title $icon=◆
-  @article [$card, $interactive, animation fade-up 0.3s ease]
-    @row [spacing 10, align-items center]
-      @text [font-size 20, color $primary] $icon
-      @text [font-weight bold, font-size 16, color $ink] $title
-    @children
-
--- Component that wraps children in a titled section (function + slot)
-@let titled $title
-  @section [spacing 12, padding-block $base]
-    @text [font-weight bold, font-size 22, color $ink] $title
-    @children
-
--- Top-level layout
 @el [
   max-width 960,
   center-x,
-  padding 32,
-  spacing $gutter,
-  background white,
-  dark:background #0b1220,
-  dark:color #e2e8f0
+  padding $gutter,
+  color var(--ink),
+  line-height 1.5,
+  dark:background #030712,
+  dark:color #e5e7eb
 ]
+  @header [spacing $unit, padding-block $gutter, animation rise 0.4s ease]
+    @text [$label] A one-page tour
+    @h1 [font-size 44, line-height 1.1, letter-spacing -1] Welcome to htmlang
+    @paragraph [font-size 18, color var(--muted), max-width 620]
+      A small layout language that compiles to
+      {@text [font-weight 700, color var(--brand)] one static HTML file}.
+      Structure starts with {@code @}, everything else is content.
 
-  -- Header: nav + hero
-  @header [spacing $base]
-    @nav [spacing 6, color $muted, font-size 13]
-      @row [spacing 6, align-items center]
-        @link [color $muted] / Home
-        @text /
-        @link [color $muted] /demos Demos
-        @text /
-        @text [color $ink] htmlang
+  -- 1. Layout ---------------------------------------------------------------
+  @chapter [title Layout, number 1]
+    @paragraph
+      {@code @el} stacks its children in a column and {@code @row} lays them
+      out side by side. {@code spacing} is the gap between children.
+    @row [spacing $unit, wrap]
+      @el [$card, width fill] width fill
+      @el [$card, width fill] shares the row
+      @el [$card, width 160] width 160
+    @row [$card, spacing $unit, align-items center]
+      @text [font-weight 700] Logo
+      @spacer
+      @text @spacer pushes this to the end
+    @row [spacing $unit, height 120]
+      @el [$card, align-top] align-top
+      @el [$card, center-y] center-y
+      @el [$card, align-bottom] align-bottom
+    @grid [grid-cols 4, spacing $unit]
+      @each $n in 1..6
+        @el [$card, text-align center, if($n == 1, col-span 2)] Cell $n
+    @el [$card, height 120, overflow hidden]
+      @behind
+        @el [background linear-gradient(135deg, #dbeafe, #fae8ff), height fill, justify-content flex-end, padding $unit] (behind)
+      @text [font-weight 700] @in-front and @behind layer content
+      @in-front
+        @text [align-right, align-bottom, padding $unit, font-size 12, color var(--muted)] painted on top
 
-    @row [spacing $gap, align-items center]
-      @el [width fill, spacing 6]
-        @text [font-weight bold, font-size 40, color $ink, dark:color white] Welcome to htmlang
-        @paragraph [line-height 1.6, color $muted]
-          A minimalist layout language that compiles to
-          {@text [font-weight bold, color $primary] static HTML} — no JS, no build step.
-          Visit the {@link [color $primary, text-decoration underline] https://github.com repo} for more.
-      @image [width 72, height 72, border-radius 36, alt="Avatar"] https://picsum.photos/72
-
-  @hr [border-top 1 solid #e5e7eb]
-
-  -- Feature grid using @card + @titled components
-  @titled [title Features]
-    @row [wrap, gap $base]
-      @card [title Simple, icon ✦]
-        Write layouts without CSS classes.
-      @card [title Fast, icon ⚡]
-        Compiles to a single self-contained HTML file.
-      @card [title Minimal, icon ○]
-        Zero runtime JavaScript by default.
-      @card [title Typed]
-        LSP with diagnostics and go-to-definition.
-
-  -- Typography showcase: inline elements, blockquote, code
-  @titled [title Typography]
-    @paragraph [line-height 1.7]
-      A quick brown fox jumps over {@text [font-weight bold] the lazy} {@text [font-style italic] dog}.
-      Press {@kbd [
-        padding 2 6, background #f1f5f9, border-radius 4,
-        font-family monospace, font-size 13
-      ] Ctrl+K} to search. {@mark [background #fef08a] Highlighted} uses mark.
-      {@abbr [title=HyperText Markup Language + language] htmlang} is an abbreviation.
-
-    @blockquote [
-      padding-inline-start $gap, border-left 3 solid $primary,
-      color $muted, font-style italic
-    ]
+  -- 2. Text ----------------------------------------------------------------
+  @chapter [title Text, number 2]
+    @paragraph [max-width 640]
+      Lines without an {@code @} are text. Braces put elements inside a line:
+      {@text [font-weight 700] bold}, {@text [font-style italic] italic},
+      {@mark highlighted}, {@link [color var(--brand), text-decoration underline] https://example.com a link},
+      and {@kbd [padding 1 6, border 1 solid var(--line), border-radius 4] Ctrl+K}.
+    @paragraph
+      A backslash escapes: \@ at the start of a line, \$price, and \{braces}.
+    -- `>` chains elements that have one child each
+    @el [padding 12 20, background var(--brand), border-radius 8, align-left] > @link /start
+      @text [color white, font-weight 700] Get started
+    @blockquote [padding-inline-start $gap, border-left 3 solid var(--brand), color var(--muted), font-style italic]
       Layout is code. Style is code. Everything should compose.
       @cite — Anonymous
 
-    @pre [
-      background #0f172a, color #e2e8f0,
-      padding 16, border-radius 8, font-family monospace, font-size 13,
-      overflow-x auto
-    ]
-      @raw
-        @let button $label
-          @el [padding 12, background blue]
-            @text $label
+  -- 3. Style ---------------------------------------------------------------
+  @chapter [title Style, number 3]
+    @paragraph
+      Besides the layout attributes, every attribute is a CSS property with its
+      CSS name and value. A bare number is pixels for lengths.
+    @row [spacing $unit, wrap]
+      @el [$card, box-shadow 0 1px 3px rgba(0,0,0,0.1), transform rotate(-2deg)] Any CSS property
+      @el [$card, hover:background #eff6ff, hover:border-color var(--brand), transition all 0.15s ease, cursor pointer] hover:
+      @el [$card, md:background #ecfdf5, dark:background #064e3b] md: and dark:
+      @el [$card, before:content "→ ", before:color var(--brand)] before:
+    @ul [$card, spacing 4, children:padding 4 8]
+      @each $item in first: bolds this one, odd: shades every other row, children: pads them all
+        @li [first:font-weight 700, odd:background var(--subtle), border-radius 4] $item
+    @el [$card, has(input:checked):border-color var(--brand), has(input:checked):background #eff6ff]
+      @label [cursor pointer]
+        @input [type=checkbox, margin-inline-end 8]
+        Tick the box: has() styles the card around it
 
-  -- Control flow: @each, @else, @match, if()
-  @titled [title Control flow]
-    @el [spacing 6]
-      @data $team [
-        {"name": "Alice", "role": "Engineer"},
-        {"name": "Bob", "role": "Designer"},
-        {"name": "Carol", "role": "PM"}
-      ]
-      @each $person in $team
-        @row [spacing 10, align-items baseline]
-          @text [font-weight bold, min-width 80] $person.name
-          @text [color $muted] $person.role
+  -- 4. Functions -----------------------------------------------------------
+  @let stat $value $caption $tone=var(--brand)
+    @el [$card, spacing 4, flex 1 1 160px]
+      @text [font-size 32, font-weight 800, color $tone] $value
+      @text [color var(--muted)] $caption
 
-    -- @each ... @else fallback for empty list
-    @let nothing ""
-    @each $x in $nothing
+  @let panel $title
+    @article [$card, spacing $unit]
+      @row [align-items center]
+        @h3 [font-size 18] $title
+        @spacer
+        @slot actions
+      @children
+      @slot footer
+        @text [font-size 13, color var(--muted)] Default footer
+
+  @let badge $text
+    @style
+      & { animation: rise 0.3s ease; }
+      .dot { color: var(--brand); }
+    @row [spacing 6, padding 2 10, border-radius 999, background var(--subtle), font-size 13]
+      @text [class=dot] •
+      $text
+
+  @let pitch
+    Functions are {@text [font-weight 700] @let} with a body. Their
+    parameters are attributes, and a body can be text like this one.
+
+  @chapter [title Functions, number 4]
+    @paragraph
+      @pitch
+    @row [spacing $unit, wrap]
+      @stat [value 1, caption output file]
+      @stat [value 0, caption lines of JavaScript, tone #10b981]
+      @stat [value ∞, caption components, tone #a855f7, background var(--subtle)]
+    @panel [title Named slots]
+      @slot actions
+        @link [color var(--brand), font-size 14] /edit Edit
+      @paragraph
+        Children fill {@code @children}; {@code @slot} blocks fill slots by name.
+    @row [spacing $unit]
+      @badge [text scoped style]
+      @badge [text same function]
+
+  -- 5. Expressions ---------------------------------------------------------
+  @let name htmlang
+  @data $tags ["layout", "css", "static"]
+  @let compact false
+  @chapter [title Expressions, number 5]
+    @paragraph
+      \$name inserts a value and \${...} any expression: ${uppercase($name)}
+      has ${length($name)} letters and ${length($tags)} tags.
+    @row [spacing $unit, wrap]
+      @each $shade in 0, 10, 20, 30
+        @el [
+          padding if($compact, 8, 16),
+          border-radius $unit,
+          color white,
+          background ${darken($--brand, $shade)}
+        ]
+          darken $shade%
+      @el [padding 16, border-radius $unit, background ${alpha($--brand, 0.2)}] alpha 0.2
+      @el [padding 16, border-radius $unit, background ${mix($--brand, #f43f5e, 50)}] mix
+    @if contains($tags, css)
+      @text [color var(--muted)] contains(\$tags, css) is true
+
+  -- 6. Control flow --------------------------------------------------------
+  @data $team [
+    {"name": "Ada", "role": "Engineering", "active": true},
+    {"name": "Grace", "role": "Design, research", "active": true},
+    {"name": "Linus", "role": "Operations", "active": false}
+  ]
+  @data $nobody []
+  @chapter [title Control flow, number 6]
+    @table [border-collapse collapse, width 100%]
+      @thead
+        @tr [text-align left, color var(--muted), font-size 13]
+          @th [padding 8] #
+          @th [padding 8] Name
+          @th [padding 8] Role
+          @th [padding 8] Status
+      @tbody
+        @each $person, $i in $team
+          @tr [border-top 1 solid var(--line)]
+            @td [padding 8] ${$i + 1}
+            @td [padding 8, font-weight 600] $person.name
+            @td [padding 8] $person.role
+            @td [padding 8, color if($person.active, #10b981, var(--muted))]
+              @if $person.active
+                Active
+              @else
+                Away
+    @row [spacing 4]
+      @each $n in 10..0 step 2
+        @text [$card, padding 4 10] $n
+    @each $x in $nobody
       @text $x
     @else
-      @text [color $muted, font-style italic, data-state=$nothing] (Nothing — @each ... @else fallback)
+      @text [color var(--muted), font-style italic] @each … @else shows this for an empty list.
 
-    -- repeat N times
-    @row [spacing 6]
-      @each $_ in 1..6
-        @el [width 18, height 18, border-radius 9, background $primary, opacity 0.4]
-
-    -- numeric range
-    @row [spacing 4]
-      @each $i in 1..6
-        @el [
-          width 24, height 24, border-radius 4,
-          background $primary, color white,
-          text-align center, font-size 12, font-weight bold, line-height 24px
+  -- 7. HTML ----------------------------------------------------------------
+  @chapter [title HTML, number 7]
+    @paragraph
+      Every other element has its HTML name, and HTML attributes are written
+      {@code key=value}.
+    @row [spacing $gutter, wrap, align-items flex-start]
+      @form [$card, spacing $unit, flex 1 1 280px, method=post] /subscribe
+        @label [for=email, font-weight 600] Email
+        @input [
+          id=email,
+          type=email,
+          name=email,
+          placeholder=you@example.com,
+          required,
+          padding 10,
+          border 1 solid var(--line),
+          border-radius 6,
+          focus:outline 2 solid var(--brand),
+          invalid:border-color #ef4444
         ]
-          $i
+        @label [for=topic, font-weight 600] Topic
+        @select [id=topic, name=topic, padding 10, border-radius 6]
+          @option [value=news] News
+          @option [value=releases] Releases
+        @button [type=submit, padding 10, border 0, border-radius 6, background var(--brand), color white, font-weight 700, cursor pointer, hover:background ${darken($--brand, 10)}] Subscribe
+      @el [spacing $unit, flex 1 1 280px]
+        @details [$card]
+          @summary [font-weight 600, cursor pointer] What does this compile to?
+          @paragraph [color var(--muted), padding-block-start 8]
+            Flexbox and grid CSS in one {@code <style>}, and no JavaScript.
+        @button [type=button, popovertarget=about, $card, cursor pointer] Open a popover
+        @el [popover, id=about, $card, max-width 320]
+          Native HTML popovers need no script.
+        @row [spacing $unit, align-items center, font-size 14, color var(--muted)]
+          @text Progress
+          @progress [value=60, max=100]
+          @time [datetime=2026-09-26] Sept 26
+        @figure [spacing 4]
+          @image [alt=A placeholder landscape, border-radius $unit, width 100%] https://picsum.photos/640/240
+          @figcaption [font-size 13, color var(--muted)] @figure and @figcaption
 
-    -- @if / @else if / @else
-    @let count 3
-    @row [spacing 6, align-items center]
-      @text [font-weight bold, min-width 64] Count:
-      @if $count == 0
-        @text [color $muted] Empty
-      @else if $count == 1
-        @text [color $primary] Exactly one
-      @else
-        @text [color $primary, font-weight bold] $count items
+  -- Raw HTML is the escape hatch
+  @raw <hr style="border: none; border-top: 1px dashed #cbd5e1">
 
-    -- @match
-    @let status ready
-    @if $status == "pending"
-      @text [color #f59e0b] Pending…
-    @else if $status == "ready"
-      @text [color #10b981, font-weight bold] ✓ Ready
-    @else if $status == "error"
-      @text [color #ef4444] Error
-    @else
-      @text Unknown
-
-    -- Conditional attribute value + before: pseudo-element
-    @let emphasized true
-    @el [
-      padding 12, border-radius 6,
-      background if($emphasized, $primary, #e5e7eb),
-      color if($emphasized, white, $ink),
-      before:content "→ ", before:font-weight bold
-    ]
-      Conditional styling via {@code if(cond, a, b)}.
-
-  -- Forms + pseudo-states
-  @titled [title Forms]
-    @form [spacing 10, max-width 420] /subscribe
-      @label [font-weight bold, font-size 13, for=email] Email
-      @input [
-        id=email, type=email, name=email,
-        placeholder=you@example.com, required,
-        padding 10, border 1 solid #e5e7eb, border-radius 6,
-        focus:border 1 solid $primary,
-        valid:border 1 solid #10b981,
-        invalid:border 1 solid #ef4444,
-        transition border 0.15s ease
-      ]
-      @label [font-weight bold, font-size 13, for=role] Role
-      @select [id=role, name=role, padding 10, border 1 solid #e5e7eb, border-radius 6]
-        @option [value=dev] Developer
-        @option [value=designer] Designer
-        @option [value=other] Other
-      @label [font-weight bold, font-size 13, for=msg] Message
-      @textarea [
-        id=msg, name=msg, rows=3,
-        padding 10, border 1 solid #e5e7eb, border-radius 6
-      ]
-      @row [spacing 8]
-        @button [
-          type=submit,
-          padding 10 16, background $primary, color white, font-weight bold,
-          border-radius 6, border 0,
-          hover:background ${darken($primary, 10)},
-          active:background ${darken($primary, 20)},
-          transition background 0.15s ease,
-          cursor pointer
-        ] Subscribe
-        @button [
-          type=reset,
-          padding 10 16, background white,
-          border 1 solid #e5e7eb, border-radius 6, cursor pointer
-        ] Reset
-      @progress [value=60, max=100]
-
-  -- Lists and tables
-  @titled [title Data]
-    @row [gap $gap, wrap]
-      @el [width fill, spacing $base, min-width 240]
-        @text [font-weight bold] Unordered
-        @ul [spacing 4, list-style disc, padding-inline-start 20]
-          @li [display list-item] Composable with @each
-          @li [display list-item] Indent to nest children
-          @li [display list-item] Bold list items work too
-        @text [font-weight bold] Ordered
-        @ol [list-style decimal, padding-inline-start 20]
-          @li [display list-item] First
-          @li [display list-item] Second
-          @li [display list-item] Third
-
-      @el [width fill, spacing $base, min-width 240]
-        @text [font-weight bold] Table
-        @table
-          @thead
-            @tr
-              @th [text-align left, padding 8] Item
-              @th [text-align right, padding 8] Qty
-          @tbody
-            @tr
-              @td [padding 8, border-top 1 solid #e5e7eb] Widgets
-              @td [padding 8, border-top 1 solid #e5e7eb, text-align right] 12
-            @tr
-              @td [padding 8, border-top 1 solid #e5e7eb] Gadgets
-              @td [padding 8, border-top 1 solid #e5e7eb, text-align right] 7
-
-    @figure [spacing 6]
-      @image [alt="A random placeholder", border-radius 8] https://picsum.photos/640/200
-      @figcaption [color $muted, font-size 13, text-align center]
-        A placeholder image.
-
-  -- Disclosure + named grid areas
-  @titled [title Disclosure + grid areas]
-    @details [padding 12, border 1 solid #e5e7eb, border-radius 6, background $subtle]
-      @summary [font-weight bold, cursor pointer] What is htmlang?
-      @paragraph [color $muted, line-height 1.6, padding-block-start 6]
-        htmlang is a layout-first language that compiles to a single,
-        self-contained HTML file with embedded CSS.
-
-    @el [
-      display grid,
-      grid-template-columns 1fr 2fr,
-      grid-template-areas "h h" "s m" "f f",
-      gap $base,
-      padding $base, background $subtle, border-radius 8
-    ]
-      @el [grid-area h, padding 10, background $primary, color white, border-radius 6, text-align center]
-        Header
-      @el [grid-area s, padding 10, background white, border-radius 6, border 1 solid #e5e7eb]
-        Sidebar
-      @el [grid-area m, padding 10, background white, border-radius 6, border 1 solid #e5e7eb]
-        Main
-      @el [grid-area f, padding 10, background $ink, color white, border-radius 6, text-align center]
-        Footer
-
-  -- Misc: address, time, meter
-  @titled [title Misc]
-    @address [spacing 4, font-style normal]
-      @text [font-weight bold] htmlang HQ
-      @text 123 Flexbox Avenue
-      @link [color $primary] mailto:hi@htmlang.dev hi@htmlang.dev
-    @row [spacing 10, align-items center]
-      @text [font-size 13, color $muted] Published
-      @time [datetime=2026-04-16, font-size 13] April 16 2026
-    @row [spacing 10, align-items center]
-      @text [font-size 13, color $muted] Confidence
-      @meter [value=8, min=0, max=10, low=3, high=7] 8/10
-
-  -- Footer: hover/active button, visited link, print-hidden
-  @footer [
-    padding-block-start $gutter, margin-block-start $gutter,
-    border-top 1 solid #e5e7eb, spacing $base,
-    print:display none
-  ]
-    @row [spacing $base, align-items center]
-      @el [
-        padding 12 20, background $primary, color white, font-weight bold, border-radius 8,
-        hover:background ${darken($primary, 10)},
-        active:background ${darken($primary, 20)},
-        transition all 0.15s ease,
-        cursor pointer
-      ] > @link https://github.com
-        Get Started
-      @link [
-        color $primary,
-        visited:color #8b5cf6,
-        hover:text-decoration underline
-      ] https://github.com Browse source
-      @el [width fill]
-      @text [color $muted, font-size 13] © 2026 htmlang
+  @footer [padding-block $gutter, color var(--muted), font-size 14, print:display none]
+    @row [spacing $unit]
+      @text © 2026 htmlang
+      @spacer
+      @link [hover:color var(--brand)] https://github.com/iko-soy/htmlang Source
