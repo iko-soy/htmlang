@@ -195,7 +195,15 @@ pub fn interpolate(text: &str, scope: &dyn Scope) -> (String, Vec<Problem>) {
             Reference::Expr(source) => match expr::eval(source, scope) {
                 Ok(value) => out.push_str(&value.to_string()),
                 Err(error) => {
-                    problems.push(error.at(dollar + 2));
+                    problems.push(match error {
+                        // At the `${`
+                        expr::Error::Invalid(message) => Problem::Invalid {
+                            message,
+                            offset: dollar,
+                        },
+                        // At the name, inside the braces
+                        error => error.at(dollar + 2),
+                    });
                     out.push_str(written);
                 }
             },
@@ -209,7 +217,21 @@ pub fn interpolate(text: &str, scope: &dyn Scope) -> (String, Vec<Problem>) {
 /// The names `text` refers to, by syntax alone: the first name of each
 /// path, including those inside `${...}`.
 pub fn names(text: &str) -> Vec<&str> {
+    name_spans(text)
+        .into_iter()
+        .map(|span| &text[span])
+        .collect()
+}
+
+/// Where the names of [`names`] are in `text`, as byte ranges of the name
+/// alone: after the `$` of `$name`, inside the braces of `${name}`.
+pub fn name_spans(text: &str) -> Vec<std::ops::Range<usize>> {
     let mut found = Vec::new();
+    collect_name_spans(text, 0, &mut found);
+    found
+}
+
+fn collect_name_spans(text: &str, base: usize, found: &mut Vec<std::ops::Range<usize>>) {
     let mut pos = 0;
     while let Some(i) = text[pos..].find('$') {
         let after = pos + i + 1;
@@ -219,22 +241,22 @@ pub fn names(text: &str) -> Vec<&str> {
             && let Some(close) = matching_brace(rest)
         {
             let inner = &rest[1..close];
-            let trimmed = inner.trim();
-            if is_path(trimmed) {
-                found.push(&trimmed[..name_len(trimmed)]);
+            let trimmed = inner.trim_start();
+            if is_path(trimmed.trim_end()) {
+                let start = base + after + 1 + inner.len() - trimmed.len();
+                found.push(start..start + name_len(trimmed));
             } else {
-                found.extend(names(inner));
+                collect_name_spans(inner, base + after + 1, found);
             }
             pos = after + close + 1;
             continue;
         }
         let n = name_len(rest);
         if n > 0 {
-            found.push(&rest[..n]);
+            found.push(base + after..base + after + n);
             pos = after + n;
         }
     }
-    found
 }
 
 /// Index of the `}` matching the `{` that `s` starts with (skipping
@@ -381,6 +403,10 @@ pub(crate) mod tests {
         assert_eq!(
             names("$a.b ${c} ${upper($d)} $5 $--e"),
             ["a", "c", "d", "--e"]
+        );
+        assert_eq!(
+            name_spans("x ${ size }px ${$n + ${m}} $a- b"),
+            [5..9, 17..18, 23..24, 28..29]
         );
     }
 }

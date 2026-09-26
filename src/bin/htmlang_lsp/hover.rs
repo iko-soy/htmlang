@@ -28,6 +28,9 @@ pub(crate) fn hover_at(text: &str, position: Position) -> Option<Hover> {
 }
 
 pub(crate) fn word_at(line: &str, col: usize) -> Option<String> {
+    if let Some(span) = variable_at(line, col) {
+        return Some(format!("${}", &line[span]));
+    }
     let bytes = line.as_bytes();
     let mut start = col;
     while start > 0 && is_word_byte(bytes[start - 1]) {
@@ -41,6 +44,28 @@ pub(crate) fn word_at(line: &str, col: usize) -> Option<String> {
         return None;
     }
     Some(line[start..end].to_string())
+}
+
+/// The name of the variable reference at `col` of `line`, ended as the
+/// compiler ends it: the byte range of the name alone, after the `$` of
+/// `$name` or inside the braces of `${name}`.
+pub(crate) fn variable_at(line: &str, col: usize) -> Option<std::ops::Range<usize>> {
+    htmlang::interp::name_spans(line)
+        .into_iter()
+        .find(|span| span.start - 1 <= col && col <= span.end)
+}
+
+/// The variable references named `name` on `line`: each as a byte range
+/// that includes the `$` of `$name`, or is the name alone inside `${name}`.
+pub(crate) fn variable_refs_named(line: &str, name: &str) -> Vec<std::ops::Range<usize>> {
+    htmlang::interp::name_spans(line)
+        .into_iter()
+        .filter(|span| &line[span.clone()] == name)
+        .map(|span| match line[..span.start].ends_with('$') {
+            true => span.start - 1..span.end,
+            false => span,
+        })
+        .collect()
 }
 
 pub(crate) fn is_word_byte(c: u8) -> bool {

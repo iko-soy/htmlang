@@ -84,7 +84,11 @@ struct ParseContext {
     current_source: (usize, Option<String>),
     /// Variable diagnostics already reported, so a line evaluated many
     /// times (in a loop, in a function) reports each problem once.
-    reported: HashSet<(usize, Option<usize>, String)>,
+    /// Keyed by the syntax node (ids are unique across files), line,
+    /// column and message.
+    reported: HashSet<(usize, usize, Option<usize>, String)>,
+    /// The id of the syntax node being evaluated.
+    current_node: usize,
 }
 
 /// The variables in scope, for interpolation and expressions.
@@ -123,19 +127,14 @@ impl ParseContext {
         track_var_refs(src, &mut self.used_variables);
         match crate::expr::eval(src, &Vars(&self.variables)) {
             Ok(value) => Some(value),
-            Err(crate::expr::Error::Invalid(message)) => {
-                self.diagnostics.push(
-                    Diagnostic::error(
-                        code::INVALID_EXPRESSION,
-                        line,
-                        format!("invalid expression: {}", message),
-                    )
-                    .source(src),
-                );
-                None
-            }
             Err(error) => {
+                // Without the line to point into, show the expression
+                let shown = matches!(&self.current_source, (current, Some(_)) if *current == line);
+                let before = self.diagnostics.len();
                 self.report(error.at(0), line, column);
+                if !shown && let Some(diagnostic) = self.diagnostics.get_mut(before) {
+                    diagnostic.source_line = Some(src.into());
+                }
                 None
             }
         }
@@ -157,13 +156,46 @@ impl ParseContext {
     /// [`interpolate`](Self::interpolate), and whether everything was
     /// filled in.
     fn fill(&mut self, text: &str, line: usize, column: Option<usize>) -> (String, bool) {
+        self.fill_mapped(text, line, column, |offset| offset)
+    }
+
+    /// Fill in a slot of text, where `\$`, `\{` and the other escapes
+    /// stay literal.
+    fn interpolate_text(&mut self, raw: &str, line: usize, column: Option<usize>) -> String {
+        let protected = protect_escapes(raw);
+        let (filled, _) = self.fill_mapped(&protected, line, column, |offset| {
+            // An offset into the protected text, as one into `raw`
+            protected[..offset]
+                .chars()
+                .map(|c| match ESCAPES.iter().find(|(_, p, _)| *p == c) {
+                    Some((escape, _, _)) => escape.len(),
+                    None => c.len_utf8(),
+                })
+                .sum()
+        });
+        restore_escapes(&filled)
+    }
+
+    /// [`fill`](Self::fill), where `source_offset` turns an offset into
+    /// `text` into one into the text as written.
+    fn fill_mapped(
+        &mut self,
+        text: &str,
+        line: usize,
+        column: Option<usize>,
+        source_offset: impl Fn(usize) -> usize,
+    ) -> (String, bool) {
         if !text.contains('$') {
             return (text.to_string(), true);
         }
         track_var_refs(text, &mut self.used_variables);
         let (out, problems) = interp::interpolate(text, &Vars(&self.variables));
         let filled = problems.is_empty();
-        for problem in problems {
+        for mut problem in problems {
+            match &mut problem {
+                interp::Problem::Undefined { offset, .. }
+                | interp::Problem::Invalid { offset, .. } => *offset = source_offset(*offset),
+            }
             self.report(problem, line, column);
         }
         (out, filled)
@@ -203,6 +235,7 @@ impl ParseContext {
             None => diagnostic,
         };
         let key = (
+            self.current_node,
             diagnostic.line,
             diagnostic.column,
             diagnostic.message.clone(),
@@ -214,8 +247,10 @@ impl ParseContext {
 
     /// The error for `$name` with no definition: what the name is if it is
     /// something else, or the closest defined name.
-    fn undefined(&self, name: &str, line: usize) -> Diagnostic {
+    fn undefined(&mut self, name: &str, line: usize) -> Diagnostic {
         if self.defines.contains_key(name) {
+            // Reported here, so not also as unused
+            self.used_defines.insert(name.to_string());
             return Diagnostic::error(
                 code::UNDEFINED_VARIABLE,
                 line,
@@ -243,6 +278,7 @@ impl ParseContext {
     /// Note the node being evaluated, for diagnostics.
     fn enter(&mut self, node: &syntax::Node) {
         self.current_line = node.span.line;
+        self.current_node = node.id;
         let text =
             (node.line_count <= 1).then(|| format!("{}{}", " ".repeat(node.indent), node.source));
         self.current_source = (node.span.line, text);
@@ -325,6 +361,7 @@ pub fn parse_with_base(input: &str, base_path: Option<&Path>) -> ParseResult {
         namespace: HashSet::new(),
         current_source: (0, None),
         reported: HashSet::new(),
+        current_node: 0,
     };
     load_prelude(&mut ctx);
     let tree = ctx.parse_tree(input);
@@ -1536,12 +1573,7 @@ fn parse_single_element(
             } else {
                 text.raw.clone()
             };
-            let value = ctx.interpolate(
-                &protect_escapes(&raw),
-                text.span.line,
-                Some(text.span.column),
-            );
-            argument = Some(restore_escapes(&value));
+            argument = Some(ctx.interpolate_text(&raw, text.span.line, Some(text.span.column)));
         } else {
             children.push(Node::Text(text_segments(text, ctx)));
         }
@@ -2127,16 +2159,21 @@ fn parse_attr_list(
         };
         let column = |at: usize| as_written.then_some(token.span.column + at);
 
-        // `$name` alone: an attribute bundle, spliced in
-        if value.is_none()
-            && !html
-            && let Some(name) = key.strip_prefix('$')
-        {
-            if let Some(define_attrs) = ctx.defines.get(name) {
-                ctx.used_defines.insert(name.to_string());
+        // `$name` (or `${name}`) alone: an attribute bundle, spliced in
+        let bundle = key.strip_prefix('$').filter(|_| value.is_none() && !html);
+        let bundle =
+            bundle.and_then(
+                |after| match interp::reference(after, &Vars(&ctx.variables))? {
+                    (interp::Reference::Var(name), len) if len == after.len() => Some(name),
+                    _ => None,
+                },
+            );
+        if let Some(name) = bundle {
+            if let Some(define_attrs) = ctx.defines.get(&name) {
+                ctx.used_defines.insert(name);
                 attrs.extend(define_attrs.clone());
             } else {
-                not_a_bundle(name, line, column(0), ctx);
+                not_a_bundle(&name, line, column(0), ctx);
             }
             continue;
         }
@@ -2351,8 +2388,8 @@ fn text_segments(text: &syntax::Text, ctx: &mut ParseContext) -> Vec<TextSegment
                  ctx: &mut ParseContext| {
         if !plain.is_empty() {
             let at = start.unwrap_or(text.span);
-            let filled = ctx.interpolate(&protect_escapes(plain), at.line, Some(at.column));
-            segments.push(TextSegment::Plain(restore_escapes(&filled)));
+            let filled = ctx.interpolate_text(plain, at.line, Some(at.column));
+            segments.push(TextSegment::Plain(filled));
             plain.clear();
         }
         *start = None;
@@ -2851,10 +2888,6 @@ fn contrast_ratio(c1: (u8, u8, u8), c2: (u8, u8, u8)) -> f64 {
     let (lighter, darker) = if l1 > l2 { (l1, l2) } else { (l2, l1) };
     (lighter + 0.05) / (darker + 0.05)
 }
-
-// ---------------------------------------------------------------------------
-// Variable substitution
-// ---------------------------------------------------------------------------
 
 /// `@image [inline] icon.svg` becomes the SVG's markup, with `width`,
 /// `height`, `color` / `fill`, `class=` and `id=` applied to the `<svg>`

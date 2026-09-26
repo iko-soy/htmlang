@@ -870,3 +870,49 @@ fn a_problem_in_a_loop_is_reported_once() {
     let result = parser::parse("@each $i in 1..3\n  @text $nobody");
     assert_eq!(result.diagnostics.len(), 1, "{:?}", result.diagnostics);
 }
+
+#[test]
+fn a_column_after_an_escape_points_at_the_variable() {
+    let result = parser::parse("@text \\@ \\$ $nobody \\-- $other");
+    let columns: Vec<_> = result.diagnostics.iter().map(|d| d.column).collect();
+    assert_eq!(columns, [Some(12), Some(24)], "{:?}", result.diagnostics);
+}
+
+#[test]
+fn an_invalid_expression_in_a_loop_is_reported_once() {
+    let result = parser::parse("@each $i in 1..3\n  @if $i +\n    @text x\n  @text ${$i +}");
+    let lines: Vec<_> = result
+        .diagnostics
+        .iter()
+        .map(|d| (d.code, d.line))
+        .collect();
+    assert_eq!(
+        lines,
+        [("invalid-expression", 2), ("invalid-expression", 4)],
+        "{:?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn a_bundle_can_be_written_with_braces() {
+    let out = compile("@let card [padding 8]\n@el [${card}] x");
+    assert!(out.contains("padding:8px"), "{}", out);
+    // A bundle used as a value is reported once, not also as unused
+    let result = parser::parse("@let card [padding 8]\n@el [padding $card] x");
+    let codes: Vec<_> = result.diagnostics.iter().map(|d| d.code).collect();
+    assert_eq!(codes, ["undefined-variable"], "{:?}", result.diagnostics);
+}
+
+#[test]
+fn the_same_problem_in_an_included_file_is_reported_too() {
+    let dir = scratch_dir("include_undefined");
+    std::fs::write(dir.join("part.hl"), "@text $nobody\n").unwrap();
+    let result = parser::parse_with_base("@text $nobody\n@include part.hl", Some(&dir));
+    let undefined = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == "undefined-variable")
+        .count();
+    assert_eq!(undefined, 2, "{:?}", result.diagnostics);
+}

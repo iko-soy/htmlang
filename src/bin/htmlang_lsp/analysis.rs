@@ -890,7 +890,8 @@ pub(crate) fn inlay_hints(text: &str, tree: &Tree) -> Vec<InlayHint> {
             continue;
         }
         for (start, end) in variable_refs(line) {
-            if let Some(value) = values.get(&line[start + 1..end]) {
+            let name = line[start..end].trim_start_matches('$');
+            if let Some(value) = values.get(name) {
                 hints.push(InlayHint {
                     position: Position::new(line_idx as u32, end as u32),
                     label: InlayHintLabel::String(format!(" \u{2192} {}", value)),
@@ -907,20 +908,17 @@ pub(crate) fn inlay_hints(text: &str, tree: &Tree) -> Vec<InlayHint> {
     hints
 }
 
-/// The `$name` references on a line, as byte ranges that include the `$`.
-/// A name ends as the compiler ends it; `$5` is text.
+/// The variable references on a line, as byte ranges that include the `$`
+/// of `$name` (the name alone inside `${name}`). A name ends as the
+/// compiler ends it; `$5` is text.
 fn variable_refs(line: &str) -> Vec<(usize, usize)> {
-    let mut refs = Vec::new();
-    let mut from = 0;
-    while let Some(i) = line[from..].find('$') {
-        let start = from + i;
-        let len = htmlang::interp::name_len(&line[start + 1..]);
-        if len > 0 {
-            refs.push((start, start + 1 + len));
-        }
-        from = start + 1 + len;
-    }
-    refs
+    htmlang::interp::name_spans(line)
+        .into_iter()
+        .map(|span| match line[..span.start].ends_with('$') {
+            true => (span.start - 1, span.end),
+            false => (span.start, span.end),
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -1100,7 +1098,7 @@ mod tests {
     fn variable_tokens_end_where_the_compiler_ends_names() {
         assert_eq!(
             variable_refs("$lang.json costs $5, ${x} $--brand $a- b"),
-            [(0, 5), (26, 34), (35, 37)]
+            [(0, 5), (23, 24), (26, 34), (35, 37)]
         );
         // A typo'd variable gets the compiler's suggestion as a fix
         let found = fixes("@let gap 8\n@el [padding $gpa]\n");

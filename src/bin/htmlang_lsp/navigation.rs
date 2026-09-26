@@ -4,7 +4,7 @@ use tower_lsp::lsp_types::*;
 
 use htmlang::syntax::DefinitionKind;
 
-use crate::hover::{is_word_byte, word_at};
+use crate::hover::{is_word_byte, variable_at, variable_refs_named, word_at};
 use crate::state::WorkspaceIndex;
 use crate::tree;
 
@@ -98,14 +98,23 @@ pub(crate) fn prepare_rename_at(text: &str, position: Position) -> Option<Prepar
 
     // Find the range of the word in the line
     let bytes = line.as_bytes();
-    let mut start = col;
-    while start > 0 && is_word_byte(bytes[start - 1]) {
-        start -= 1;
-    }
-    let mut end = col;
-    while end < bytes.len() && is_word_byte(bytes[end]) {
-        end += 1;
-    }
+    let (start, end) = match variable_at(line, col) {
+        Some(span) => {
+            let dollar = line[..span.start].ends_with('$');
+            (span.start - usize::from(dollar), span.end)
+        }
+        None => {
+            let mut start = col;
+            while start > 0 && is_word_byte(bytes[start - 1]) {
+                start -= 1;
+            }
+            let mut end = col;
+            while end < bytes.len() && is_word_byte(bytes[end]) {
+                end += 1;
+            }
+            (start, end)
+        }
+    };
 
     Some(PrepareRenameResponse::Range(Range::new(
         Position::new(position.line, start as u32),
@@ -150,7 +159,8 @@ pub(crate) fn rename_at(
         }
     }
 
-    // The references: `$name` or `@name`, outside verbatim bodies
+    // The references: `$name` (or `${name}`) or `@name`, outside verbatim
+    // bodies
     let verbatim = tree::verbatim_lines(&htmlang::syntax::parse(text));
     let sigil = if is_var { '$' } else { '@' };
     let search = format!("{}{}", sigil, name);
@@ -158,6 +168,23 @@ pub(crate) fn rename_at(
     for (i, line) in text.lines().enumerate() {
         let line_num = i as u32;
         if verbatim.contains(&line_num) {
+            continue;
+        }
+        if is_var {
+            for span in variable_refs_named(line, name) {
+                let new_text = match line[span.clone()].starts_with('$') {
+                    true => replace.clone(),
+                    false => new_base.to_string(),
+                };
+                let range = Range::new(
+                    Position::new(line_num, span.start as u32),
+                    Position::new(line_num, span.end as u32),
+                );
+                // A parameter's `$` belongs to the edit above
+                if !edits.iter().any(|e| overlaps(&e.range, &range)) {
+                    edits.push(edit(range, new_text));
+                }
+            }
             continue;
         }
         let mut offset = 0;
@@ -211,59 +238,18 @@ pub(crate) fn linked_editing_ranges(text: &str, position: Position) -> Option<Li
     let line = lines.get(position.line as usize)?;
     let col = (position.character as usize).min(line.len());
 
-    // Find the $variable at the cursor
-    let bytes = line.as_bytes();
-    let mut start = col;
-    while start > 0
-        && (bytes[start - 1].is_ascii_alphanumeric()
-            || bytes[start - 1] == b'$'
-            || bytes[start - 1] == b'-'
-            || bytes[start - 1] == b'_')
-    {
-        start -= 1;
-    }
-    let mut end = col;
-    while end < bytes.len()
-        && (bytes[end].is_ascii_alphanumeric()
-            || bytes[end] == b'$'
-            || bytes[end] == b'-'
-            || bytes[end] == b'_')
-    {
-        end += 1;
-    }
-    if start == end {
-        return None;
-    }
-
-    let word = &line[start..end];
-    if !word.starts_with('$') {
-        return None;
-    }
-
-    // Find all occurrences of this $variable in the document
+    // The $variable at the cursor, and every reference to it: the names
+    // alone, so that `$name` and `${name}` edit together
+    let span = variable_at(line, col)?;
+    let name = &line[span];
     let mut ranges = Vec::new();
     for (line_idx, line) in text.lines().enumerate() {
-        let line_bytes = line.as_bytes();
-        let mut offset = 0;
-        while let Some(pos) = line[offset..].find(word) {
-            let abs_pos = offset + pos;
-            // Check it's a whole word match
-            let before_ok = abs_pos == 0 || {
-                let c = line_bytes[abs_pos - 1];
-                !c.is_ascii_alphanumeric() && c != b'-' && c != b'_'
-            };
-            let after_end = abs_pos + word.len();
-            let after_ok = after_end >= line.len() || {
-                let c = line_bytes[after_end];
-                !c.is_ascii_alphanumeric() && c != b'-' && c != b'_'
-            };
-            if before_ok && after_ok {
-                ranges.push(Range::new(
-                    Position::new(line_idx as u32, abs_pos as u32),
-                    Position::new(line_idx as u32, after_end as u32),
-                ));
-            }
-            offset = abs_pos + word.len();
+        for span in variable_refs_named(line, name) {
+            let start = span.end - name.len();
+            ranges.push(Range::new(
+                Position::new(line_idx as u32, start as u32),
+                Position::new(line_idx as u32, span.end as u32),
+            ));
         }
     }
 
@@ -288,6 +274,9 @@ pub(crate) fn symbol_at(text: &str, position: Position) -> Option<String> {
     let lines: Vec<&str> = text.lines().collect();
     let line = lines.get(position.line as usize)?;
     let col = (position.character as usize).min(line.len());
+    if let Some(span) = variable_at(line, col) {
+        return Some(format!("${}", &line[span]));
+    }
     let bytes = line.as_bytes();
     let mut start = col;
     while start > 0 && is_word_byte(bytes[start - 1]) {
@@ -341,6 +330,9 @@ pub(crate) fn cross_file_definition(
 /// emit one `Location` per word-boundary match. Used to extend the local
 /// `find_references` result across the workspace.
 pub(crate) fn find_references_for_symbol(text: &str, symbol: &str, uri: &Url) -> Vec<Location> {
+    if let Some(name) = symbol.strip_prefix('$') {
+        return variable_locations(text, name, uri);
+    }
     let mut out = Vec::new();
     for (line_idx, line) in text.lines().enumerate() {
         let mut offset = 0;
@@ -371,6 +363,24 @@ pub(crate) fn find_references_for_symbol(text: &str, symbol: &str, uri: &Url) ->
     out
 }
 
+/// Every reference to the variable `name`: `$name`, `${name}`, and
+/// `$name` inside `${...}`.
+fn variable_locations(text: &str, name: &str, uri: &Url) -> Vec<Location> {
+    let mut out = Vec::new();
+    for (line_idx, line) in text.lines().enumerate() {
+        for span in variable_refs_named(line, name) {
+            out.push(Location {
+                uri: uri.clone(),
+                range: Range::new(
+                    Position::new(line_idx as u32, span.start as u32),
+                    Position::new(line_idx as u32, span.end as u32),
+                ),
+            });
+        }
+    }
+    out
+}
+
 // ---------------------------------------------------------------------------
 // Find references
 // ---------------------------------------------------------------------------
@@ -382,6 +392,9 @@ pub(crate) fn find_references(text: &str, position: Position, uri: &Url) -> Vec<
         None => return vec![],
     };
     let col = (position.character as usize).min(line.len());
+    if let Some(span) = variable_at(line, col) {
+        return variable_locations(text, &line[span], uri);
+    }
     let bytes = line.as_bytes();
 
     // Find the word at cursor
@@ -468,5 +481,62 @@ mod tests {
         assert_eq!(found.start, Position::new(0, 5));
         let found = find_definition(text, "tone").expect("parameter");
         assert_eq!(found.start, Position::new(0, 18));
+    }
+
+    #[test]
+    fn variables_are_found_as_the_compiler_reads_them() {
+        // `${lang}` is `$lang`, `$lang.json` is `$lang` then text, and
+        // `$langs` is another name
+        let text = "@let lang fr
+@text ${lang}uage $lang.json ${ upper($lang) } $langs
+";
+        let uri = Url::parse("file:///tmp/none/page.hl").unwrap();
+        let spans = |locations: Vec<Location>| -> Vec<(u32, u32, u32)> {
+            locations
+                .iter()
+                .map(|l| {
+                    (
+                        l.range.start.line,
+                        l.range.start.character,
+                        l.range.end.character,
+                    )
+                })
+                .collect()
+        };
+        let expected = [(1, 8, 12), (1, 18, 23), (1, 38, 43)];
+        // From the cursor inside the braces, and on a plain reference
+        let found = find_references(text, Position::new(1, 9), &uri);
+        assert_eq!(spans(found), expected);
+        let found = find_references(text, Position::new(1, 20), &uri);
+        assert_eq!(spans(found), expected);
+        assert_eq!(
+            symbol_at(text, Position::new(1, 10)).as_deref(),
+            Some("$lang")
+        );
+
+        let edit = rename_at(text, Position::new(1, 9), "locale", &uri).expect("rename");
+        let mut edits: Vec<(u32, u32, String)> = edit
+            .changes
+            .unwrap()
+            .remove(&uri)
+            .unwrap()
+            .into_iter()
+            .map(|e| (e.range.start.line, e.range.start.character, e.new_text))
+            .collect();
+        edits.sort_unstable();
+        assert_eq!(
+            edits,
+            [
+                (0, 5, "locale".to_string()),
+                (1, 8, "locale".to_string()),
+                (1, 18, "$locale".to_string()),
+                (1, 38, "$locale".to_string()),
+            ]
+        );
+
+        // Linked editing covers the names alone, so all ranges match
+        let linked = linked_editing_ranges(text, Position::new(1, 20)).expect("linked");
+        let starts: Vec<u32> = linked.ranges.iter().map(|r| r.start.character).collect();
+        assert_eq!(starts, [8, 19, 39]);
     }
 }
