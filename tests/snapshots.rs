@@ -6421,3 +6421,125 @@ fn an_empty_container_is_linted_by_its_layout() {
     assert_eq!(lint("@li First\n"), 0);
     assert_eq!(lint("@h2\n"), 0);
 }
+
+// --- Text (P3): arguments are read like text everywhere ---
+
+#[test]
+fn snapshot_text_everywhere() {
+    snapshot_test("text_everywhere");
+}
+
+#[test]
+fn every_element_s_argument_is_read_like_text() {
+    let out = compile("@h1 Hello {@text [color red] world}\n");
+    assert!(
+        out.contains("<h1 class=\"a\">Hello <span class=\"b\">world</span></h1>"),
+        "{}",
+        out
+    );
+    let out = compile("@ul\n  @li Read {@link /x more}\n");
+    assert!(
+        out.contains("<span>Read <a href=\"/x\">more</a></span></li>"),
+        "{}",
+        out
+    );
+    let out = compile("@table > @tr > @td {@kbd Ctrl}\n");
+    assert!(
+        out.contains("<td><kbd class=\"a\">Ctrl</kbd></td>"),
+        "{}",
+        out
+    );
+    for name in [
+        "text",
+        "button",
+        "label",
+        "summary",
+        "legend",
+        "figcaption",
+        "cite",
+        "dt",
+        "dd",
+        "th",
+        "mark",
+        "abbr",
+        "kbd",
+        "time",
+        "option",
+        "h6",
+    ] {
+        let out = compile(&format!("@{} a {{@text b}} c\n", name));
+        assert!(out.contains("a <span>b</span> c"), "@{}: {}", name, out);
+    }
+    // Escapes and $names too, as before
+    let out = compile("@let x 5\n@h2 \\{@b\\} costs $x\n");
+    assert!(out.contains(">{@b} costs 5</h2>"), "{}", out);
+}
+
+#[test]
+fn an_unknown_inline_element_in_an_argument_is_reported() {
+    let diagnostics = parse_diagnostics("@text Read {@lnk /x more}\n");
+    let d = diagnostics
+        .iter()
+        .find(|d| d.code == "unknown-element")
+        .unwrap_or_else(|| panic!("{:?}", diagnostics));
+    assert!(d.message.contains("did you mean @link"), "{}", d.message);
+}
+
+#[test]
+fn code_and_textarea_show_their_text_as_written() {
+    // Inline, on the line and in the lines under it
+    let out = compile("@paragraph\n  Write {@code {@link /x y}} for a link.\n");
+    assert!(
+        out.contains("Write <code class=\"b\">{@link /x y}</code> for a link.</p>"),
+        "{}",
+        out
+    );
+    let out = compile("@code {@b x}\n");
+    assert!(out.contains(">{@b x}</code>"), "{}", out);
+    let out = compile("@code\n  {@b x}\n  {@i y}\n");
+    assert!(out.contains(">{@b x} {@i y}</code>"), "{}", out);
+    let out = compile("@pre > @code {@b x}\n");
+    assert!(out.contains(">{@b x}</code></pre>"), "{}", out);
+    // Its misspellings aren't elements, so they aren't reported
+    let diagnostics = parse_diagnostics("@code {@lnk x}\n");
+    assert!(
+        diagnostics.iter().all(|d| d.code != "unknown-element"),
+        "{:?}",
+        diagnostics
+    );
+    // $names and escapes still work
+    let out = compile("@let v 2\n@code {@x} v$v \\}\n");
+    assert!(out.contains(">{@x} v2 }</code>"), "{}", out);
+    // A textarea keeps its lines, and shows braces as written
+    let out = compile("@textarea [aria-label=a]\n  {@b one}\n  two\n");
+    assert!(out.contains(">{@b one}\ntwo</textarea>"), "{}", out);
+    let out = compile("@textarea [aria-label=a] {@b one}\n  two\n");
+    assert!(out.contains(">{@b one}\ntwo</textarea>"), "{}", out);
+}
+
+#[test]
+fn the_argument_is_the_first_line_of_the_element_s_layout() {
+    // In a row or column each line is a child, the argument first
+    let out = compile("@row [spacing 8] one\n  two\n");
+    assert!(
+        out.contains("<span>one</span><span>two</span></div>"),
+        "{}",
+        out
+    );
+    // In a text element the lines flow
+    let out = compile("@button [type=button] Read\n  more\n");
+    assert!(out.contains(">Read more</button>"), "{}", out);
+    // Text that @each, @if or a function writes flows like a line
+    let out = compile(
+        "@let @word\n  plain\n@h2 Start\n  @each $x in a, b\n    $x\n  @if true\n    yes\n  @word\n",
+    );
+    assert!(out.contains(">Start a b yes plain</h2>"), "{}", out);
+}
+
+#[test]
+fn lines_of_text_at_the_top_of_the_page_are_separate_lines() {
+    let out = compile("Read\nmore\n");
+    assert!(out.ends_with("</style>Read\nmore"), "{}", out);
+    let out = compile("Read\n@text x\nmore\n");
+    assert!(out.ends_with("</style>Read<span>x</span>more"), "{}", out);
+}

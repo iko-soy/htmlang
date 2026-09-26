@@ -3092,14 +3092,15 @@ fn parse_single_element(
         parse_attr_list(&list.attrs, line_num, ctx, true, &[])
     });
 
-    // The argument is one slot: a URL, a source, an action, a slot name, or
-    // text shown as written. For @link, the first word is the URL and the
-    // rest is its text. Any other element's argument is text content, as
-    // in `@el [padding 8] Hello` or `@paragraph Read {@link /more more}`.
+    // The argument is one slot: a URL, a source, an action or a slot name.
+    // For @link, the first word is the URL and the rest is its text. Any
+    // other element's argument is text content, parsed like any line of
+    // text, as in `@el [padding 8] Hello` or `@h2 Meet {@text htmlang}`;
+    // its layout decides how it combines with the lines under it.
     let mut children = Vec::new();
     let mut argument = None;
     if let Some(text) = text {
-        if argument_is_special(&kind) || renders_argument_as_text(&kind) {
+        if argument_is_special(&kind) {
             let raw = if kind == ElementKind::Link {
                 let (url, rest) = text.split_first_word();
                 if let Some(rest) = rest {
@@ -4386,10 +4387,8 @@ pub fn lint(nodes: &[Node]) -> Vec<Diagnostic> {
             }
             // A function's body may draw with an empty element (a spacer,
             // a dot): only one written in the page is flagged
-            let has_text = elem.argument.is_some() && renders_argument_as_text(&elem.kind);
             if elem.kind.layout().is_container()
                 && elem.children.is_empty()
-                && !has_text
                 && elem.function.is_none()
             {
                 warn(
@@ -4629,7 +4628,7 @@ fn validate_tree(
 
             // @button should have accessible text
             if elem.kind.is_tag("button") {
-                let has_text = elem.argument.is_some() || !elem.children.is_empty();
+                let has_text = !elem.children.is_empty();
                 let has_aria = elem.attrs.iter().any(|a| a.key == "aria-label");
                 if !has_text && !has_aria {
                     diagnostics.push(Diagnostic::new(

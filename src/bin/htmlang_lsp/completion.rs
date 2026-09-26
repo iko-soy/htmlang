@@ -68,8 +68,12 @@ pub(crate) fn completions(text: &str, position: Position) -> Vec<CompletionItem>
     }
 
     // An inline element or call in text, `{@name ...}`: elements and
-    // functions, but no directives
+    // functions, but no directives. In the text of `@code` or `@textarea`,
+    // `{@` is text, so there is nothing to offer.
     if current_word.starts_with('@') && before[..word_start].ends_with('{') {
+        if !starts_inline_element(text, position.line, word_start) {
+            return vec![];
+        }
         let mut items = element_completions(edit_range);
         items.extend(function_completions(text, edit_range));
         return items;
@@ -93,6 +97,17 @@ pub(crate) fn completions(text: &str, position: Position) -> Vec<CompletionItem>
     }
 
     vec![]
+}
+
+/// Whether the `@` at byte `column` of `line` starts an inline element,
+/// as the syntax tree reads it: not in text shown as written.
+fn starts_inline_element(text: &str, line: u32, column: usize) -> bool {
+    let tree = htmlang::syntax::parse(text);
+    crate::tree::node_at(&tree, line).is_some_and(|node| {
+        node.heads()
+            .iter()
+            .any(|head| head.name_span.line == line as usize + 1 && head.name_span.column == column)
+    })
 }
 
 /// Whether `line` is (part of) a function definition's head,
@@ -1446,6 +1461,24 @@ mod tests {
         assert!(labels.iter().any(|l| l == "@key"), "{:?}", labels);
         assert!(labels.iter().any(|l| l == "@kbd"), "{:?}", labels);
         assert!(!labels.iter().any(|l| l == "@each"), "{:?}", labels);
+    }
+
+    #[test]
+    fn inline_elements_are_offered_in_every_text_but_literal_text() {
+        // An element's argument is text like any other
+        let text = "@h2 Meet {@t";
+        let items = completions(text, pos(0, text.len() as u32));
+        assert!(items.iter().any(|i| i.label == "@text"), "{:?}", items);
+        // In `@code` and `@textarea`, `{@` is text
+        for text in [
+            "@code Write {@l",
+            "@paragraph Write {@code {@l",
+            "@code\n  Write {@l",
+        ] {
+            let line = text.lines().count() as u32 - 1;
+            let column = text.lines().last().unwrap().len() as u32;
+            assert!(completions(text, pos(line, column)).is_empty(), "{}", text);
+        }
     }
 
     #[test]

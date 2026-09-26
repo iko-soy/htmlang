@@ -92,14 +92,37 @@ else, `[` is an ordinary character, so a line of text can contain one:
 ### Text
 
 A line that doesn't start with `@` is text. Text after an element's
-attributes is the element's content. Inside a line of text, `{...}` holds an
-inline element:
+attributes is the element's content: its first line of text, read like any
+other. Inside a line of text, `{...}` holds an inline element, and
+[escapes](#escapes) and [`$names`](#variables) work:
 
 ```
 @paragraph
   This is {@text [font-weight bold] important}, and this is {@link https://example.com a link}.
 @text [font-weight bold, font-size 24, color #333] Hello world
+@h2 Welcome to {@text [color #3b82f6] htmlang}
+@ul
+  @li Read {@link /docs the docs}
 @section [padding 8] Text after the attributes is content too.
+```
+
+How an element's lines combine is its [layout](#rows-columns-and-text)'s
+business: in a row or column each line is a child; in a text element lines
+flow. Text that `@if`, `@each` or a function writes counts as lines written
+in its place, so in a text element it flows with the rest, joined with a
+space.
+
+The text of `@code` and `@textarea` is shown as written: a `{@...}` in it is
+text, on its line, in the lines under it and inline, so a page can show
+htmlang source. Escapes and `$names` still work in it, and the lines of a
+`@textarea` keep their line breaks.
+
+```
+@paragraph
+  Write {@code {@link /docs docs}} for a link.
+@textarea [aria-label=Notes]
+  First line
+  Second line
 ```
 
 ### Escapes
@@ -457,7 +480,7 @@ its HTML name.
 | `@grid` | div, grid | Grid container (with `grid-cols` or `grid-template-*`) |
 | `@in-front` / `@behind` | div, absolute | Overlay layers that fill the parent |
 | `@text` | span | Styled inline text |
-| `@paragraph` | p | Flowing text with inline elements |
+| `@paragraph` | p | A paragraph of flowing text |
 | `@link URL` | a | Link, whose content is the text after the URL |
 | `@image SRC` | img | Image |
 | `@fragment` | (none) | Its children, without a wrapper element (so it takes no attributes) |
@@ -476,9 +499,9 @@ Every element has one [layout](#rows-columns-and-text):
 `@fragment`, `@children` and `@slot` have no element of their own: what
 they hold takes the layout of the element they are in. For `@form URL`, the
 URL is the form's `action`; for `@video`, `@audio`, `@iframe` and `@source`,
-the argument is the `src`. In a native element, lines of text are separated
-by a line break, which HTML shows as a space except where whitespace is
-kept, as in `@pre` and `@textarea`.
+the argument is the `src`. In a native element, and at the top of the
+page, lines of text are separated by a line break, which HTML shows as a
+space except where whitespace is kept, as in `@pre` and `@textarea`.
 
 `@script` takes HTML attributes (`@script [src=app.js, defer]`) and its code
 as a verbatim body; it isn't shown, so a style on it is an error. An element

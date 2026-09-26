@@ -22,6 +22,9 @@
       "include": "#directive"
     },
     {
+      "include": "#literal-line"
+    },
+    {
       "include": "#element"
     },
     {
@@ -38,6 +41,9 @@
     },
     {
       "include": "#attributes"
+    },
+    {
+      "include": "#literal-inline"
     },
     {
       "include": "#inline-element"
@@ -110,6 +116,28 @@
     "directive": {
       "name": "keyword.control.directive.htmlang",
       "match": "@(?:page|let|include|data|meta|if|else|each|style|head|raw|markdown)(?![a-zA-Z0-9_-])"
+    },
+    "literal-line": {
+      "comment": "@code and @textarea show their text as written: a {@...} in it is text",
+      "begin": "(?:^\\s*|\\s>\\s*)(@(?:code|textarea))(?![a-zA-Z0-9_-])",
+      "end": "$",
+      "beginCaptures": {
+        "1": {
+          "name": "entity.name.tag.htmlang"
+        }
+      },
+      "contentName": "markup.inline.raw.htmlang",
+      "patterns": [
+        {
+          "include": "#attributes"
+        },
+        {
+          "include": "#escape"
+        },
+        {
+          "include": "#variable"
+        }
+      ]
     },
     "element": {
       "name": "entity.name.tag.htmlang",
@@ -203,6 +231,56 @@
       "name": "support.type.property-name.htmlang",
       "match": "\\b(?:spacing|center-x|center-y|align-left|align-right|align-top|align-bottom|wrap|grid-cols|grid-rows|col-span|row-span|inline|padding|margin|width|height|min-width|max-width|min-height|max-height|background|color|border|border-radius|font-size|font-weight|font-family|line-height|text-align|display|gap|flex|position|overflow|opacity|cursor|transition|transform|box-shadow|z-index)\\b"
     },
+    "literal-inline": {
+      "comment": "{@code ...} and {@textarea ...}: their text is shown as written, so a {@...} in it is text",
+      "name": "meta.inline-element.htmlang",
+      "begin": "(\\{)(@(?:code|textarea))(?![a-zA-Z0-9_-])",
+      "end": "(\\})",
+      "beginCaptures": {
+        "1": {
+          "name": "punctuation.section.braces.begin.htmlang"
+        },
+        "2": {
+          "name": "entity.name.tag.htmlang"
+        }
+      },
+      "endCaptures": {
+        "1": {
+          "name": "punctuation.section.braces.end.htmlang"
+        }
+      },
+      "contentName": "markup.inline.raw.htmlang",
+      "patterns": [
+        {
+          "include": "#escape"
+        },
+        {
+          "include": "#attributes"
+        },
+        {
+          "include": "#variable"
+        },
+        {
+          "include": "#literal-braces"
+        }
+      ]
+    },
+    "literal-braces": {
+      "comment": "Braces inside literal text, kept as written and balanced",
+      "begin": "\\{",
+      "end": "\\}",
+      "patterns": [
+        {
+          "include": "#escape"
+        },
+        {
+          "include": "#variable"
+        },
+        {
+          "include": "#literal-braces"
+        }
+      ]
+    },
     "inline-element": {
       "name": "meta.inline-element.htmlang",
       "begin": "(\\{)(?=@)",
@@ -220,6 +298,12 @@
       "patterns": [
         {
           "include": "#escape"
+        },
+        {
+          "include": "#literal-inline"
+        },
+        {
+          "include": "#inline-element"
         },
         {
           "include": "#element"

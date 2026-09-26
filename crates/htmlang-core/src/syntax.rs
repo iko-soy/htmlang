@@ -605,6 +605,7 @@ pub(crate) fn parse_from(source: &str, first_id: usize) -> Tree {
     let mut next_id = first_id;
     let mut pos = 0;
     let mut nodes = build(entries, &mut pos, None, &mut next_id);
+    literal_text(&mut nodes, false);
     check(&mut nodes, &mut diagnostics);
     diagnostics.sort_by_key(|d| d.line);
     Tree {
@@ -835,6 +836,53 @@ fn build_from(
         });
     }
     nodes
+}
+
+/// Make the text of `@code` and `@textarea` literal, on their line, in the
+/// lines under them and inline (`{@code {@link /x y}}`): a `{@...}` in it is
+/// text. `inside` says that `nodes` are in such an element.
+fn literal_text(nodes: &mut [Node], inside: bool) {
+    for node in nodes {
+        let mut literal = inside;
+        match &mut node.kind {
+            NodeKind::Text(text) => text.literal_where_asked(inside),
+            NodeKind::Element(line) => {
+                literal |= line
+                    .chain
+                    .iter()
+                    .any(|head| ast::has_literal_text(&head.name));
+                if let Some(text) = &mut line.text {
+                    text.literal_where_asked(literal);
+                }
+            }
+            _ => {}
+        }
+        literal_text(&mut node.children, literal);
+    }
+}
+
+impl Text {
+    /// Make the whole text literal when `literal`, and otherwise the text
+    /// of the inline elements in it that show their text as written.
+    fn literal_where_asked(&mut self, literal: bool) {
+        if literal {
+            self.segments = match self.raw.is_empty() {
+                true => Vec::new(),
+                false => vec![Segment::Plain {
+                    raw: self.raw.clone(),
+                    span: self.span,
+                }],
+            };
+            return;
+        }
+        for segment in &mut self.segments {
+            if let Segment::Inline(inline) = segment
+                && let Some(text) = &mut inline.text
+            {
+                text.literal_where_asked(ast::has_literal_text(&inline.head.name));
+            }
+        }
+    }
 }
 
 /// Checks on the built tree: what each line's body may be, and `@else`
@@ -2164,6 +2212,44 @@ mod tests {
         };
         assert_eq!(inline.head.name, "link");
         assert_eq!(inline.text.as_ref().unwrap().segments.len(), 2);
+    }
+
+    #[test]
+    fn the_text_of_code_and_textarea_has_no_inline_elements() {
+        let plain = |text: &Text| {
+            text.segments.len() == 1 && matches!(text.segments[0], Segment::Plain { .. })
+        };
+        // On the element's line, in a chain and in the lines under it
+        let tree = parse("@code {@link /x y}\n@pre > @code {@b x}\n@textarea\n  {@b x}\n");
+        for node in &tree.nodes[..2] {
+            let NodeKind::Element(line) = &node.kind else {
+                panic!()
+            };
+            assert!(plain(line.text.as_ref().unwrap()), "{:?}", line.text);
+        }
+        let NodeKind::Text(text) = &tree.nodes[2].children[0].kind else {
+            panic!()
+        };
+        assert!(plain(text), "{:?}", text);
+        // Inline: `{@code ...}`'s text is literal, the line around it isn't
+        let tree = parse("@h2 Write {@code {@link /x y}} or {@b {@code {@i z}}}\n");
+        let NodeKind::Element(line) = &tree.nodes[0].kind else {
+            panic!()
+        };
+        let heads: Vec<&str> = tree.nodes[0]
+            .heads()
+            .iter()
+            .map(|h| h.name.as_str())
+            .collect();
+        assert_eq!(heads, ["h2", "code", "b", "code"]);
+        let Segment::Inline(code) = &line.text.as_ref().unwrap().segments[1] else {
+            panic!()
+        };
+        assert!(plain(code.text.as_ref().unwrap()));
+        assert_eq!(code.text.as_ref().unwrap().raw, "{@link /x y}");
+        // Any other element's text is parsed
+        let tree = parse("@h1 Hello {@text [color red] world}\n");
+        assert_eq!(tree.nodes[0].heads().len(), 2);
     }
 
     #[test]

@@ -1566,3 +1566,29 @@ fn an_empty_fragment_in_text_left_two_spaces() {
     let out = compile("@pre\n  a\n  @fragment\n  b\n");
     assert!(out.contains(">a\nb</pre>"), "{}", out);
 }
+
+#[test]
+fn inline_elements_were_printed_as_text_in_a_heading() {
+    // `<h1>Hello {@text [color red] world}</h1>`
+    let out = compile("@h1 Hello {@text [color red] world}\n");
+    assert!(!out.contains("{@"), "{}", out);
+    assert!(
+        out.contains("Hello <span class=\"b\">world</span></h1>"),
+        "{}",
+        out
+    );
+    // `@text This is {@mark highlighted} text`
+    let out = compile("@text This is {@mark highlighted} text\n");
+    assert!(
+        out.contains("This is <mark>highlighted</mark> text"),
+        "{}",
+        out
+    );
+}
+
+#[test]
+fn text_lines_at_the_top_of_the_page_were_glued() {
+    // 'Readmore'
+    let out = compile("Read\nmore\n");
+    assert!(out.contains("Read\nmore"), "{}", out);
+}

@@ -599,9 +599,7 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
 
     let mut body = String::new();
 
-    for node in &doc.nodes {
-        generate_node(node, None, &mut body, &mut styles, &mut ctx);
-    }
+    generate_children(&doc.nodes, None, &mut body, &mut styles, &mut ctx);
 
     let element_css = build_element_css(doc, &styles, dev);
 
@@ -860,9 +858,7 @@ fn generate_partial_inner(doc: &Document, dev: bool) -> String {
     };
     let mut body = String::new();
 
-    for node in &doc.nodes {
-        generate_node(node, None, &mut body, &mut styles, &mut ctx);
-    }
+    generate_children(&doc.nodes, None, &mut body, &mut styles, &mut ctx);
 
     let element_css = build_element_css(doc, &styles, dev);
 
@@ -912,29 +908,31 @@ fn generate_node(
 }
 
 /// What goes between two things written one after the other in an element
-/// with this layout: text flows, so its lines and children are joined with
-/// a space; in HTML's own layout, two lines of text are separated by a line
-/// break (a space, except where whitespace is kept, as in `@pre`).
-fn separator(layout: Layout, previous_is_text: bool, next: &Node) -> Option<char> {
+/// with this layout (`None`: the top of the page): text flows, so its lines
+/// and children are joined with a space; in HTML's own layout, and at the
+/// top of the page, two lines of text are separated by a line break (a
+/// space, except where whitespace is kept, as in `@pre`).
+fn separator(layout: Option<Layout>, previous_is_text: bool, next: &Node) -> Option<char> {
     match layout {
-        Layout::Text => Some(' '),
-        Layout::Native if previous_is_text && matches!(next, Node::Text(_)) => Some('\n'),
+        Some(Layout::Text) => Some(' '),
+        Some(Layout::Native) | None if previous_is_text && matches!(next, Node::Text(_)) => {
+            Some('\n')
+        }
         _ => None,
     }
 }
 
 /// Write the children of an element (or of a `@fragment`, which has no
-/// element of its own) laid out as `layout`. `after_text` says that text
-/// (the element's argument) was written just before them.
+/// element of its own) laid out as `layout` (`None`: the top of the page).
+/// The first line of an element's text is its first child.
 fn generate_children(
     children: &[Node],
-    layout: Layout,
-    after_text: bool,
+    layout: Option<Layout>,
     out: &mut String,
     styles: &mut StyleCollector,
     ctx: &mut GenContext,
 ) {
-    let mut previous: Option<bool> = after_text.then_some(true);
+    let mut previous: Option<bool> = None;
     for child in children {
         let start = out.len();
         if let Some(previous_is_text) = previous
@@ -943,7 +941,7 @@ fn generate_children(
             out.push(sep);
         }
         let body = out.len();
-        generate_node(child, Some(layout), out, styles, ctx);
+        generate_node(child, layout, out, styles, ctx);
         // A child that writes nothing (an empty `@fragment`) takes no
         // separator either, so text never gets two spaces in a row
         if out.len() == body {
@@ -1058,14 +1056,7 @@ fn generate_element(
     if elem.kind == ElementKind::Fragment {
         // Render children without a wrapper element, as if they were
         // written where the fragment is
-        match parent {
-            Some(layout) => generate_children(&elem.children, layout, false, out, styles, ctx),
-            None => {
-                for child in &elem.children {
-                    generate_node(child, None, out, styles, ctx);
-                }
-            }
-        }
+        generate_children(&elem.children, parent, out, styles, ctx);
         return;
     }
 
@@ -1142,21 +1133,7 @@ fn generate_element(
     ctx.depth += 1;
     let outer_in_text = ctx.in_text;
     ctx.in_text = in_text || layout == Layout::Text;
-    // An argument printed as the element's text is its first line
-    let argument = elem
-        .argument
-        .as_deref()
-        .filter(|_| renders_argument_as_text(&elem.kind));
-    if let Some(text) = argument {
-        generate_node(
-            &Node::Text(vec![TextSegment::Plain(text.to_string())]),
-            Some(layout),
-            out,
-            styles,
-            ctx,
-        );
-    }
-    generate_children(&elem.children, layout, argument.is_some(), out, styles, ctx);
+    generate_children(&elem.children, Some(layout), out, styles, ctx);
     ctx.in_text = outer_in_text;
     ctx.depth -= 1;
 

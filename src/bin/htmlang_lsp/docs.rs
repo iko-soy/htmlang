@@ -32,7 +32,7 @@ pub(crate) const ELEMENTS: &[Doc] = &[
     doc("text", "Styled inline text (`<span>`).", "@text [font-weight bold, font-size 24] Hello"),
     doc(
         "paragraph",
-        "Flowing text (`<p>`); holds inline `{@...}` elements.",
+        "A paragraph of flowing text (`<p>`), which holds inline `{@...}` elements like any text.",
         "@paragraph\n  Read the {@link /docs docs}.",
     ),
     doc("link", "Link (`<a>`); text after the URL is its content.", "@link /about About us"),
@@ -206,7 +206,10 @@ pub(crate) fn element_summary(name: &str) -> Option<String> {
         let mut summary = format!("Renders `<{}>`.", spec.html);
         match spec.arg {
             TagArg::Attr(attr) => summary.push_str(&format!(" The argument is its `{}`.", attr)),
-            TagArg::Text | TagArg::Child => summary.push_str(" Text after it is its content."),
+            TagArg::Child if spec.literal => summary.push_str(
+                " Text after it is its content, shown as written: a `{@...}` in it is text.",
+            ),
+            TagArg::Child => summary.push_str(" Text after it is its content."),
         }
         summary
     };

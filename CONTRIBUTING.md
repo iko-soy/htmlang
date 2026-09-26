@@ -22,7 +22,9 @@ Linux, macOS, and Windows. Your change should pass all three.
   - `syntax.rs` — the syntax tree: every line as written, with spans. The
     compiler evaluates it, the formatter prints it back, and the language
     server takes definitions, directives and verbatim bodies from it. It
-    also holds `ESCAPES`, the one escape table of every htmlang string.
+    also holds `ESCAPES`, the one escape table of every htmlang string,
+    and decides where `{@...}` is an inline element: in every line of text
+    except the text of a `literal` element.
   - `parser.rs` — evaluates the tree: definitions, data, loops and
     conditions, and the checks over code that doesn't run. Names live in
     `Env`, one frame per block, so a definition is visible to the end of
@@ -31,7 +33,8 @@ Linux, macOS, and Windows. Your change should pass all three.
   - `ast.rs` — the element kinds; every plain HTML element is one row in
     `TAGS` with its one `Layout` (column, row, grid, text, native or void,
     which decides its text lines, `spacing` and its children's layout
-    words), and every directive one row in `DIRECTIVES` (its argument, its
+    words) and whether its text is shown as written (`literal`: `@code`,
+    `@textarea`), and every directive one row in `DIRECTIVES` (its argument, its
     kind of body, and whether it takes the rest of the line).
   - `vocab.rs` — the attribute vocabulary (htmlang attributes, CSS properties,
     HTML attributes) and the state/media prefixes.

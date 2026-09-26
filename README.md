@@ -32,8 +32,10 @@ unless you write some, and nothing is added that you didn't ask for.
 ## The language in brief
 
 - **`@` starts structure, and any other line is content.** Indentation nests
-  elements. Text after an element's attributes is its content, and `{...}`
-  puts an element inside a line of text.
+  elements. Text after an element's attributes is its content, read like
+  any line of text, and `{...}` puts an element inside a line of text
+  (`@h1 Hello {@text [color red] world}`). The text of `@code` and
+  `@textarea` is shown as written.
 - **Layout comes from elm-ui.** Every element has one layout. `@el` and the
   containers (`@section`, `@nav`, `@ul`, `@li`, ...) are columns, `@row` is a
   row and `@grid` a grid: in them each line of text is a child, and

@@ -1,0 +1,41 @@
+-- Every element's text is read like any line of text: inline elements,
+-- escapes and $names work in it. Its layout decides how its lines combine.
+@let name htmlang
+
+-- Headings, list items, cells, buttons and labels
+@h2 Welcome to {@text [color #3b82f6] $name}
+@ul
+  @li Read {@link /docs the docs}
+@table > @tr
+  @td Press {@kbd Ctrl}
+  @th \{not an element\}
+@button [type=button] Save {@text [font-weight bold] now}
+@label Name {@abbr [title=required] *}
+
+-- A row or column: each line is a child
+@row [spacing 8]
+  one
+  two
+
+-- A text element: lines flow, whatever writes them
+@button [type=button]
+  Read
+  more
+@paragraph
+  Items:
+  @each $x in a, b
+    $x
+  @if true
+    and done.
+
+-- @code and @textarea show their text as written
+@paragraph
+  Write {@code {@link /x y}} for a link to {@code $name}.
+@code {@b not bold}
+@textarea [aria-label=Notes]
+  {@b line one}
+  line two
+
+-- At the top of the page, two lines of text are two lines
+Top
+level

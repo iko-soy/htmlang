@@ -7,7 +7,8 @@ Syntax highlighting, snippets, and language server support for
 
 - **Syntax highlighting**: `@` elements and directives, `$variables`,
   `[attribute]` lists with state and media prefixes, `if(...)` and its
-  `[groups]`, `key=value` HTML attributes, quoted text, escapes (`\,`, `\$`, `\]`), `{@inline}` elements,
+  `[groups]`, `key=value` HTML attributes, quoted text, escapes (`\,`, `\$`, `\]`), `{@inline}` elements
+  (shown as text in `@code` and `@textarea`),
   `@each $item in` headers and ranges (`1..5`), colors, numbers and `-- comments`.
 - **Diagnostics**: the compiler's own, each with its code: parse errors,
   unknown elements, prefixes and CSS properties with "did you mean"

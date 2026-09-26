@@ -33,6 +33,9 @@ pub enum TextSegment {
 pub struct Element {
     pub kind: ElementKind,
     pub attrs: Vec<Attribute>,
+    /// The argument when it is one slot: `@link`'s URL, `@image`'s source,
+    /// the attribute of a [`TagArg::Attr`] row, `@slot`'s name. Any other
+    /// element's argument is text, its first child.
     pub argument: Option<String>,
     pub children: Vec<Node>,
     /// The line it is written on; for an element a function's body wrote,
@@ -180,11 +183,10 @@ impl ElementKind {
 /// What an element does with the text after its name and attributes.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TagArg {
-    /// Leading text content (`@section Hello`).
+    /// Its content: the first line of its text, parsed like any text
+    /// (`@h1 Hello {@text [color red] world}`). The element's layout
+    /// decides how it combines with the lines under it.
     Child,
-    /// Its first line of text, taken as written (`@li First`); the
-    /// element's layout decides whether it is a child of its own.
-    Text,
     /// Emitted as this HTML attribute (`@iframe URL` sets `src`).
     Attr(&'static str),
 }
@@ -248,6 +250,9 @@ pub struct TagSpec {
     pub arg: TagArg,
     /// How it lays out its content.
     pub layout: Layout,
+    /// Its text is shown as written (`@code`, `@textarea`): a `{@...}` in
+    /// it is text, not an inline element. Escapes and `$names` still work.
+    pub literal: bool,
 }
 
 impl TagSpec {
@@ -257,6 +262,7 @@ impl TagSpec {
         css: "",
         arg: TagArg::Child,
         layout: Layout::Native,
+        literal: false,
     };
 }
 
@@ -282,10 +288,10 @@ pub static TAGS: &[TagSpec] = &[
     TagSpec { name: "datalist", html: "datalist", layout: Layout::Native, ..TagSpec::DEFAULT },
     TagSpec { name: "ul", html: "ul", css: "margin:0;padding-left:0;list-style:none;", layout: Layout::Column, ..TagSpec::DEFAULT },
     TagSpec { name: "ol", html: "ol", css: "margin:0;padding-left:0;list-style:none;", layout: Layout::Column, ..TagSpec::DEFAULT },
-    TagSpec { name: "li", html: "li", arg: TagArg::Text, layout: Layout::Column, ..TagSpec::DEFAULT },
+    TagSpec { name: "li", html: "li", layout: Layout::Column, ..TagSpec::DEFAULT },
     TagSpec { name: "dl", html: "dl", css: "margin:0;", layout: Layout::Column, ..TagSpec::DEFAULT },
-    TagSpec { name: "dt", html: "dt", arg: TagArg::Text, layout: Layout::Text, ..TagSpec::DEFAULT },
-    TagSpec { name: "dd", html: "dd", css: "margin:0;", arg: TagArg::Text, layout: Layout::Column },
+    TagSpec { name: "dt", html: "dt", layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "dd", html: "dd", css: "margin:0;", layout: Layout::Column, ..TagSpec::DEFAULT },
     TagSpec { name: "table", html: "table", layout: Layout::Native, ..TagSpec::DEFAULT },
     TagSpec { name: "thead", html: "thead", layout: Layout::Native, ..TagSpec::DEFAULT },
     TagSpec { name: "tbody", html: "tbody", layout: Layout::Native, ..TagSpec::DEFAULT },
@@ -296,28 +302,28 @@ pub static TAGS: &[TagSpec] = &[
     TagSpec { name: "meter", html: "meter", layout: Layout::Native, ..TagSpec::DEFAULT },
     TagSpec { name: "output", html: "output", layout: Layout::Native, ..TagSpec::DEFAULT },
     TagSpec { name: "canvas", html: "canvas", layout: Layout::Native, ..TagSpec::DEFAULT },
-    TagSpec { name: "td", html: "td", arg: TagArg::Text, layout: Layout::Text, ..TagSpec::DEFAULT },
-    TagSpec { name: "th", html: "th", arg: TagArg::Text, layout: Layout::Text, ..TagSpec::DEFAULT },
-    TagSpec { name: "button", html: "button", arg: TagArg::Text, layout: Layout::Text, ..TagSpec::DEFAULT },
-    TagSpec { name: "label", html: "label", arg: TagArg::Text, layout: Layout::Text, ..TagSpec::DEFAULT },
-    TagSpec { name: "option", html: "option", arg: TagArg::Text, layout: Layout::Native, ..TagSpec::DEFAULT },
-    TagSpec { name: "textarea", html: "textarea", arg: TagArg::Text, layout: Layout::Native, ..TagSpec::DEFAULT },
-    TagSpec { name: "summary", html: "summary", arg: TagArg::Text, layout: Layout::Text, ..TagSpec::DEFAULT },
-    TagSpec { name: "cite", html: "cite", arg: TagArg::Text, layout: Layout::Text, ..TagSpec::DEFAULT },
-    TagSpec { name: "figcaption", html: "figcaption", arg: TagArg::Text, layout: Layout::Text, ..TagSpec::DEFAULT },
-    TagSpec { name: "legend", html: "legend", arg: TagArg::Text, layout: Layout::Text, ..TagSpec::DEFAULT },
-    TagSpec { name: "time", html: "time", arg: TagArg::Text, layout: Layout::Text, ..TagSpec::DEFAULT },
-    TagSpec { name: "mark", html: "mark", arg: TagArg::Text, layout: Layout::Text, ..TagSpec::DEFAULT },
-    TagSpec { name: "abbr", html: "abbr", arg: TagArg::Text, layout: Layout::Text, ..TagSpec::DEFAULT },
-    TagSpec { name: "code", html: "code", css: "font-family:ui-monospace,monospace;", arg: TagArg::Text, layout: Layout::Text },
-    TagSpec { name: "kbd", html: "kbd", css: "font-family:ui-monospace,monospace;", arg: TagArg::Text, layout: Layout::Text },
+    TagSpec { name: "td", html: "td", layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "th", html: "th", layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "button", html: "button", layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "label", html: "label", layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "option", html: "option", layout: Layout::Native, ..TagSpec::DEFAULT },
+    TagSpec { name: "textarea", html: "textarea", layout: Layout::Native, literal: true, ..TagSpec::DEFAULT },
+    TagSpec { name: "summary", html: "summary", layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "cite", html: "cite", layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "figcaption", html: "figcaption", layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "legend", html: "legend", layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "time", html: "time", layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "mark", html: "mark", layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "abbr", html: "abbr", layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "code", html: "code", css: "font-family:ui-monospace,monospace;", layout: Layout::Text, literal: true, ..TagSpec::DEFAULT },
+    TagSpec { name: "kbd", html: "kbd", css: "font-family:ui-monospace,monospace;", layout: Layout::Text, ..TagSpec::DEFAULT },
     TagSpec { name: "pre", html: "pre", css: "margin:0;white-space:pre;font-family:ui-monospace,monospace;", layout: Layout::Native, ..TagSpec::DEFAULT },
-    TagSpec { name: "h1", html: "h1", css: "margin:0;", arg: TagArg::Text, layout: Layout::Text },
-    TagSpec { name: "h2", html: "h2", css: "margin:0;", arg: TagArg::Text, layout: Layout::Text },
-    TagSpec { name: "h3", html: "h3", css: "margin:0;", arg: TagArg::Text, layout: Layout::Text },
-    TagSpec { name: "h4", html: "h4", css: "margin:0;", arg: TagArg::Text, layout: Layout::Text },
-    TagSpec { name: "h5", html: "h5", css: "margin:0;", arg: TagArg::Text, layout: Layout::Text },
-    TagSpec { name: "h6", html: "h6", css: "margin:0;", arg: TagArg::Text, layout: Layout::Text },
+    TagSpec { name: "h1", html: "h1", css: "margin:0;", layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "h2", html: "h2", css: "margin:0;", layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "h3", html: "h3", css: "margin:0;", layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "h4", html: "h4", css: "margin:0;", layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "h5", html: "h5", css: "margin:0;", layout: Layout::Text, ..TagSpec::DEFAULT },
+    TagSpec { name: "h6", html: "h6", css: "margin:0;", layout: Layout::Text, ..TagSpec::DEFAULT },
     TagSpec { name: "input", html: "input", layout: Layout::Void, ..TagSpec::DEFAULT },
     TagSpec { name: "hr", html: "hr", layout: Layout::Void, ..TagSpec::DEFAULT },
     TagSpec { name: "source", html: "source", arg: TagArg::Attr("src"), layout: Layout::Void, ..TagSpec::DEFAULT },
@@ -329,10 +335,13 @@ pub static TAGS: &[TagSpec] = &[
     TagSpec { name: "behind", html: "div", css: "position:absolute;inset:0;z-index:-1;", layout: Layout::Column, ..TagSpec::DEFAULT },
 ];
 
-/// Elements that print their argument as their text (`@text Hello`,
-/// `@li First`).
-pub fn renders_argument_as_text(kind: &ElementKind) -> bool {
-    *kind == ElementKind::Text || kind.spec().is_some_and(|spec| spec.arg == TagArg::Text)
+/// Whether the element named `name` (without the `@`) shows its text as
+/// written: `{@code {@link /x y}}` prints the braces. The syntax tree
+/// reads this, so every tool agrees on it.
+pub fn has_literal_text(name: &str) -> bool {
+    ElementKind::from_name(name)
+        .and_then(|kind| kind.spec())
+        .is_some_and(|spec| spec.literal)
 }
 
 /// How a directive reads the rest of its line.

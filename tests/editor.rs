@@ -78,3 +78,26 @@ fn grammar_escapes_are_the_compilers() {
         "update the `escape` rule of the TextMate grammar"
     );
 }
+
+#[test]
+fn grammar_literal_elements_are_the_compilers() {
+    let grammar = grammar();
+    let compiled: BTreeSet<String> = htmlang::ast::TAGS
+        .iter()
+        .filter(|spec| spec.literal)
+        .map(|spec| spec.name.to_string())
+        .collect();
+    for rule in ["literal-line", "literal-inline"] {
+        let begin = grammar["repository"][rule]["begin"]
+            .as_str()
+            .unwrap_or_else(|| panic!("the grammar has no `{}` rule", rule));
+        // The names are the group after the `@`
+        let names = &begin[begin.find("@(?:").expect("an element name") + 1..];
+        assert_eq!(
+            alternatives(names),
+            compiled,
+            "update the `{}` rule of the TextMate grammar",
+            rule
+        );
+    }
+}
