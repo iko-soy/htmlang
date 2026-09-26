@@ -1,53 +1,9 @@
 -- The htmlang standard library, available in every file. It is ordinary
--- htmlang: a file's own @let with the same name takes precedence, and
--- attributes on a call style the component's root element, so
--- `@badge [background red] New` works like a built-in element.
-
--- Small pill for counts and statuses.
-@let badge
-  @text [display inline-flex, align-items center, padding 2px 8px, font-size 0.75rem, font-weight 600, justify-content center, border-radius 9999px, line-height 1]
-    @children
-
--- Label with slightly rounded corners.
-@let tag
-  @text [display inline-flex, align-items center, padding 2px 8px, font-size 0.75rem, font-weight 600, border-radius 4px]
-    @children
-
--- Outlined, fully rounded label.
-@let chip
-  @text [display inline-flex, align-items center, column-gap 4px, padding 4px 12px, border-radius 9999px, font-size 0.875rem, border 1 solid currentColor]
-    @children
-
--- Circular frame for an image or initials.
-@let avatar
-  @el [display inline-flex, flex-direction row, align-items center, justify-content center, border-radius 9999px, overflow hidden, flex-shrink 0]
-    @children
+-- htmlang: a file's own @let with the same name takes precedence.
 
 -- Takes up the remaining space in a row or column.
 @let spacer
   @el [flex 1]
 
--- Text that shows `tip` when hovered.
-@let tooltip $tip
-  @text [position relative, cursor help, title=$tip]
-    @children
-
--- Horizontally scrolling row that snaps to each child.
-@let carousel
-  @row [overflow-x auto, scroll-snap-type x mandatory, scrollbar-width none, children:scroll-snap-align start, children:flex-shrink 0]
-    @children
-
--- Breadcrumb trail: each crumb is an @li.
-@let breadcrumb
-  @nav [aria-label=breadcrumb]
-    @ol [display flex, flex-direction row, flex-wrap wrap, gap 8px]
-      @children
-
--- Loading placeholder: [$skeleton]
-@let skeleton [background linear-gradient(90deg,#e5e7eb 25%,#f3f4f6 50%,#e5e7eb 75%), background-size 200% 100%, animation hl-skeleton 1.5s ease-in-out infinite]
-
 -- Cut text off at one line with an ellipsis: [$truncate]
 @let truncate [overflow hidden, text-overflow ellipsis, white-space nowrap]
-
--- Hide scrollbars but keep scrolling: [$no-scrollbar]
-@let no-scrollbar [scrollbar-width none]

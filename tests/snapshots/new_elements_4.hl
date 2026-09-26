@@ -21,15 +21,6 @@
   @spacer
   @text Right
 
--- Badge element
-@row [spacing 8]
-  @badge [background #ef4444, color white] 3
-  @badge [background #22c55e, color white] New
-  @badge [background #3b82f6, color white] Pro
-
--- Tooltip element
+-- A hover tip is the title attribute
 @row [spacing 16]
-  @tooltip [tip Hover me for info] Hover me for info
-    @text [text-decoration underline] Helpful text
-  @tooltip [tip This is a tooltip message] This is a tooltip message
-    @text [font-weight bold] Important
+  @text [title=Hover me for info, text-decoration underline] Helpful text

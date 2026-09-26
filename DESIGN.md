@@ -160,31 +160,17 @@ wins.
 
 ### Standard library
 
-These components are written in htmlang (`std.hl`) and available in every file.
-Use them like elements; your own `@let` with the same name takes precedence.
-
-| Component | Purpose |
-|---|---|
-| `@badge` | Small pill for counts and statuses |
-| `@tag` | Label with slightly rounded corners |
-| `@chip` | Outlined, fully rounded label |
-| `@avatar` | Circular frame for an image or initials |
-| `@spacer` | Takes up the remaining space in a row or column |
-| `@tooltip [tip TEXT]` | Text that shows `TEXT` when hovered |
-| `@carousel` | Horizontally scrolling row that snaps to each child |
-| `@breadcrumb` | Breadcrumb trail of `@li`s |
-| `$skeleton`, `$truncate`, `$no-scrollbar` | Attribute bundles: loading placeholder, one-line ellipsis, hidden scrollbars |
+Two definitions are written in htmlang (`std.hl`) and available in every
+file; your own `@let` with the same name takes precedence. `@spacer` takes up
+the remaining space in a row or column, and the `$truncate` bundle cuts text
+off at one line with an ellipsis. Components beyond that are yours to define
+with `@let`.
 
 ```
 @row [spacing 8, align-items center]
-  @badge [background #ef4444, color white] 3
-  @chip Rust
+  @text Logo
   @spacer
-  @tooltip [tip Opens in a new tab] Help
-@breadcrumb
-  @li > @link / Home
-  @li Docs
-@el [$skeleton, height 20, width fill]
+  @text [$truncate, max-width 200] A long title that gets cut off
 ```
 
 ## Attributes

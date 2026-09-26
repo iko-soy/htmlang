@@ -948,7 +948,7 @@ mod tests {
             let label = format!("@{}", name);
             assert!(elements.iter().any(|i| i.label == label), "missing {}", label);
         }
-        assert!(elements.iter().any(|i| i.label == "@badge"));
+        assert!(elements.iter().any(|i| i.label == "@spacer"));
         let directives = directive_completions(range);
         for name in htmlang::parser::known_directives() {
             assert!(directives.iter().any(|i| i.label == format!("@{}", name)));

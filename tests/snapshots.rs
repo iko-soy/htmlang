@@ -2488,38 +2488,7 @@ fn element_spacer() {
 
 // --- Badge element ---
 
-#[test]
-fn element_badge() {
-    let output = compile("@page T\n@badge [background red, color white] 3");
-    assert!(
-        output.contains("<span"),
-        "badge renders as span: {}",
-        output
-    );
-    assert!(
-        output.contains("border-radius:9999px"),
-        "badge should be pill-shaped: {}",
-        output
-    );
-    assert!(output.contains("3"), "badge content: {}", output);
-}
-
 // --- Tooltip element ---
-
-#[test]
-fn element_tooltip() {
-    let output = compile("@page T\n@tooltip [tip Hover for info]\n  @text Help");
-    assert!(
-        output.contains("title=\"Hover for info\""),
-        "tooltip should have title attr: {}",
-        output
-    );
-    assert!(
-        output.contains("cursor:help"),
-        "tooltip should have cursor:help: {}",
-        output
-    );
-}
 
 // --- @each step ---
 
@@ -2695,7 +2664,7 @@ fn no_warning_direction_attr() {
 
 #[test]
 fn no_warning_new_elements() {
-    // Grid, stack, spacer, badge, tooltip should all parse without errors
+    // Grid and spacer parse without errors
     let diags = parse_diagnostics("@grid\n  @text A");
     assert!(
         !diags
@@ -2712,22 +2681,6 @@ fn no_warning_new_elements() {
         "spacer should parse, got: {:?}",
         diags
     );
-    let diags = parse_diagnostics("@badge [background red] 5");
-    assert!(
-        !diags
-            .iter()
-            .any(|d| d.severity == htmlang::parser::Severity::Error),
-        "badge should parse, got: {:?}",
-        diags
-    );
-    let diags = parse_diagnostics("@tooltip Help text\n  @text Hover");
-    assert!(
-        !diags
-            .iter()
-            .any(|d| d.severity == htmlang::parser::Severity::Error),
-        "tooltip should parse, got: {:?}",
-        diags
-    );
 }
 
 // --- New feature tests ---
@@ -2735,11 +2688,6 @@ fn no_warning_new_elements() {
 #[test]
 fn snapshot_variable_filters() {
     snapshot_test("variable_filters");
-}
-
-#[test]
-fn snapshot_new_elements_5() {
-    snapshot_test("new_elements_5");
 }
 
 #[test]
@@ -2805,49 +2753,6 @@ fn test_variable_filters() {
 }
 
 #[test]
-fn test_new_elements_parse() {
-    // Avatar
-    let diags = parse_diagnostics("@avatar [width 48, height 48]\n  @text AB");
-    assert!(
-        !diags
-            .iter()
-            .any(|d| d.severity == htmlang::parser::Severity::Error),
-        "avatar: {:?}",
-        diags
-    );
-
-    // Carousel
-    let diags = parse_diagnostics("@carousel [gap 16]\n  @el Slide 1");
-    assert!(
-        !diags
-            .iter()
-            .any(|d| d.severity == htmlang::parser::Severity::Error),
-        "carousel: {:?}",
-        diags
-    );
-
-    // Chip
-    let diags = parse_diagnostics("@chip [background #eee] Tag");
-    assert!(
-        !diags
-            .iter()
-            .any(|d| d.severity == htmlang::parser::Severity::Error),
-        "chip: {:?}",
-        diags
-    );
-
-    // Tag
-    let diags = parse_diagnostics("@tag [color blue] v1.0");
-    assert!(
-        !diags
-            .iter()
-            .any(|d| d.severity == htmlang::parser::Severity::Error),
-        "tag: {:?}",
-        diags
-    );
-}
-
-#[test]
 fn test_css_shorthands_output() {
     let result = htmlang::parser::parse("@text [$truncate] Hello");
     let html = htmlang::codegen::generate(&result.document);
@@ -2885,27 +2790,6 @@ fn test_css_shorthands_output() {
         html
     );
 
-    let result = htmlang::parser::parse("@el [$no-scrollbar] Content");
-    let html = htmlang::codegen::generate(&result.document);
-    assert!(
-        html.contains("scrollbar-width:none"),
-        "no-scrollbar should work, got: {}",
-        html
-    );
-
-    let result = htmlang::parser::parse("@el [$skeleton, width 100, height 20] Content");
-    let html = htmlang::codegen::generate(&result.document);
-    assert!(
-        html.contains("hl-skeleton"),
-        "skeleton should add animation, got: {}",
-        html
-    );
-    assert!(
-        html.contains("@keyframes hl-skeleton"),
-        "skeleton should add keyframes, got: {}",
-        html
-    );
-
     // `gradient` became plain CSS: the compiler points to the replacement.
     let result = htmlang::parser::parse("@el [gradient #fff #000] Content");
     assert!(
@@ -2915,17 +2799,6 @@ fn test_css_shorthands_output() {
             .any(|d| d.message.contains("linear-gradient") && d.message.contains("upgrade")),
         "gradient should point to linear-gradient: {:?}",
         result.diagnostics
-    );
-}
-
-#[test]
-fn test_carousel_children_snap() {
-    let result = htmlang::parser::parse("@carousel\n  @el A\n  @el B");
-    let html = htmlang::codegen::generate(&result.document);
-    assert!(
-        html.contains("scroll-snap-align:start"),
-        "carousel children should have snap-align, got: {}",
-        html
     );
 }
 
@@ -3307,11 +3180,6 @@ fn snapshot_script_element() {
 }
 
 #[test]
-fn snapshot_breadcrumb() {
-    snapshot_test("breadcrumb");
-}
-
-#[test]
 fn snapshot_new_directives() {
     snapshot_test("new_directives");
 }
@@ -3366,14 +3234,6 @@ fn address_element() {
 fn search_element() {
     let output = compile("@search\n  @input [type=search]");
     assert!(output.contains("<search>"), "search: {}", output);
-}
-
-#[test]
-fn breadcrumb_generates_nav_ol() {
-    let output = compile("@breadcrumb\n  @li > @text Home\n  @li About");
-    assert!(output.contains("aria-label=\"breadcrumb\""), "nav: {}", output);
-    assert!(output.contains("<ol class="), "ol: {}", output);
-    assert!(output.contains("<li class="), "li: {}", output);
 }
 
 #[test]
@@ -4819,13 +4679,12 @@ fn children_prefix_styles_direct_children() {
 
 #[test]
 fn standard_library_components_compile_cleanly() {
-    let src = "@badge [background red] 3\n@tag v2\n@chip Rust\n@avatar\n  AB\n@spacer\n@tooltip [tip More] Hover\n@carousel\n  @el A\n@breadcrumb\n  @li Home\n@el [$skeleton]\n@el [$no-scrollbar]";
+    let src = "@row\n  @text A\n  @spacer\n  @text [$truncate] B";
     let diags = parse_diagnostics(src);
     assert!(diags.is_empty(), "standard library produced diagnostics: {:?}", diags);
     let output = compile(src);
-    assert!(output.contains("<span class=\"a\">3</span>"), "{}", output);
-    assert!(output.contains("title=\"More\""), "{}", output);
-    assert!(output.contains("@keyframes hl-skeleton"), "{}", output);
+    assert!(output.contains("flex:1"), "{}", output);
+    assert!(output.contains("text-overflow:ellipsis"), "{}", output);
 }
 
 #[test]

@@ -492,7 +492,7 @@ fn rewrite_block(
     }
 
     // @tooltip TEXT (text shown and used as the hover tip) →
-    // @tooltip [tip TEXT] TEXT
+    // @text [title=TEXT] TEXT
     if let Some(rest) = trimmed.strip_prefix("@tooltip ")
         && !user_defined.contains(&"tooltip")
         && !has_attr_key(rest, "tip")
@@ -508,39 +508,11 @@ fn rewrite_block(
             return None;
         }
         let attrs = match attrs {
-            Some(a) if !a.trim().is_empty() => format!("[tip {}, {}]", text, a.trim()),
-            _ => format!("[tip {}]", text),
+            Some(a) if !a.trim().is_empty() => format!("[title={}, {}]", text, a.trim()),
+            _ => format!("[title={}]", text),
         };
-        let mut out = vec![format!("{pad}@tooltip {} {}", attrs, text)];
+        let mut out = vec![format!("{pad}@text {} {}", attrs, text)];
         out.extend(body.iter().map(|l| l.to_string()));
-        return Some(Block { lines: out, end });
-    }
-
-    // @breadcrumb: each crumb is now an explicit @li
-    if (trimmed == "@breadcrumb" || trimmed.starts_with("@breadcrumb "))
-        && !user_defined.contains(&"breadcrumb")
-    {
-        let child_indent = body.iter().find(|l| !l.trim().is_empty()).map(|l| indent_of(l));
-        let is_item = |t: &str| t == "@li" || t.starts_with("@li ") || t.starts_with("@li[");
-        if body.iter().all(|l| {
-            l.trim().is_empty() || Some(indent_of(l)) != child_indent || is_item(l.trim())
-        }) {
-            return None;
-        }
-        let mut out = vec![line.to_string()];
-        for l in body {
-            let t = l.trim();
-            if Some(indent_of(l)) == child_indent && !t.is_empty() && !is_item(t) {
-                let wrapped = if t.starts_with('@') {
-                    format!("@li > {}", t)
-                } else {
-                    format!("@li {}", t)
-                };
-                out.push(format!("{}{}", " ".repeat(indent_of(l)), wrapped));
-            } else {
-                out.push(l.to_string());
-            }
-        }
         return Some(Block { lines: out, end });
     }
 
@@ -1190,7 +1162,8 @@ const HTML_ATTRIBUTES: &[&str] = &[
     "step", "tabindex", "target", "title", "translate", "type", "value",
 ];
 
-/// Standard-library components, which forward attributes to an element.
+/// Components the standard library had, which forwarded attributes to an
+/// element.
 const STD_COMPONENTS: &[&str] = &[
     "badge", "tag", "chip", "avatar", "spacer", "tooltip", "carousel", "breadcrumb",
 ];
@@ -1322,7 +1295,8 @@ fn rewrite_attr_list(list: &str, element_attrs: bool) -> String {
         let body = body.strip_prefix("...$").map_or(body.to_string(), |b| format!("${b}"));
         // Built-in style attributes that became standard-library bundles
         let body = match body.trim_end() {
-            "skeleton" | "no-scrollbar" | "truncate" => format!("${}", body),
+            "truncate" => format!("${}", body),
+            "no-scrollbar" => "scrollbar-width none".to_string(),
             "grid" => "display grid".to_string(),
             _ => body,
         };
@@ -1764,20 +1738,15 @@ mod tests {
     #[test]
     fn standard_library_migrations() {
         assert_eq!(
-            up("@el [skeleton, height 20]\n@el [no-scrollbar]"),
-            "@el [$skeleton, height 20]\n@el [$no-scrollbar]"
+            up("@el [truncate, height 20]\n@el [no-scrollbar]"),
+            "@el [$truncate, height 20]\n@el [scrollbar-width none]"
         );
         assert_eq!(
             up("@el [gradient #f00 #00f 45deg, padding 4]"),
             "@el [background linear-gradient(45deg,#f00,#00f), padding 4]"
         );
-        assert_eq!(up("@tooltip Hover me"), "@tooltip [tip Hover me] Hover me");
-        assert_eq!(up("@tooltip A tooltip text"), "@tooltip [tip A tooltip text] A tooltip text");
+        assert_eq!(up("@tooltip Hover me"), "@text [title=Hover me] Hover me");
         assert_eq!(up("@tooltip [tip X] Y"), "@tooltip [tip X] Y");
-        assert_eq!(
-            up("@breadcrumb\n  @link / Home\n  Current"),
-            "@breadcrumb\n  @li > @link / Home\n  @li Current"
-        );
     }
 
     #[test]

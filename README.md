@@ -107,8 +107,7 @@ Prefixes apply a style conditionally:
 ```
 
 Functions are used like elements: extra attributes (here `padding 12`) style
-their root element. A small standard library (`@badge`, `@chip`, `@tooltip`,
-`@carousel`, `@breadcrumb`, ...) is written the same way.
+their root element.
 
 Control flow runs at compile time:
 

@@ -1051,7 +1051,7 @@ impl Evaluator {
             }
             caller_children.push(child);
         }
-        // Text after the call, as in `@badge [color red] New`, is content:
+        // Text after the call, as in `@card [color red] New`, is content:
         // it goes first among the caller's children.
         let trailing_text = trailing_text.trim();
         if !trailing_text.is_empty() {
@@ -1085,7 +1085,7 @@ impl Evaluator {
         }
         // Arguments that aren't parameters are attributes for the
         // function's root element, so a function can be styled like an
-        // element: `@badge [background red] New`.
+        // element: `@card [background red] New`.
         let forwarded: Vec<Attribute> = args
             .iter()
             .zip(&consumed)
@@ -1500,8 +1500,8 @@ const REMOVED_SYNTAX: &[(&str, &str)] = &[
 /// Attributes that became standard-library bundles or plain CSS.
 fn removed_attribute_hint(name: &str) -> Option<&'static str> {
     match name {
-        "skeleton" => Some("use the `$skeleton` bundle"),
-        "no-scrollbar" => Some("use the `$no-scrollbar` bundle"),
+        "skeleton" => Some("write the animation in `@style`"),
+        "no-scrollbar" => Some("use `scrollbar-width none`"),
         "gradient" => Some("use `background linear-gradient(...)`"),
         "animate" => Some("use `animation`"),
         "inset-area" => Some("use `position-area`"),

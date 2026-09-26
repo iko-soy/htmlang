@@ -127,26 +127,18 @@ pub(crate) const ATTRIBUTES: &[Doc] = &[
     doc("grid-rows", "Number of equal grid rows.", "grid-rows 2"),
     doc("col-span", "Columns a grid child spans.", "col-span 2"),
     doc("row-span", "Rows a grid child spans.", "row-span 2"),
-    doc("line-height", "Line height; integers of 2 or more are px.", "line-height 1.5"),
+    doc("line-height", "Line height; a bare number is a multiplier of the font size.", "line-height 1.5"),
     doc("inline", "On `@image`: embed the file (SVG markup, or other images as base64) in the page.", "inline"),
 ];
 
 /// Standard-library components (`std.hl`), used like elements.
 pub(crate) const COMPONENTS: &[Doc] = &[
-    doc("badge", "Small pill for counts and statuses.", "@badge [background red, color white] 3"),
-    doc("tag", "Label with slightly rounded corners.", "@tag v2.0"),
-    doc("chip", "Outlined, fully rounded label.", "@chip Rust"),
-    doc("avatar", "Circular frame for an image or initials.", "@avatar [width 48, height 48]\n  AB"),
     doc("spacer", "Takes up the remaining space in a row or column.", "@spacer"),
-    doc("tooltip", "Text that shows `tip` when hovered.", "@tooltip [tip More info] Hover me"),
-    doc("carousel", "Horizontally scrolling row that snaps to each child.", "@carousel [spacing 16]\n  @el Slide 1"),
-    doc("breadcrumb", "Breadcrumb trail of `@li`s.", "@breadcrumb\n  @li > @link / Home\n  @li Docs"),
 ];
 
 /// Standard-library attribute bundles, used as `[$name]`.
 pub(crate) const BUNDLES: &[Doc] = &[
-    doc("skeleton", "Loading placeholder with a shimmer animation.", "@el [$skeleton, height 20]"),
-    doc("no-scrollbar", "Hides scrollbars while keeping scrolling.", "@el [$no-scrollbar, overflow-x auto]"),
+    doc("truncate", "Cuts text off at one line with an ellipsis.", "@text [$truncate] A long title"),
 ];
 
 fn find(table: &'static [Doc], name: &str) -> Option<&'static Doc> {
@@ -351,8 +343,8 @@ mod tests {
         assert!(hover("required").unwrap().contains("Boolean"));
         assert!(hover("hover:color").unwrap().contains(":hover"));
         assert!(hover("md:").unwrap().contains("viewport"));
-        assert!(hover("@badge").unwrap().contains("standard library"));
-        assert!(hover("$skeleton").unwrap().contains("bundle"));
+        assert!(hover("@spacer").unwrap().contains("standard library"));
+        assert!(hover("$truncate").unwrap().contains("bundle"));
         assert!(hover("@nav").unwrap().contains("<nav>"));
     }
 }

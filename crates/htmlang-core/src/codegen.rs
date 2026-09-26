@@ -837,16 +837,6 @@ fn build_element_css(doc: &Document, styles: &StyleCollector, dev: bool) -> Stri
 
     element_css.push_str(&styles_css);
 
-
-    // Keyframes for the standard library's `$skeleton` bundle, when used
-    if element_css.contains("hl-skeleton") {
-        if dev {
-            element_css.push_str("@keyframes hl-skeleton {\n  0% { background-position: 200% 0; }\n  100% { background-position: -200% 0; }\n}\n");
-        } else {
-            element_css.push_str("@keyframes hl-skeleton{0%{background-position:200% 0}100%{background-position:-200% 0}}");
-        }
-    }
-
     // @style blocks (custom CSS)
     for block in &doc.custom_css {
         if dev {
