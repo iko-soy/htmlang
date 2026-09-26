@@ -1265,7 +1265,8 @@ The generated rules live in `@layer htmlang`, after a small reset in
 and makes `<body>` a column that fills the window. A fragment (a file
 without `@page`, or `--partial` output) goes into a page it doesn't own, so
 its reset touches only htmlang's own elements (those with an `hl-` class),
-which get `box-sizing: border-box`, and nothing else. In both, an element
+which get `box-sizing: border-box`; no other element on the page is
+touched. In both, an element
 htmlang lays out stays hidden while it has `hidden`, while an `@dialog` is
 closed, and while a popover isn't showing, even though its generated
 `display` would otherwise beat the browser's `display: none`. A page with

@@ -3,7 +3,7 @@
 @el [aspect-ratio 16/9, width 400, background #eee]
   @text Widescreen
 
-@el [outline 2 red, padding 10]
+@el [outline 2 solid red, padding 10]
   @text Outlined
 
 @el [padding-inline 20, padding-block 10]
