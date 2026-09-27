@@ -1314,7 +1314,7 @@ so a length takes its unit (`@let --radius 8px`). A token is read one way,
 redefine it. It is not a variable: `$--name` is an error that says to
 write `var(--name)`. Since `:root` is one place for the whole page, a
 `@let --name` goes at the top level of the file, once: inside an element,
-a loop or a function's body it is an error (set the property on an
+an `@if`, a loop or a function's body it is an error (set the property on an
 element with `[--name value]` instead), and declaring it again warns.
 
 A colour variant of a token is CSS too, so it follows the token wherever
