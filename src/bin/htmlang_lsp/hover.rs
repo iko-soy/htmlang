@@ -269,6 +269,17 @@ mod tests {
     }
 
     #[test]
+    fn an_element_prefix_is_part_of_the_word() {
+        let text = "@table [md:@td:padding 8, @link:hover:color red] x\n";
+        let padding = hover_text(text, 0, 17);
+        assert!(padding.contains("every `<td>` inside"), "{}", padding);
+        assert!(padding.contains("`md`"), "{}", padding);
+        let color = hover_text(text, 0, 40);
+        assert!(color.contains("every `<a>` inside"), "{}", color);
+        assert!(color.contains("`:hover`"), "{}", color);
+    }
+
+    #[test]
     fn a_whole_attribute_if_has_a_hover() {
         let text = "@el [padding 4, if($on, [color red])] x\n@el [width if(media(print): 1px)] y\n";
         assert!(hover_text(text, 0, 17).contains("Attributes chosen by a condition"));

@@ -687,7 +687,7 @@ the HTML `@markdown` writes, and the rows a loop writes.
   get 8.
 - **It styles what is inside, not the element itself.** `@ul
   [@ul:padding-inline-start 16]` indents the lists inside the list, not
-  its own items.
+  the list itself.
 
 `children:` and an element prefix answer different questions:
 `children:` is for the direct children, whatever they are, as the parent

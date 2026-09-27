@@ -1916,3 +1916,29 @@ fn a_custom_property_starting_a_line_of_a_list_is_not_dropped() {
     let html = codegen::generate(&result.document);
     assert!(html.contains("--surface:white;"), "{}", html);
 }
+
+#[test]
+fn a_caller_s_attributes_win_over_a_function_s_scoped_style() {
+    // The scoped @style was unlayered, so its `& { padding }` beat the
+    // caller's `[padding 2]`, and it was written for a function that was
+    // never called
+    let function = "@let @box\n  @style\n    & { padding: 40px; }\n  @el x\n";
+    let out = compile(&format!("{}@box [padding 2]\n", function));
+    let order = "@layer hl-reset,hl-kind,hl-inside,htmlang;";
+    assert!(out.contains(order), "{}", out);
+    let scoped = out.find("@layer hl-inside{.hl-fn-box {").expect(&out);
+    let own = out.find("@layer htmlang{").expect(&out);
+    assert!(
+        scoped < own && out[own..].contains("padding:2px"),
+        "{}",
+        out
+    );
+    // Nothing after the layers: no unlayered copy of the scoped rules
+    assert_eq!(out.matches("padding: 40px").count(), 1, "{}", out);
+    // Called only where the page doesn't go: not written
+    let out = compile(&format!(
+        "{}@let on false\n@if $on\n  @box\n@text y\n",
+        function
+    ));
+    assert!(!out.contains("hl-fn-box"), "{}", out);
+}

@@ -4117,6 +4117,20 @@ fn check_element_prefixes(
                 Some(_) => (None, true),
                 None => (None, false),
             };
+            // `@each:`, `@markdown:`: a directive, which is no element
+            if crate::ast::directive(name).is_some() {
+                return fail(
+                    ctx,
+                    code::UNKNOWN_PREFIX,
+                    format!(
+                        "unknown element @{} in '{}': @{} is a directive, and an element \
+                         prefix names an element with an HTML tag of its own, such as `@td:`",
+                        name, prefix, name
+                    ),
+                    prefix,
+                    None,
+                );
+            }
             // `@div:`, `@span:`: several elements write it
             if shared {
                 return fail(
@@ -4630,6 +4644,27 @@ fn unknown_attribute(
     error: bool,
     ctx: &mut ParseContext,
 ) -> bool {
+    // `@td padding 8`: an element prefix without its colon
+    if let Some(name) = base.strip_prefix('@')
+        && crate::ast::ElementKind::from_name(name).is_some()
+    {
+        let example = match attr.value.as_deref() {
+            Some(value) => format!("{}:{}", attr.key, value.trim()),
+            None => format!("{}:padding 8", attr.key),
+        };
+        let diagnostic = Diagnostic::error(
+            code::UNKNOWN_ATTRIBUTE,
+            line,
+            format!(
+                "unknown attribute '{}': an element prefix ends in a colon, as in `{}`",
+                attr.key, example
+            ),
+        )
+        .subject(base);
+        let diagnostic = at_attribute(diagnostic, column, ctx);
+        ctx.diagnostics.push(diagnostic);
+        return false;
+    }
     // `hover:title x`: an HTML attribute's name is not a suggestion for
     // itself
     let suggestion =
@@ -5722,18 +5757,32 @@ fn validate_tree(
                 }
             }
 
-            // Contrast ratio check for hex color pairs
-            {
-                let bg_color = elem
-                    .attrs
-                    .iter()
-                    .find(|a| crate::vocab::base_attribute(&a.key) == "background")
-                    .and_then(|a| a.value.as_deref());
-                let fg_color = elem
-                    .attrs
-                    .iter()
-                    .find(|a| crate::vocab::base_attribute(&a.key) == "color")
-                    .and_then(|a| a.value.as_deref());
+            // Contrast ratio check for hex color pairs, each pair on the
+            // same elements: the element's own, or those an element prefix
+            // (`@td:`) picks out inside it
+            let inside = |key: &str| {
+                crate::vocab::split_prefixes(key)
+                    .0
+                    .into_iter()
+                    .find_map(crate::vocab::element_prefix)
+                    .map(str::to_string)
+            };
+            let mut targets: Vec<Option<String>> = Vec::new();
+            for attr in elem.attrs.iter().filter(|a| !a.html) {
+                let target = inside(&attr.key);
+                if !targets.contains(&target) {
+                    targets.push(target);
+                }
+            }
+            for target in targets {
+                let color = |property: &str| {
+                    elem.attrs
+                        .iter()
+                        .filter(|a| !a.html && inside(&a.key) == target)
+                        .find(|a| crate::vocab::base_attribute(&a.key) == property)
+                        .and_then(|a| a.value.as_deref())
+                };
+                let (bg_color, fg_color) = (color("background"), color("color"));
                 if let (Some(bg), Some(fg)) = (bg_color, fg_color)
                     && let (Some(bg_rgb), Some(fg_rgb)) = (
                         crate::expr::parse_hex_rgb(bg),

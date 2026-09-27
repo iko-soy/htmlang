@@ -2624,6 +2624,33 @@ fn no_warning_good_contrast() {
     );
 }
 
+#[test]
+fn contrast_is_checked_on_the_same_elements() {
+    let low = |src: &str| {
+        parse_diagnostics(src)
+            .iter()
+            .filter(|d| d.message.contains("low contrast ratio"))
+            .count()
+    };
+    // The cells' colour on the cells' background
+    assert_eq!(
+        low("@table [@td:background #000000, @td:color #111111]\n  @tr\n    @td x"),
+        1
+    );
+    // Not the cells' colour against the table's background, nor one kind
+    // of cell's against another's
+    assert_eq!(
+        low("@table [background #ffffff, @td:color #fefefe]\n  @tr\n    @td x"),
+        0
+    );
+    assert_eq!(
+        low(
+            "@table [@th:background #000000, @td:color #111111, color #000000, background #ffffff]\n  @tr\n    @td x"
+        ),
+        0
+    );
+}
+
 // --- no warnings for new features ---
 
 #[test]
@@ -8493,6 +8520,20 @@ fn an_element_prefix_names_an_element_with_a_tag_of_its_own() {
             .any(|d| d.suggestion.as_deref() == Some("@td:before:content")),
         "{:?}",
         diagnostics
+    );
+    // A directive is no element, and gets no suggestion
+    let diagnostics = parse_diagnostics("@article [@markdown:color red] x");
+    let found = diagnostics
+        .iter()
+        .find(|d| d.code == "unknown-prefix")
+        .expect("an error");
+    assert!(found.message.contains("is a directive"), "{:?}", found);
+    assert_eq!(found.suggestion, None);
+    // Without its colon
+    check(
+        "@table [hover:@td padding 8] x",
+        "unknown-attribute",
+        "`hover:@td:padding 8`",
     );
     // Checked in code that doesn't run, too
     check(

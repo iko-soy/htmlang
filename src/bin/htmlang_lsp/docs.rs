@@ -122,7 +122,7 @@ pub(crate) const DIRECTIVES: &[Doc] = &[
     doc("include", "Inserts another `.hl` file here, with its definitions.", "@include header.hl"),
     doc("raw", "Pastes HTML into the output verbatim: the rest of the line, or an indented block (not both). It takes no attributes.", "@raw <hr class=\"fancy\">\n@raw\n  <div class=\"widget\"></div>"),
     doc("markdown", "Markdown, converted to HTML: a file named on its line, or an indented block kept verbatim (not both). It takes no attributes.", "@markdown notes.md\n@markdown\n  # Title"),
-    doc("style", "Raw CSS, which overrides generated styles: the rest of the line, or an indented block kept verbatim (not both). It takes no attributes.", "@style .note { color: gray; }\n@style\n  @keyframes fade { from { opacity: 0; } }"),
+    doc("style", "Raw CSS, which overrides generated styles: the rest of the line, or an indented block kept verbatim (not both). It takes no attributes. At the top of a function body it is scoped to the function's root (`&`), written once the function is called, and an element's own attributes win over it.", "@style .note { color: gray; }\n@style\n  @keyframes fade { from { opacity: 0; } }"),
     doc("head", "Raw HTML added to `<head>`: the rest of the line, or an indented block kept verbatim (not both). It takes no attributes.", "@head <link rel=\"icon\" href=\"f.ico\">"),
     doc("meta", "A `<meta>` tag; `og:` names become Open Graph tags.", "@meta description A small site"),
     doc("if", "Renders its body when the condition holds; `@else if` / `@else` follow.", "@if $count > 2 and not $hidden\n  @text Many"),
@@ -422,14 +422,21 @@ pub(crate) fn prefix_selector(prefix: &str) -> Option<String> {
         );
     }
     if let Some(name) = vocab::element_prefix(prefix) {
-        let tag = ElementKind::from_name(name).and_then(|kind| kind.own_tag());
-        return Some(match tag {
+        let kind = ElementKind::from_name(name);
+        return Some(match kind.as_ref().and_then(|kind| kind.own_tag()) {
             Some(tag) => format!(
-                "Styles every `<{}>` inside this element, at any depth, with CSS properties                  (`@scope`): the nearest element that styles it wins, and its own attributes                  win over both.",
+                "Styles every `<{}>` inside this element, at any depth, with CSS \
+                 properties (`@scope`): where two elements around it both style \
+                 it, the nearest wins, and its own attributes win over both.",
                 tag
             ),
-            None => format!(
+            None if kind.is_some() => format!(
                 "`@{}` has no HTML tag of its own, so an element prefix can't pick it out.",
+                name
+            ),
+            None => format!(
+                "`@{}` isn't an element: an element prefix names an element with an HTML tag \
+                 of its own, such as `@td:`.",
                 name
             ),
         });
@@ -576,6 +583,8 @@ mod tests {
         );
         assert!(hover("@link:").unwrap().contains("every `<a>`"));
         assert!(hover("@el:").unwrap().contains("no HTML tag of its own"));
+        assert!(!inside.contains("  "), "{inside}");
+        assert!(hover("@zzz:").unwrap().contains("isn't an element"));
         assert!(hover("md:").unwrap().contains("viewport"));
         let chain = hover("md:hover:").unwrap();
         assert!(

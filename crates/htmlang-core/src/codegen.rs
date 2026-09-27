@@ -258,8 +258,9 @@ struct StyleEntry {
     class_name: String,
     /// The defaults of the element's kind (its layout, a heading's
     /// `margin:0`, ...), less what its own attributes set. They are written
-    /// as `:where(.hl-a)`, with no specificity, so a parent's `children:`
-    /// styles win over them, as its attributes win over those.
+    /// as `:where(.hl-a)` in the layer `hl-kind`, so an element prefix
+    /// around it (`@h2:`), its parent's `children:` styles and its own
+    /// attributes, all in later layers, win over them.
     defaults: String,
     /// The element's rules: under each condition, its declarations, in the
     /// order they are written
