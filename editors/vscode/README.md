@@ -30,39 +30,50 @@ Syntax highlighting, snippets, and language server support for
   `dir=`, `class=` and `favicon` first), the custom properties the file
   names (`--surface`, and `dark:--surface` after a prefix, and inside
   `var(`, where a token is read), colour variants after a colour property
-  (`color-mix()`, `rgb(from)`), prefixes (CSS's
-  pseudo-classes and pseudo-elements, one with an argument placing the
+  (`color-mix()`, `rgb(from)`), prefixes (the CSS
+  pseudo-classes and pseudo-elements htmlang knows, one with an argument placing the
   cursor between its parentheses, as `nth-child(|):`; and
   after one, those that can follow it, as `md:hover:`; after a
   pseudo-element such as `before:`, only media, width and container
   prefixes; after `@`, the element prefixes, `@td:`, of the elements with
-  an HTML tag of their own, and after one, CSS properties only), only
-  styles inside a prefixed group (`md:[...]`), `if()` (and attributes inside its branches),
+  an HTML tag of their own, and after one, CSS properties only), bundles
+  after prefixes (`md:$card`), only styles inside a prefixed group
+  (`md:[...]`), `if()` (and attributes inside its branches),
   the variables visible where you type (definitions above in the block and
   the blocks around it, `@each` variables and a function's parameters),
   functions and the parameters a function call hasn't passed yet, the slot names of a call's `@slot`
-  blocks, and elements and functions inside `{@...}` in text. It triggers on `@`, `$`, `[` and `,`.
+  blocks, and elements and functions inside `{@...}` in text. Only what
+  the element takes is offered: `inline` on `@image`, nothing on
+  `@fragment`, HTML attributes on `@script`; and nothing for the new name
+  after `@let`. It triggers on `@`, `$`, `[` and `,`.
 - **Hover** documentation for elements (with their layout: column, row,
   grid, text, native or void), directives, attributes (CSS
   properties link to MDN), prefixes and stacks of them (`md:hover:`, `@td:`) and `if()`, function signatures with their slots and
-  whether they take content, variable values, and color swatches.
+  whether they take content, a parameter's name where it is declared or
+  passed (required, or its default), variable values, and color swatches.
 - **Navigation**: go to definition (the definition a name means at that
   line), find references and rename for
-  `$variables`, bundles and `@let @name` functions. `@include`, `@markdown` and
+  `$variables`, bundles, `@let @name` functions and custom properties
+  (`@let --brand`, `var(--brand)`). Renaming a parameter renames it at
+  every call too (`@card [title Hi]`). `@include`, `@markdown` and
   `@data` file paths are links.
 - **Code actions**: fixes keyed on diagnostic codes (replace a misspelled
   name, prefix (`@tdd:` as `@td:`, `@a:` as `@link:`) or slot name, put a pseudo-element's prefix last
-  (`before:hover:` as `hover:before:`), replace `@a` with `@link`, write a slot name as one word, add a missing `alt` or `type`, include the file that defines an
+  (`before:hover:` as `hover:before:`), replace `@a` with `@link`, write a slot name as one word, add a missing `alt=` or `type=text`, write a
+  style given as an HTML attribute (`padding=4`) as `padding 4`, use a
+  bundle named without its `$` as `$card`, include the file that defines an
   unknown function, write a quoted font stack as `A\, B`, write `$--x` as
   `var(--x)`, drop the `$` from
   `@let $x` and add it to `@each x`, pass a parameter as `name value`
   instead of `name=value`), removing unused
   definitions, and extracting a selection
-  into a `@let` function or attribute bundle.
+  into a `@let` function or attribute bundle, placed above the top-level
+  line it comes from so it sees the same definitions (a loop variable or
+  parameter the lines read becomes a parameter of the function).
 - **Outline and symbols**: the document outline, and `Ctrl-T` workspace
   search across every `.hl` file.
 - **Formatting**: `Format Document` and `Format Selection` use the same
-  formatter as `htmlang fmt`.
+  formatter as `htmlang fmt`; a formatted selection keeps its nesting.
 - **Also**: reference counts as code lenses on each `@let`, variable values
   as inlay hints, a color picker, folding, semantic tokens, signature help for
   function calls, and linked editing of a variable's uses.

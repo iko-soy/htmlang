@@ -22,7 +22,7 @@ pub(crate) fn hover_at(text: &str, position: Position) -> Option<Hover> {
     } else if let Some(fn_name) = word.strip_prefix('@') {
         hover_user_fn(text, fn_name).or_else(|| docs::hover(&word))
     } else {
-        docs::hover(&word)
+        hover_parameter(text, position, &word).or_else(|| docs::hover(&word))
     }?;
 
     Some(Hover {
@@ -187,6 +187,57 @@ fn hover_variable(text: &str, name: &str, line: u32) -> Option<String> {
         .map(|d| format!("**${}** \u{2014} Parameter of `@{}`", name, d.name))
 }
 
+/// A parameter's name where it is declared (`@let @card [title]`) or
+/// passed (`@card [title Hi]`): what it is, and its default.
+fn hover_parameter(text: &str, position: Position, word: &str) -> Option<String> {
+    let defs = tree::definitions(text);
+    let describe = |function: &str, param: &tree::Param| {
+        let given = match &param.default {
+            Some(default) => format!("default: {}", default),
+            None => "required".to_string(),
+        };
+        format!(
+            "**{}** — parameter of `@{}` ({}), passed as `{} VALUE`",
+            param.name, function, given, param.name
+        )
+    };
+    // Declared
+    for def in defs.iter().filter(|d| d.kind == DefinitionKind::Function) {
+        if let Some(param) = def.params.iter().find(|p| {
+            p.name == word
+                && p.name_range.start.line == position.line
+                && p.name_range.start.character <= position.character
+                && position.character <= p.name_range.end.character
+        }) {
+            return Some(describe(&def.name, param));
+        }
+    }
+    // Passed at a call
+    let parsed = htmlang::syntax::parse(text);
+    let node = tree::node_at(&parsed, position.line)?;
+    for head in node.heads() {
+        let Some(def) = defs
+            .iter()
+            .find(|d| d.kind == DefinitionKind::Function && d.name == head.name)
+        else {
+            continue;
+        };
+        let Some(list) = &head.attrs else {
+            continue;
+        };
+        for attr in list.attrs.iter().filter(|a| a.key == word && !a.html) {
+            let start = tree::range(attr.span).start;
+            let on_it = start.line == position.line
+                && start.character <= position.character
+                && position.character <= start.character + attr.key.len() as u32;
+            if let (true, Some(param)) = (on_it, def.params.iter().find(|p| p.name == word)) {
+                return Some(describe(&def.name, param));
+            }
+        }
+    }
+    None
+}
+
 fn hover_user_fn(text: &str, name: &str) -> Option<String> {
     let def = tree::definitions(text)
         .into_iter()
@@ -247,6 +298,32 @@ fn hover_user_fn(text: &str, name: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_parameter_s_name_is_described_as_a_parameter() {
+        let text = "@let @card [title, tone info]\n  @el [background $tone] $title\n@card [title Hi, tone warm]\n";
+        let at = |line, character| match hover_at(text, Position::new(line, character)) {
+            Some(Hover {
+                contents: HoverContents::Markup(markup),
+                ..
+            }) => markup.value,
+            other => panic!("{:?}", other),
+        };
+        assert!(
+            at(2, 8).contains("parameter of `@card` (required)"),
+            "{}",
+            at(2, 8)
+        );
+        assert!(at(2, 18).contains("(default: info)"), "{}", at(2, 18));
+        assert!(at(0, 13).contains("parameter of `@card`"), "{}", at(0, 13));
+        // Elsewhere, `title` is the HTML attribute
+        let text = "@el [title=x] y\n";
+        let hover = hover_at(text, Position::new(0, 6)).expect("hover");
+        let HoverContents::Markup(markup) = hover.contents else {
+            panic!()
+        };
+        assert!(markup.value.contains("HTML attribute"), "{}", markup.value);
+    }
 
     fn hover_text(text: &str, line: u32, character: u32) -> String {
         match hover_at(text, Position::new(line, character)).map(|h| h.contents) {

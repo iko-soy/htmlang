@@ -674,8 +674,7 @@ impl LanguageServer for Backend {
         }
 
         let selection: String = lines[start_line..=end_line].join("\n");
-        let formatted = htmlang::fmt::format(&selection);
-        let formatted = formatted.trim_end_matches('\n').to_string();
+        let formatted = analysis::format_selection(&lines[start_line..=end_line]);
         if formatted == selection {
             return Ok(None);
         }
@@ -740,12 +739,28 @@ impl LanguageServer for Backend {
         let mut lenses = Vec::with_capacity(defs.len());
         for def in &defs {
             let mut locations: Vec<Location> = Vec::new();
+            // A custom property's reads are `var(--name)` and redefinitions
+            // on elements
+            if def.name.starts_with("--") {
+                locations.extend(
+                    navigation::custom_property_refs(text, &def.name)
+                        .into_iter()
+                        .filter(|range| *range != def.name_range)
+                        .map(|range| Location {
+                            uri: uri.clone(),
+                            range,
+                        }),
+                );
+            }
             let needle = match def.kind {
                 DefinitionKind::Function => format!("@{}", def.name),
                 _ => format!("${}", def.name),
             };
             for (i, line) in lines.iter().enumerate() {
-                if i as u32 == def.line || verbatim.contains(&(i as u32)) {
+                if i as u32 == def.line
+                    || verbatim.contains(&(i as u32))
+                    || def.name.starts_with("--")
+                {
                     continue;
                 }
                 let mut from = 0;

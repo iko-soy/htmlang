@@ -51,9 +51,14 @@ pub(crate) fn document_symbols(text: &str) -> Vec<SymbolInformation> {
                 Some("attribute bundle".to_string()),
             )),
             DefinitionKind::Value => {
+                // A custom property is read as `var(--name)`, not `$--name`
+                let shown = match def.name.starts_with("--") {
+                    true => def.name.clone(),
+                    false => format!("${}", def.name),
+                };
                 if let Some(value) = def.value.filter(|v| !v.is_empty()) {
                     symbols.push(symbol(
-                        format!("${}", def.name),
+                        shown,
                         SymbolKind::VARIABLE,
                         def.line,
                         Some(format!("= {}", value.trim_start_matches("= "))),
@@ -218,11 +223,12 @@ pub(crate) fn code_actions(
             // Rewrite a value as the compiler suggests (a quoted font
             // stack as `A\, B`, a slot name `my footer` as `my-footer`, a
             // prefix `hovr:` as `hover:`, prefixes in order: `before:hover:`
-            // as `hover:before:`).
+            // as `hover:before:`, a style written `padding=4` as `padding 4`).
             code::INVALID_VALUE
             | code::INVALID_SLOT_NAME
             | code::UNKNOWN_PREFIX
-            | code::INVALID_PREFIX => {
+            | code::INVALID_PREFIX
+            | code::HTML_ATTRIBUTE_FORM => {
                 let (Some(subject), Some(suggestion)) = (subject, suggestion) else {
                     continue;
                 };
@@ -330,9 +336,9 @@ pub(crate) fn code_actions(
             // Add a missing attribute to the element the diagnostic is on.
             code::MISSING_ALT | code::MISSING_INPUT_TYPE => {
                 let (element, attr, title) = if code == code::MISSING_ALT {
-                    ("image", "alt", "Add alt attribute")
+                    ("image", "alt=", "Add alt attribute")
                 } else {
-                    ("input", "type text", "Add type=\"text\" attribute")
+                    ("input", "type=text", "Add type=text attribute")
                 };
                 let Some(node) = lsp_tree::node_at(tree, line) else {
                     continue;
@@ -380,7 +386,7 @@ pub(crate) fn code_actions(
         }
     }
 
-    actions.extend(extract_component(&lines, selection, uri));
+    actions.extend(extract_component(tree, &lines, selection, uri));
     actions.extend(extract_bundle(tree, selection, uri));
     actions
 }
@@ -457,8 +463,57 @@ fn auto_imports(name: &str, tree: &Tree, diag: &Diagnostic, uri: &Url) -> Vec<Co
     actions
 }
 
-/// Refactoring: extract the selected lines into a `@let` function.
-fn extract_component(lines: &[&str], selection: &Range, uri: &Url) -> Option<CodeActionOrCommand> {
+/// Where a definition extracted from `line` (0-based) goes: on the line of
+/// the top-level node that holds it, so it sees every definition above
+/// that node, as the code it came from did (a function or bundle sees
+/// only what is defined above it).
+fn extraction_point(tree: &Tree, line: usize) -> usize {
+    tree.nodes
+        .iter()
+        .filter(|node| !matches!(node.kind, NodeKind::Blank))
+        .take_while(|node| node.span.line <= line + 1)
+        .last()
+        .map_or(0, |node| node.span.line - 1)
+}
+
+/// The names `text` reads with `$` that are bound where `line` (0-based)
+/// is, but not at the top level at `point`: a loop variable, a parameter,
+/// or a definition inside the block. `None` when one of them is a bundle
+/// or a function, which a parameter can't pass.
+fn local_names(tree: &Tree, text: &str, line: usize, point: usize) -> Option<Vec<String>> {
+    let here = tree.visible_at(line + 1);
+    let top = tree.visible_at(point + 1);
+    let mut locals: Vec<String> = Vec::new();
+    for name in htmlang::interp::names(text) {
+        let root = name.split('.').next().unwrap_or(name);
+        let Some(visible) = here.iter().rev().find(|v| v.name == root) else {
+            continue;
+        };
+        if top.iter().any(|v| v.name == root && v.span == visible.span) {
+            continue;
+        }
+        if matches!(
+            visible.kind,
+            syntax::VisibleKind::Let(DefinitionKind::Bundle | DefinitionKind::Function)
+        ) {
+            return None;
+        }
+        if !locals.iter().any(|l| l == root) {
+            locals.push(root.to_string());
+        }
+    }
+    Some(locals)
+}
+
+/// Refactoring: extract the selected lines into a `@let` function. Names
+/// the lines read from around them (a loop variable, a parameter) become
+/// its parameters.
+fn extract_component(
+    tree: &Tree,
+    lines: &[&str],
+    selection: &Range,
+    uri: &Url,
+) -> Option<CodeActionOrCommand> {
     if selection.start.line == selection.end.line {
         return None;
     }
@@ -489,8 +544,19 @@ fn extract_component(lines: &[&str], selection: &Range, uri: &Url) -> Option<Cod
         })
         .collect();
 
-    let fn_def = format!("@let @extracted\n{}", fn_body);
-    let fn_call = format!("{}@extracted", " ".repeat(min_indent));
+    let point = extraction_point(tree, start_line);
+    let params = local_names(tree, &selected.join("\n"), start_line, point)?;
+    let (list, passed) = if params.is_empty() {
+        (String::new(), String::new())
+    } else {
+        let passed: Vec<String> = params.iter().map(|p| format!("{} ${}", p, p)).collect();
+        (
+            format!(" [{}]", params.join(", ")),
+            format!(" [{}]", passed.join(", ")),
+        )
+    };
+    let fn_def = format!("@let @extracted{}\n{}", list, fn_body);
+    let fn_call = format!("{}@extracted{}", " ".repeat(min_indent), passed);
     let replace_edit = TextEdit {
         range: Range::new(
             Position::new(selection.start.line, 0),
@@ -498,7 +564,7 @@ fn extract_component(lines: &[&str], selection: &Range, uri: &Url) -> Option<Cod
         ),
         new_text: format!("{}\n", fn_call),
     };
-    let insert_edit = insert(0, 0, &format!("{}\n", fn_def));
+    let insert_edit = insert(point as u32, 0, &format!("{}\n", fn_def));
     let mut changes = HashMap::new();
     changes.insert(uri.clone(), vec![insert_edit, replace_edit]);
     Some(CodeActionOrCommand::CodeAction(CodeAction {
@@ -529,12 +595,18 @@ fn extract_bundle(tree: &Tree, selection: &Range, uri: &Url) -> Option<CodeActio
     })?;
     let name = "extracted-style";
     let attrs: Vec<&str> = list.attrs.iter().map(|a| a.raw.as_str()).collect();
+    // A bundle has no parameters: only one that reads nothing local
+    let line = selection.start.line as usize;
+    let point = extraction_point(tree, line);
+    if !local_names(tree, &attrs.join(", "), line, point)?.is_empty() {
+        return None;
+    }
     let define_line = format!("@let {} [{}]\n", name, attrs.join(", "));
     let replace_edit = TextEdit {
         range: lsp_tree::range(list.span),
         new_text: format!("[${}]", name),
     };
-    let insert_edit = insert(0, 0, &define_line);
+    let insert_edit = insert(point as u32, 0, &define_line);
     let mut changes = HashMap::new();
     changes.insert(uri.clone(), vec![insert_edit, replace_edit]);
     Some(CodeActionOrCommand::CodeAction(CodeAction {
@@ -547,6 +619,30 @@ fn extract_bundle(tree: &Tree, selection: &Range, uri: &Url) -> Option<CodeActio
         }),
         ..Default::default()
     }))
+}
+
+/// Selected lines formatted as the formatter formats a file, then indented
+/// back to where the first of them is, so a nested block stays nested.
+pub(crate) fn format_selection(lines: &[&str]) -> String {
+    let indent = lines
+        .iter()
+        .find(|l| !l.trim().is_empty())
+        .map_or("", |l| &l[..l.len() - l.trim_start().len()]);
+    // Dedented first, so the formatter reads the block as a file
+    let dedented: Vec<&str> = lines
+        .iter()
+        .map(|l| l.strip_prefix(indent).unwrap_or(l.trim_start()))
+        .collect();
+    let formatted = htmlang::fmt::format(&dedented.join("\n"));
+    formatted
+        .trim_end_matches('\n')
+        .lines()
+        .map(|l| match l.is_empty() {
+            true => String::new(),
+            false => format!("{}{}", indent, l),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 // ---------------------------------------------------------------------------
@@ -1163,8 +1259,109 @@ mod tests {
             .iter()
             .find(|(t, _)| t == "Add alt attribute")
             .expect("alt fix");
-        assert_eq!(edits[0].new_text, " [alt]");
+        assert_eq!(edits[0].new_text, " [alt=]");
         assert_eq!(edits[0].range.start, Position::new(0, 6));
+
+        // The fixed line compiles without the warning or an error
+        let found = fixes(
+            "@input [name=q, aria-label=Q]
+",
+        );
+        let (_, edits) = found
+            .iter()
+            .find(|(t, _)| t == "Add type=text attribute")
+            .expect("type fix");
+        assert_eq!(edits[0].new_text, "type=text, ");
+        for fixed in [
+            "@image [alt=] cat.png\n",
+            "@input [type=text, name=q, aria-label=Q]\n",
+        ] {
+            let result = htmlang::parser::parse(fixed);
+            assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        }
+
+        // A style written as an HTML attribute gets its style form
+        let found = fixes("@el [padding=4] x\n");
+        let (_, edits) = found
+            .iter()
+            .find(|(t, _)| t == "Replace with 'padding 4'")
+            .unwrap_or_else(|| panic!("{:?}", found));
+        assert_eq!(edits[0].range.start, Position::new(0, 5));
+    }
+
+    #[test]
+    fn a_formatted_selection_keeps_its_nesting() {
+        let text = "@el [padding 8]\n  @row [spacing 4]\n    @text   a\n      @text b\n";
+        let lines: Vec<&str> = text.lines().collect();
+        let formatted = format_selection(&lines[1..4]);
+        assert!(formatted.starts_with("  @row"), "{}", formatted);
+        assert!(
+            formatted.lines().skip(1).all(|l| l.starts_with("    ")),
+            "{}",
+            formatted
+        );
+    }
+
+    fn extracted(text: &str, from: u32, to: u32) -> Option<String> {
+        let uri = Url::parse("file:///tmp/none/page.hl").unwrap();
+        let tree = syntax::parse(text);
+        let selection = Range::new(Position::new(from, 0), Position::new(to, 0));
+        code_actions(text, &tree, &selection, &[], &uri)
+            .into_iter()
+            .find_map(|action| match action {
+                CodeActionOrCommand::CodeAction(action)
+                    if action.title == "Extract to @let component" =>
+                {
+                    let mut edits = action.edit?.changes?.remove(&uri)?;
+                    // Apply from the end, so earlier positions hold
+                    edits.sort_by_key(|e| std::cmp::Reverse(e.range.start));
+                    let mut lines: Vec<String> = text.lines().map(String::from).collect();
+                    for edit in edits {
+                        let (a, b) = (edit.range.start.line as usize, edit.range.end.line as usize);
+                        let new: Vec<String> = edit.new_text.lines().map(String::from).collect();
+                        lines.splice(a..b, new);
+                    }
+                    Some(lines.join("\n") + "\n")
+                }
+                _ => None,
+            })
+    }
+
+    #[test]
+    fn an_extracted_bundle_goes_after_what_it_reads() {
+        let bundle = |text: &str, line: u32| {
+            let uri = Url::parse("file:///tmp/none/page.hl").unwrap();
+            let tree = syntax::parse(text);
+            let selection = Range::new(Position::new(line, 0), Position::new(line, 0));
+            code_actions(text, &tree, &selection, &[], &uri)
+                .into_iter()
+                .find_map(|action| match action {
+                    CodeActionOrCommand::CodeAction(action)
+                        if action.title == "Extract to @let attribute bundle" =>
+                    {
+                        action.edit?.changes?.remove(&uri)
+                    }
+                    _ => None,
+                })
+        };
+        let edits = bundle("@let x 4\n@el [padding $x, color red] y\n", 1).expect("bundle");
+        assert_eq!(edits[0].range.start, Position::new(1, 0));
+        // A loop variable can't go into a bundle, which has no parameters
+        assert!(bundle("@each $i in 1..2\n  @el [padding $i, color red] y\n", 1).is_none());
+    }
+
+    #[test]
+    fn an_extracted_function_sees_what_its_lines_saw() {
+        // Inserted above the top-level node that holds the lines, after the
+        // definitions they read, with the loop variable as a parameter
+        let text = "@let brand #3b82f6\n@each $item in apple, banana\n  @el [color $brand]\n    @text $item\n@text done\n";
+        let out = extracted(text, 2, 3).expect("extract");
+        assert_eq!(
+            out,
+            "@let brand #3b82f6\n@let @extracted [item]\n  @el [color $brand]\n    @text $item\n\n@each $item in apple, banana\n  @extracted [item $item]\n@text done\n"
+        );
+        let result = htmlang::parser::parse(&out);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
 
     #[test]

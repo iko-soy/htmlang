@@ -74,6 +74,22 @@ pub(crate) fn completions(text: &str, position: Position) -> Vec<CompletionItem>
         {
             return element_prefix_completions(written_prefix, &group(), edit_range);
         }
+        // A bundle under prefixes (`md:$card`): the bundles, prefixed
+        if current_word[written_prefix.len()..].starts_with('$')
+            && vocab::is_prefixed(written_prefix)
+        {
+            return variable_completions(text, edit_range)
+                .into_iter()
+                .filter(|item| item.kind == Some(CompletionItemKind::CONSTANT))
+                .map(|mut item| {
+                    item.label = format!("{}{}", written_prefix, item.label);
+                    if let Some(CompletionTextEdit::Edit(edit)) = &mut item.text_edit {
+                        edit.new_text = format!("{}{}", written_prefix, edit.new_text);
+                    }
+                    item
+                })
+                .collect();
+        }
 
         // After prefixes (`hover:`, `md:hover:`, `nth-child(2n):`), offer the
         // styles they can apply to, and the prefixes that can follow
@@ -163,6 +179,14 @@ pub(crate) fn completions(text: &str, position: Position) -> Vec<CompletionItem>
         && !name.contains(char::is_whitespace)
     {
         return slot_completions(text, position.line, edit_range);
+    }
+
+    // A `@let` names something new: there is nothing to offer for its name
+    if let Some(name) = trimmed.strip_prefix("@let ") {
+        let name = name.strip_prefix('@').unwrap_or(name);
+        if !name.contains(char::is_whitespace) {
+            return vec![];
+        }
     }
 
     // @ element/directive or start of line
@@ -1029,14 +1053,24 @@ fn attr_completions(range: Range, element: Option<&str>) -> Vec<CompletionItem> 
         items.push(completion);
     };
     let lays_out_children = lays_out_children(element);
+    // `@fragment` has no element to put attributes on, and `@script` isn't
+    // shown, so it takes HTML attributes only
+    if element == Some("fragment") {
+        return items;
+    }
+    let styles = element != Some("script");
     if element == Some("page") {
         for name in vocab::PAGE_WORDS {
             let detail = "@page: the page's icon, put into the page";
             push(name.to_string(), format!("{} ", name), detail, "1", name);
         }
     }
-    for name in vocab::HTMLANG_ATTRIBUTES {
+    for name in vocab::HTMLANG_ATTRIBUTES.iter().filter(|_| styles) {
         if !lays_out_children && vocab::CONTAINER_ATTRIBUTES.contains(name) {
+            continue;
+        }
+        // `inline` puts an image's file into the page
+        if *name == "inline" && element != Some("image") {
             continue;
         }
         let doc = docs::attribute(name);
@@ -1048,7 +1082,7 @@ fn attr_completions(range: Range, element: Option<&str>) -> Vec<CompletionItem> 
         let detail = doc.map_or("htmlang attribute", |d| d.summary);
         push(name.to_string(), insert, detail, "2", name);
     }
-    for name in vocab::CSS_PROPERTIES {
+    for name in vocab::CSS_PROPERTIES.iter().filter(|_| styles) {
         let detail = docs::attribute(name).map_or("CSS property", |d| d.summary);
         push(name.to_string(), format!("{} ", name), detail, "5", name);
     }
@@ -1074,7 +1108,7 @@ fn attr_completions(range: Range, element: Option<&str>) -> Vec<CompletionItem> 
             );
         }
     }
-    for prefix in prefix_labels(false) {
+    for prefix in prefix_labels(false).into_iter().filter(|_| styles) {
         let detail = docs::prefix_selector(&prefix).unwrap_or_default();
         let mut completion = prefix_item("", &prefix, CompletionItemKind::PROPERTY, &detail, range);
         completion.sort_text = Some(format!("6_{}", prefix));
@@ -1615,6 +1649,32 @@ mod tests {
 
     fn pos(line: u32, ch: u32) -> Position {
         Position::new(line, ch)
+    }
+
+    fn labels_at_end(text: &str) -> Vec<String> {
+        let line = text.lines().count().saturating_sub(1) as u32;
+        let column = text.lines().last().map_or(0, str::len) as u32;
+        completions(text, pos(line, column))
+            .into_iter()
+            .map(|item| item.label)
+            .collect()
+    }
+
+    #[test]
+    fn completion_offers_only_what_the_element_takes() {
+        let has = |text: &str, label: &str| labels_at_end(text).iter().any(|l| l == label);
+        assert!(has("@image [", "inline"));
+        assert!(!has("@el [", "inline"));
+        assert!(labels_at_end("@fragment [").is_empty());
+        assert!(!has("@script [", "padding"));
+        assert!(has("@script [", "defer"));
+        // A bundle after prefixes
+        let text = "@let card [padding 4]\n@el [md:$";
+        assert!(has(text, "md:$card"), "{:?}", labels_at_end(text));
+        // A new name: nothing to offer
+        assert!(labels_at_end("@let @").is_empty());
+        assert!(labels_at_end("@let @but").is_empty());
+        assert!(labels_at_end("@let ").is_empty());
     }
 
     #[test]
