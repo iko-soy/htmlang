@@ -6750,7 +6750,16 @@ fn inline_svg(node: Node, line_num: usize, ctx: &mut ParseContext) -> Node {
         svg = set_svg_attr(&svg, target, &html_escape_md(value));
     }
     if !style.is_empty() {
-        svg = set_svg_attr(&svg, "style", &html_escape_md(&style.join(";")));
+        // After the file's own `style=`, which stays: these come later, so
+        // they win where both set a property
+        let mut value = html_escape_md(&style.join(";"));
+        if let Some(own) = svg_attr_value(&svg, "style")
+            .map(|range| svg[range].trim().trim_end_matches(';').to_string())
+            .filter(|own| !own.is_empty())
+        {
+            value = format!("{};{}", own, value);
+        }
+        svg = set_svg_attr(&svg, "style", &value);
     }
     if !left_out.is_empty() {
         let alt = left_out.iter().any(|name| name == "alt");
@@ -7135,6 +7144,29 @@ fn json_value(json: JsonValue) -> Value {
 // SVG attribute injection helper
 // ---------------------------------------------------------------------------
 
+/// Where the root `<svg ...>` tag's `attr_name="..."` value is, as a byte
+/// range of `svg`. Only the opening tag is read, so a child's attribute is
+/// never found, and the name must follow whitespace, so `width` doesn't
+/// match `stroke-width`.
+fn svg_attr_value(svg: &str, attr_name: &str) -> Option<std::ops::Range<usize>> {
+    let tag_start = svg.find("<svg")?;
+    let tag_end = svg[tag_start..]
+        .find('>')
+        .map(|p| tag_start + p)
+        .unwrap_or(svg.len());
+    let tag = &svg[tag_start..tag_end];
+    let pattern = format!("{}=\"", attr_name);
+    let (pos, _) = tag.match_indices(&pattern).find(|(pos, _)| {
+        tag[..*pos]
+            .chars()
+            .next_back()
+            .is_some_and(char::is_whitespace)
+    })?;
+    let value_start = tag_start + pos + pattern.len();
+    let end = svg[value_start..tag_end].find('"')?;
+    Some(value_start..value_start + end)
+}
+
 fn set_svg_attr(svg: &str, attr_name: &str, value: &str) -> String {
     // Only the opening <svg ...> tag is touched, so child attributes such as
     // `stroke-width` are left alone.
@@ -7145,26 +7177,14 @@ fn set_svg_attr(svg: &str, attr_name: &str, value: &str) -> String {
         .find('>')
         .map(|p| tag_start + p)
         .unwrap_or(svg.len());
-    let tag = &svg[tag_start..tag_end];
 
-    // Replace an existing attribute (must be preceded by whitespace so that
-    // `width` doesn't match `stroke-width`).
-    let pattern = format!("{}=\"", attr_name);
-    let existing = tag.match_indices(&pattern).find(|(pos, _)| {
-        tag[..*pos]
-            .chars()
-            .next_back()
-            .is_some_and(char::is_whitespace)
-    });
-    if let Some((pos, _)) = existing {
-        let value_start = tag_start + pos + pattern.len();
-        if let Some(end) = svg[value_start..tag_end].find('"') {
-            let mut result = String::with_capacity(svg.len());
-            result.push_str(&svg[..value_start]);
-            result.push_str(value);
-            result.push_str(&svg[value_start + end..]);
-            return result;
-        }
+    // Replace an existing attribute
+    if let Some(existing) = svg_attr_value(svg, attr_name) {
+        let mut result = String::with_capacity(svg.len());
+        result.push_str(&svg[..existing.start]);
+        result.push_str(value);
+        result.push_str(&svg[existing.end..]);
+        return result;
     }
 
     // Otherwise inject it into the opening tag (before a self-closing `/`).

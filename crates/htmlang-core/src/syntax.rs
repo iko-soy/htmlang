@@ -704,8 +704,9 @@ pub(crate) fn parse_from(source: &str, first_id: usize) -> Tree {
         starts: lines.iter().map(|l| l.0).collect(),
     };
     let mut diagnostics = Vec::new();
-    mixed_indentation(&lines, &mut diagnostics);
-    let entries = scan(&lines, &index, &mut diagnostics);
+    let mut indents = Vec::new();
+    let entries = scan(&lines, &index, &mut diagnostics, &mut indents);
+    mixed_indentation(&lines, &indents, &mut diagnostics);
     let mut next_id = first_id;
     let mut pos = 0;
     let mut nodes = build(entries, &mut pos, None, &mut next_id);
@@ -752,14 +753,21 @@ impl LineIndex {
 /// A tab counts as one column, like a space, so indentation that mixes
 /// them nests lines in ways the eye doesn't see: the first line whose
 /// indentation mixes them, or uses the other one than the lines before
-/// it, is reported.
-fn mixed_indentation(lines: &[(usize, &str)], diagnostics: &mut Vec<Diagnostic>) {
+/// it, is reported. `indents` holds, for each line whose indentation
+/// places it, its index and how many of its leading bytes do: a verbatim
+/// body's own indentation after the body's is its content (a tab in a
+/// `@code` sample), and so is a continuation line's.
+fn mixed_indentation(
+    lines: &[(usize, &str)],
+    indents: &[(usize, usize)],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     let mut first: Option<char> = None;
-    for (number, (_, line)) in lines.iter().enumerate() {
-        if line.trim().is_empty() {
+    for &(number, width) in indents {
+        let Some((_, line)) = lines.get(number) else {
             continue;
-        }
-        let indent = &line[..leading_whitespace(line)];
+        };
+        let indent = line.get(..width).unwrap_or("");
         let (tabs, spaces) = (indent.contains('\t'), indent.contains(' '));
         let used = match (tabs, spaces) {
             (false, false) => continue,
@@ -805,6 +813,7 @@ fn scan(
     lines: &[(usize, &str)],
     index: &LineIndex,
     diagnostics: &mut Vec<Diagnostic>,
+    indents: &mut Vec<(usize, usize)>,
 ) -> Vec<Entry> {
     let mut entries: Vec<Entry> = Vec::new();
     let mut i = 0;
@@ -825,6 +834,7 @@ fn scan(
             i += 1;
             continue;
         }
+        indents.push((i, indent));
         if is_comment(trimmed) {
             entries.push(Entry {
                 indent,
@@ -898,6 +908,11 @@ fn scan(
                     .map(|(_, l)| leading_whitespace(l))
                     .min()
                     .unwrap_or(0);
+                indents.extend(
+                    (i..body_end)
+                        .filter(|&k| !lines[k].1.trim().is_empty())
+                        .map(|k| (k, common)),
+                );
                 let text: Vec<&str> = body
                     .iter()
                     .map(|(_, l)| l.get(common..).unwrap_or("").trim_end())

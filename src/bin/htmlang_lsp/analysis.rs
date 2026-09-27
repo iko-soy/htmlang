@@ -622,27 +622,63 @@ fn extract_bundle(tree: &Tree, selection: &Range, uri: &Url) -> Option<CodeActio
 }
 
 /// Selected lines formatted as the formatter formats a file, then indented
-/// back to where the first of them is, so a nested block stays nested.
+/// back to where they are, so a nested block stays nested. A line less
+/// indented than the lines before it starts a new run, formatted on its
+/// own at its own indentation: the selection alone doesn't say what the
+/// deeper lines before it are nested in.
 pub(crate) fn format_selection(lines: &[&str]) -> String {
-    let indent = lines
-        .iter()
-        .find(|l| !l.trim().is_empty())
-        .map_or("", |l| &l[..l.len() - l.trim_start().len()]);
-    // Dedented first, so the formatter reads the block as a file
-    let dedented: Vec<&str> = lines
-        .iter()
-        .map(|l| l.strip_prefix(indent).unwrap_or(l.trim_start()))
-        .collect();
-    let formatted = htmlang::fmt::format(&dedented.join("\n"));
-    formatted
-        .trim_end_matches('\n')
-        .lines()
-        .map(|l| match l.is_empty() {
-            true => String::new(),
-            false => format!("{}{}", indent, l),
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+    fn indent_of(l: &str) -> &str {
+        &l[..l.len() - l.trim_start().len()]
+    }
+    // A run, dedented first so the formatter reads it as a file
+    fn flush(run: &[&str], indent: &str, out: &mut Vec<String>) {
+        let dedented: Vec<&str> = run
+            .iter()
+            .map(|l| l.strip_prefix(indent).unwrap_or(l.trim_start()))
+            .collect();
+        let formatted = htmlang::fmt::format(&dedented.join("\n"));
+        out.extend(
+            formatted
+                .trim_end_matches('\n')
+                .lines()
+                .map(|l| match l.is_empty() {
+                    true => String::new(),
+                    false => format!("{}{}", indent, l),
+                }),
+        );
+    }
+    let mut out: Vec<String> = Vec::new();
+    let mut run: Vec<&str> = Vec::new();
+    let mut indent = "";
+    // The blank lines after the run's last line, which stay as they are
+    let mut blanks = 0;
+    for &line in lines {
+        if line.trim().is_empty() {
+            match run.is_empty() {
+                true => out.push(String::new()),
+                false => {
+                    run.push(line);
+                    blanks += 1;
+                }
+            }
+            continue;
+        }
+        if !run.is_empty() && indent_of(line).len() < indent.len() {
+            flush(&run[..run.len() - blanks], indent, &mut out);
+            out.extend(std::iter::repeat_n(String::new(), blanks));
+            run.clear();
+        }
+        if run.is_empty() {
+            indent = indent_of(line);
+        }
+        run.push(line);
+        blanks = 0;
+    }
+    if !run.is_empty() {
+        flush(&run[..run.len() - blanks], indent, &mut out);
+        out.extend(std::iter::repeat_n(String::new(), blanks));
+    }
+    out.join("\n")
 }
 
 // ---------------------------------------------------------------------------
@@ -1300,6 +1336,20 @@ mod tests {
             "{}",
             formatted
         );
+        // A selection that starts deeper than a later line: each line
+        // keeps the level it had
+        let formatted = format_selection(&lines[2..4].iter().rev().copied().collect::<Vec<_>>());
+        assert_eq!(formatted, "      @text b\n    @text a", "{}", formatted);
+        let text = "@el\n  @row\n    @text   a\n  @text b\n@el c\n";
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(
+            format_selection(&lines[2..5]),
+            "    @text a\n  @text b\n@el c"
+        );
+        // Blank lines between runs, and a selection that starts with one
+        let text = "\n    @text   a\n\n  @text b\n";
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(format_selection(&lines), "\n    @text a\n\n  @text b");
     }
 
     fn extracted(text: &str, from: u32, to: u32) -> Option<String> {

@@ -1431,7 +1431,7 @@ the content to show when the list is empty.
 | `@data $name env:NAME DEFAULT` | An environment variable, with an optional default |
 | `@include file.hl` | Insert another file: its content and its definitions. A file that holds only definitions outputs nothing (a [library](#page-layouts)) |
 | `@markdown` / `@markdown file.md` | Markdown (an indented body or a file), converted to HTML |
-| `@image [inline] file.svg` | Put the file inside the page: SVG as markup, other images as base64. The file is read next to the page, and one that can't be read is an error. The SVG's root gets `width` and `height` (lengths, not `fill` or `shrink`) and `color` or `fill` (as its `fill`) in its `style=`, where `var(--name)` works, and the HTML attributes (`class=`, `aria-label=`, ...); any other style, and `alt=`, is an error, since the markup has no generated class, and an element prefix (`@image:`) doesn't reach it. `inline` goes only on `@image`, without a prefix |
+| `@image [inline] file.svg` | Put the file inside the page: SVG as markup, other images as base64. The file is read next to the page, and one that can't be read is an error. The SVG's root gets `width` and `height` (lengths, not `fill` or `shrink`) and `color` or `fill` (as its `fill`) in its `style=`, after the file's own, where `var(--name)` works, and the HTML attributes (`class=`, `aria-label=`, ...); any other style, and `alt=`, is an error, since the markup has no generated class, and an element prefix (`@image:`) doesn't reach it. `inline` goes only on `@image`, without a prefix |
 
 Records keep their values whole, even when a value contains spaces or
 commas:

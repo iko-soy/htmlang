@@ -2207,6 +2207,18 @@ fn inline_svg_styles_go_in_its_style_attribute() {
         "{}",
         out
     );
+    // The file's own `style=` stays, before the element's styles
+    std::fs::write(
+        dir.join("j.svg"),
+        "<svg style=\"display: block;\" viewBox=\"0 0 1 1\"></svg>",
+    )
+    .unwrap();
+    let out = compile_in(&dir, "@image [inline, width 24] j.svg\n");
+    assert!(
+        out.contains("<svg style=\"display: block;width:24px\" viewBox=\"0 0 1 1\">"),
+        "{}",
+        out
+    );
 }
 
 #[test]
@@ -2286,6 +2298,18 @@ fn mixed_tabs_and_spaces_are_reported() {
         &diagnostics_of("@el\n\t@text a\n\t\t@text b\n"),
         "mixed-indentation"
     ));
+    // A tab inside a verbatim body, after the body's own indentation, is
+    // content (a Go sample, a script), and so is a continuation line's
+    let content = "@data $x [\n\t1, 2\n]\n@el\n  @code\n    func main() {\n    \tfmt.Println()\n    }\n  @script\n    if (a) {\n    \tb()\n    }\n";
+    assert!(
+        !coded_in(&diagnostics_of(content), "mixed-indentation"),
+        "{:?}",
+        diagnostics_of(content)
+    );
+    // A body indented with the other one than the lines around it is
+    // reported, since that decides which lines are in the body
+    let d = diagnostics_of("@el\n  @code\n\t\t\tx\n");
+    assert!(coded_in(&d, "mixed-indentation"), "{:?}", d);
 }
 
 #[test]
