@@ -64,11 +64,10 @@ where
     }
 
     let request = String::from_utf8_lossy(&buf[..n]);
-    let path = request
-        .lines()
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1))
-        .unwrap_or("/");
+    let (method, path) = request_line(&request);
+    let Some(head) = reads(method) else {
+        return method_not_allowed(&mut stream).await;
+    };
 
     if path == "/_events" {
         return handle_sse(stream, reload_rx).await;
@@ -91,13 +90,8 @@ where
         } else {
             // Generate directory listing
             let listing = generate_directory_listing(&root_dir);
-            let header = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: no-cache\r\n\r\n",
-                listing.len(),
-            );
-            stream.write_all(header.as_bytes()).await?;
-            stream.write_all(listing.as_bytes()).await?;
-            return Ok(());
+            let html = "text/html; charset=utf-8";
+            return respond(&mut stream, "200 OK", html, listing.as_bytes(), head).await;
         }
     } else {
         // The file itself, then `<path>.html`, then `<path>/index.html`.
@@ -130,20 +124,64 @@ where
                     return Ok(());
                 }
             };
-            let content_type = content_type_for(&fp);
-            let header = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nCache-Control: no-cache\r\n\r\n",
-                content_type,
-                body.len(),
-            );
-            stream.write_all(header.as_bytes()).await?;
-            stream.write_all(&body).await?;
+            respond(&mut stream, "200 OK", content_type_for(&fp), &body, head).await?;
         }
         None => {
-            send_404(&mut stream, clean_path).await?;
+            send_404(&mut stream, clean_path, head).await?;
         }
     }
 
+    Ok(())
+}
+
+/// The method and the target of a request, from its first line.
+fn request_line(request: &str) -> (&str, &str) {
+    let mut words = request.lines().next().unwrap_or("").split_whitespace();
+    (words.next().unwrap_or("GET"), words.next().unwrap_or("/"))
+}
+
+/// Whether the server reads files for `method`: `Some(true)` for HEAD (the
+/// headers only), `Some(false)` for GET, and `None` for any other method,
+/// which a server of files can't answer: a form that posts to a page, or
+/// htmx's `hx-post`, gets 405 rather than the page.
+fn reads(method: &str) -> Option<bool> {
+    match method {
+        "GET" => Some(false),
+        "HEAD" => Some(true),
+        _ => None,
+    }
+}
+
+async fn method_not_allowed<S>(stream: &mut S) -> std::io::Result<()>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send,
+{
+    stream
+        .write_all(
+            b"HTTP/1.1 405 Method Not Allowed\r\nAllow: GET, HEAD\r\nContent-Length: 0\r\n\r\n",
+        )
+        .await
+}
+
+/// A response with `body`, which a HEAD request doesn't get.
+async fn respond<S>(
+    stream: &mut S,
+    status: &str,
+    content_type: &str,
+    body: &[u8],
+    head: bool,
+) -> std::io::Result<()>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send,
+{
+    let header = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-cache\r\n\r\n",
+        body.len(),
+    );
+    stream.write_all(header.as_bytes()).await?;
+    if !head {
+        stream.write_all(body).await?;
+    }
     Ok(())
 }
 
@@ -214,16 +252,15 @@ where
     }
 
     let request = String::from_utf8_lossy(&buf[..n]);
-    let path = request
-        .lines()
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1))
-        .unwrap_or("/");
+    let (method, path) = request_line(&request);
+    let Some(head) = reads(method) else {
+        return method_not_allowed(&mut stream).await;
+    };
 
     if path == "/_events" {
         handle_sse(stream, reload_rx).await
     } else {
-        handle_file(stream, &html_path, root_dir, path).await
+        handle_file(stream, &html_path, root_dir, path, head).await
     }
 }
 
@@ -281,6 +318,7 @@ async fn handle_file<S>(
     html_path: &Path,
     root_dir: Option<&Path>,
     request_path: &str,
+    head: bool,
 ) -> std::io::Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send,
@@ -302,7 +340,7 @@ where
     } else if is_within(dir, &requested) {
         requested
     } else {
-        send_404(&mut stream, request_path).await?;
+        send_404(&mut stream, request_path, head).await?;
         return Ok(());
     };
 
@@ -315,20 +353,13 @@ where
             }
         }
         Err(_) => {
-            send_404(&mut stream, request_path).await?;
+            send_404(&mut stream, request_path, head).await?;
             return Ok(());
         }
     };
 
     let content_type = content_type_for(&file_path);
-    let header = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-cache\r\n\r\n",
-        body.len(),
-    );
-    stream.write_all(header.as_bytes()).await?;
-    stream.write_all(&body).await?;
-
-    Ok(())
+    respond(&mut stream, "200 OK", content_type, &body, head).await
 }
 
 /// Map a request target (`/a/b.css?v=2`) to a path under `root`. Strips the
@@ -373,7 +404,7 @@ fn percent_decode(s: &str) -> Option<String> {
     String::from_utf8(out).ok()
 }
 
-async fn send_404<S>(stream: &mut S, path: &str) -> std::io::Result<()>
+async fn send_404<S>(stream: &mut S, path: &str, head: bool) -> std::io::Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send,
 {
@@ -390,15 +421,13 @@ where
          <a href=\"/\">Back to index</a></div></body></html>",
         path.replace('<', "&lt;").replace('>', "&gt;")
     );
-    let header = format!(
-        "HTTP/1.1 404 Not Found\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: no-cache\r\n\r\n",
-        body.len()
-    );
-    stream.write_all(header.as_bytes()).await?;
-    stream.write_all(body.as_bytes()).await?;
-    Ok(())
+    let html = "text/html; charset=utf-8";
+    respond(stream, "404 Not Found", html, body.as_bytes(), head).await
 }
 
+/// The page with the reload script before its `</body>`. A fragment
+/// (`--partial`) has no `</body>`, and is served as it is: it goes into
+/// a page that has the script, and a second one would reload it twice.
 fn inject_reload_script(content: &[u8]) -> Vec<u8> {
     let html = String::from_utf8_lossy(content);
     match html.rfind("</body>") {
@@ -410,11 +439,7 @@ fn inject_reload_script(content: &[u8]) -> Vec<u8> {
             result.push_str(&html[pos..]);
             result.into_bytes()
         }
-        None => {
-            let mut result = content.to_vec();
-            result.extend_from_slice(RELOAD_SCRIPT.as_bytes());
-            result
-        }
+        None => content.to_vec(),
     }
 }
 
@@ -476,5 +501,58 @@ mod tests {
         assert_eq!(resolve_request_path(root, "/a/%2e%2e/%2e%2e/secret"), None);
         assert_eq!(resolve_request_path(root, "/bad%zz"), None);
         assert_eq!(resolve_request_path(root, "é"), Some(root.join("é")));
+    }
+
+    /// The response of the directory server at `root` to `request`.
+    async fn respond_to(root: &Path, request: &str) -> String {
+        let (mut client, server) = tokio::io::duplex(1 << 16);
+        let (reload, _) = broadcast::channel(1);
+        let server = tokio::spawn(handle_dir_request(
+            server,
+            root.to_path_buf(),
+            reload.subscribe(),
+        ));
+        client.write_all(request.as_bytes()).await.unwrap();
+        let mut response = Vec::new();
+        client.read_to_end(&mut response).await.unwrap();
+        server.await.unwrap().unwrap();
+        String::from_utf8(response).unwrap()
+    }
+
+    #[tokio::test]
+    async fn files_are_read_by_get_and_head_only() {
+        let root = std::env::temp_dir().join(format!("htmlang-serve-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("page.html"),
+            "<html><body><p>Hi</p></body></html>",
+        )
+        .unwrap();
+        std::fs::write(root.join("frag.html"), "<p class=\"hl-a\">Hi</p>").unwrap();
+
+        let page = respond_to(&root, "GET /page HTTP/1.1\r\n\r\n").await;
+        assert!(page.starts_with("HTTP/1.1 200 OK"), "{page}");
+        assert!(page.contains(RELOAD_SCRIPT), "{page}");
+
+        // A fragment goes into a page that already reloads
+        let fragment = respond_to(&root, "GET /frag.html HTTP/1.1\r\n\r\n").await;
+        assert!(
+            fragment.ends_with("\r\n\r\n<p class=\"hl-a\">Hi</p>"),
+            "{fragment}"
+        );
+
+        let head = respond_to(&root, "HEAD /page HTTP/1.1\r\n\r\n").await;
+        assert!(head.starts_with("HTTP/1.1 200 OK"), "{head}");
+        assert!(head.ends_with("\r\n\r\n"), "{head}");
+
+        for method in ["POST", "PUT", "DELETE"] {
+            let request = format!("{method} /page HTTP/1.1\r\nContent-Length: 3\r\n\r\nq=1");
+            let response = respond_to(&root, &request).await;
+            assert!(
+                response.starts_with("HTTP/1.1 405 Method Not Allowed\r\nAllow: GET, HEAD"),
+                "{response}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

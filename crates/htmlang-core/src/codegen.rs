@@ -855,15 +855,9 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
     }
 
     // `@page`'s HTML attributes go on `<html>`
-    let mut html_attrs = String::new();
-    for attr in &page.html_attrs {
-        html_attrs.push(' ');
-        html_attrs.push_str(&attr.key);
-        if attr.html {
-            html_attrs.push_str("=\"");
-            html_attrs.push_str(&html_escape(attr.value.as_deref().unwrap_or("")));
-            html_attrs.push('"');
-        }
+    let mut root_attrs = String::new();
+    for attr in html_attrs(&page.html_attrs) {
+        push_html_attr(&mut root_attrs, attr);
     }
     let mut body_attrs = String::new();
     emit_class_attr(&mut body_attrs, body_class.as_deref(), None);
@@ -888,7 +882,7 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
     let reset_css = reset_css(dev, true, &focus_visible_css);
 
     format!(
-        "<!DOCTYPE html>{nl}<html{html_attrs}>{nl}<head>{nl}<meta charset=\"utf-8\">{nl}\
+        "<!DOCTYPE html>{nl}<html{root_attrs}>{nl}<head>{nl}<meta charset=\"utf-8\">{nl}\
          {meta_html}<style>{nl}{reset_css}{element_css}</style>{nl}</head>{nl}\
          <body{body_attrs}>{nl}{body}</body>{nl}</html>{nl}",
     )
@@ -1198,24 +1192,40 @@ pub(crate) fn data_uri(path: &str, data: &[u8]) -> String {
 }
 
 /// Emit HTML attributes: `key=value` ones (except `id` / `class`, which
-/// are emitted with the generated class) and bare booleans like `required`.
+/// are emitted with the generated class) and flags like `required`.
 fn emit_html_attrs(out: &mut String, attrs: &[Attribute]) {
-    for attr in attrs {
+    for attr in html_attrs(attrs) {
         let key = attr.key.as_str();
-        if attr.html && key != "id" && key != "class" {
-            out.push(' ');
-            out.push_str(key);
-            out.push_str("=\"");
-            // Quoted text has already lost its quotes (see parser.rs)
-            out.push_str(&html_escape(attr.value.as_deref().unwrap_or("")));
-            out.push('"');
-        } else if !attr.html
-            && attr.value.is_none()
-            && crate::vocab::BOOLEAN_HTML_ATTRS.contains(&key)
-        {
-            out.push(' ');
-            out.push_str(key);
+        if key != "id" && key != "class" {
+            push_html_attr(out, attr);
         }
+    }
+}
+
+/// The HTML attributes of `attrs`, `key=value` ones and flags, each name
+/// once: the later one wins, as a style does. (Of two attributes with one
+/// name, the browser keeps the first, so a bundle's attribute or a
+/// function's own would win over one written after it.)
+fn html_attrs(attrs: &[Attribute]) -> impl Iterator<Item = &Attribute> {
+    let is_html =
+        |a: &Attribute| a.html || (a.value.is_none() && crate::vocab::is_html_flag(&a.key));
+    attrs.iter().enumerate().filter_map(move |(i, attr)| {
+        let later = attrs[i + 1..]
+            .iter()
+            .any(|other| is_html(other) && other.key == attr.key);
+        (is_html(attr) && !later).then_some(attr)
+    })
+}
+
+/// ` key="value"`, or ` key` for a flag.
+fn push_html_attr(out: &mut String, attr: &Attribute) {
+    out.push(' ');
+    out.push_str(&attr.key);
+    if attr.html {
+        out.push_str("=\"");
+        // Quoted text has already lost its quotes (see parser.rs)
+        out.push_str(&html_escape(attr.value.as_deref().unwrap_or("")));
+        out.push('"');
     }
 }
 

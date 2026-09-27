@@ -72,15 +72,26 @@ An attribute can take one of three forms:
   (`spacing 20`, `color red`).
 - `key=value` is an **HTML attribute** (`id=main`, `type=email`,
   `aria-label=Close`).
-- A bare word is a **flag**: a layout attribute such as `center-x`, or a
-  boolean HTML attribute such as `required`, `disabled`, `hidden` or `open`.
+- A bare word is a **flag**: a layout attribute such as `center-x`, a
+  boolean HTML attribute such as `required`, `disabled`, `hidden` or `open`,
+  or a `data-` or `hx-` attribute that has no value (`data-open`,
+  `hx-preserve`).
 
 A comma inside `(...)`, `[...]` or `"..."` doesn't split attributes. Anywhere else,
 `\,` keeps a comma in the value:
 
 ```
 @el [transition opacity 0.3s\, transform 0.3s, font-family "Open Sans"\, sans-serif]
+@el [hx-get=/news, hx-trigger=load\, every 60s]
 ```
+
+Right after a `key=value`, a name htmlang doesn't know is most likely the
+rest of that value, which a comma ended: `[hx-trigger=load, every 60s]` is
+an error (`split-value`) that shows the value written with `\,`.
+
+An attribute given twice, by a bundle and after it, by a function and its
+call, or written twice, takes the later value. An HTML attribute is
+written once, with that value.
 
 A variable fills an attribute's value (`padding $gap`, `alt=$title`), never
 its name or a whole attribute: attributes come from a
@@ -154,7 +165,7 @@ values, `@let`, `@page` and `@meta`.
 | `\@`, `\--` | `@`, `--` | a line of text that starts with `@` or `--` |
 | `\$` | `$` | a `$` before a name, which would start a variable |
 | `\{`, `\}` | `{`, `}` | braces that don't start or end an inline element |
-| `\[`, `\]` | `[`, `]` | brackets that don't open or close an attribute list |
+| `\[`, `\]` | `[`, `]` | brackets that don't open or close an attribute list; a `'...'` in a value (`alert(']')`) doesn't hide one, so a list that seems to end inside one is reported (`unbalanced-quote`) |
 | `\,` | `,` | a comma in an attribute's value |
 | `\"` | `"` | a quote that doesn't start or end quoted text |
 | `\\` | `\` | a backslash before one of these characters |
@@ -906,7 +917,10 @@ since it holds only the `@option` lines under it. A value with a space in
 it is quoted, as such a label: `@optgroup "Citrus fruits"`. The first word is
 always the argument, so on an element whose attribute is often left out
 (`@form`, `@video`, `@audio`), text goes on the lines under it: `@form Sign
-in` would make `Sign` the form's action.
+in` would make `Sign` the form's action. A first word that reads as text,
+a capitalized word with nothing of a URL in it, is taken with a warning
+(`text-as-url`): `@link [hx-get=/panel] Open panel` makes `Open` the link's
+`href`. A relative URL like that one is written `./Open`.
 
 The attribute can be written as an attribute instead, and it means the same:
 `@link [href=/about]` with its text on the lines under it, or
@@ -943,12 +957,13 @@ only the file. It isn't shown, so a style on it is an error.
 
 HTML attributes are written `key=value`: `id=main`, `class=note`,
 `href=/about`, `type=email`, `alt=Logo`, `target=_blank`,
-`aria-label=Close menu`, `data-id=42`. Any name works, one with a colon
-in it included (`xml:lang=en`, `x-on:click=open`): before an `=` a colon is
-part of the name, not a prefix. Boolean attributes are
-written bare: `required`, `disabled`, `checked`, `hidden`, `open`, `popover`.
-An HTML attribute written like a style (`type email`) is an error that
-shows the `key=value` form. A style
+`aria-label=Close menu`, `data-id=42`, `hx-get=/items`. Any name works,
+one with a colon in it included (`xml:lang=en`, `hx-on:click=open()`):
+before an `=` a colon is part of the name, not a prefix. Boolean attributes
+are written bare: `required`, `disabled`, `checked`, `hidden`, `open`,
+`popover`, and so are `data-` and `hx-` attributes that have no value
+(`hx-preserve`). An HTML attribute written like a style (`type email`,
+`hx-get /items`) is an error that shows the `key=value` form. A style
 and an HTML attribute can share a name, because the `=` tells them apart:
 
 ```

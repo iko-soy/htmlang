@@ -135,7 +135,7 @@ htmlang build src -o dist    # compile a whole site
 | Command | Purpose |
 |---|---|
 | `build <dir> [-o out] [--minify] [--strict]` | Compile every `.hl` file under a directory (into `out/` by default), except libraries: files that hold only `@let`s |
-| `serve [dir\|file] [-p PORT] [--open]` | Dev server with live reload |
+| `serve [dir\|file] [-p PORT] [--open]` | Dev server with live reload. It serves files, so it answers GET and HEAD (other methods get 405), and reloads pages, not fragments |
 | `watch [dir\|file] [-o out]` | Recompile on change, without a server |
 | `check <file\|dir> [--format json]` | Report diagnostics without writing output |
 | `lint <file\|dir> [--format json]` | Stricter checks (accessibility, nesting) |
