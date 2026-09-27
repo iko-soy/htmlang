@@ -28,7 +28,9 @@ Syntax highlighting, snippets, and language server support for
   HTML attributes (not the one an element's leading argument already
   gives, as `href=` in `@link [] /about About`; on `@page`, `lang=`,
   `dir=`, `class=` and `favicon` first), the custom properties the file
-  names (`--surface`, and `dark:--surface` after a prefix), prefixes (CSS's
+  names (`--surface`, and `dark:--surface` after a prefix, and inside
+  `var(`, where a token is read), colour variants after a colour property
+  (`color-mix()`, `rgb(from)`), prefixes (CSS's
   pseudo-classes and pseudo-elements, one with an argument placing the
   cursor between its parentheses, as `nth-child(|):`; and
   after one, those that can follow it, as `md:hover:`; after a

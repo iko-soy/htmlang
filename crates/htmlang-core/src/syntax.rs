@@ -2045,11 +2045,19 @@ impl Reader<'_> {
                         .suggest(Some(def_name.clone())),
                     );
                 } else if !is_definition_name(&def_name) {
-                    problems.push(invalid(format!(
-                        "'{}' is not a name: a @let name is letters, digits, `-` and `_`, \
-                         starting with a letter (`@let gap 8`)",
-                        written
-                    )));
+                    problems.push(invalid(if def_name.starts_with("--") {
+                        format!(
+                            "'{}' is not a custom property's name: `--` and then letters, \
+                             digits, `-` and `_` (`@let --brand #3b82f6`)",
+                            written
+                        )
+                    } else {
+                        format!(
+                            "'{}' is not a name: a @let name is letters, digits, `-` and `_`, \
+                             starting with a letter (`@let gap 8`)",
+                            written
+                        )
+                    }));
                 }
                 let value_at = self.skip_ws(def_name_end, len);
                 let value = &self.text[value_at..];
@@ -2158,10 +2166,10 @@ fn shadowed(name: &str) -> Option<String> {
 
 /// Whether `name` can be a value's or bundle's name, as `@let name`: a
 /// name `$name` reaches (`t.greeting` too, for a record's field), or a
-/// custom property `--name`.
+/// custom property `--name`, named as on an element (`[--name value]`).
 fn is_definition_name(name: &str) -> bool {
     if name.starts_with("--") {
-        return crate::interp::custom_property_len(name) == name.len();
+        return crate::vocab::is_custom_property(name);
     }
     let n = crate::interp::name_len(name);
     if n == 0 || matches!(&name[..n], "true" | "false" | "not" | "and" | "or") {

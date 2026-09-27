@@ -2973,6 +2973,22 @@ fn a_custom_property_is_read_with_var_not_as_a_variable() {
 }
 
 #[test]
+fn a_token_is_named_like_a_custom_property_on_an_element() {
+    // `@let --name` takes the names `[--name value]` takes
+    let html = compile("@let --1 red\n@let --a- 4px\n@let ---x 2\n@el [--b- 1] x");
+    assert!(html.contains(":root{--1:red;--a-:4px;---x:2;}"), "{}", html);
+    // and a name that isn't one says what a custom property's name is
+    let diagnostics = parse_diagnostics("@let --brand.dark #111\n@el x");
+    assert!(
+        diagnostics.iter().any(|d| d
+            .message
+            .contains("'--brand.dark' is not a custom property's name")),
+        "{:?}",
+        diagnostics
+    );
+}
+
+#[test]
 fn test_autofocus_attribute() {
     let result = htmlang::parser::parse("@input [type=text, autofocus]");
     let html = htmlang::codegen::generate(&result.document);

@@ -25,6 +25,25 @@ pub(crate) fn completions(text: &str, position: Position) -> Vec<CompletionItem>
     let word_start = find_word_start(before);
     let edit_range = Range::new(Position::new(position.line, word_start as u32), position);
 
+    // In `var(`: the file's custom properties, since a token is read one
+    // way, `var(--name)`
+    if before[..word_start].ends_with("var(") {
+        let current = &before[word_start..];
+        return custom_property_names(text)
+            .into_iter()
+            .filter(|name| *name != current)
+            .map(|name| {
+                item(
+                    name,
+                    CompletionItemKind::VARIABLE,
+                    "Custom property",
+                    name,
+                    edit_range,
+                )
+            })
+            .collect();
+    }
+
     // Inside attribute brackets?
     if in_brackets(before) {
         // A function's parameter list names its parameters: there are no
@@ -1075,14 +1094,8 @@ fn attr_completions(range: Range, element: Option<&str>) -> Vec<CompletionItem> 
 }
 
 /// The custom properties the file names (`@let --brand`, `[--gap 8px]`,
-/// `var(--gap)`), to set on an element: `--gap `, or `md:--gap ` after a
-/// prefix. The name being written is left out.
-fn custom_property_completions(
-    text: &str,
-    prefix: &str,
-    current: &str,
-    range: Range,
-) -> Vec<CompletionItem> {
+/// `var(--gap)`), in the order they first appear.
+fn custom_property_names(text: &str) -> Vec<&str> {
     let is_name = |c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_';
     let mut names: Vec<&str> = Vec::new();
     for (at, _) in text.match_indices("--") {
@@ -1100,6 +1113,17 @@ fn custom_property_completions(
         }
     }
     names
+}
+
+/// The file's custom properties, to set on an element: `--gap `, or `md:--gap ` after a
+/// prefix. The name being written is left out.
+fn custom_property_completions(
+    text: &str,
+    prefix: &str,
+    current: &str,
+    range: Range,
+) -> Vec<CompletionItem> {
+    custom_property_names(text)
         .into_iter()
         .map(|name| format!("{}{}", prefix, name))
         .filter(|full| full != current)
@@ -1806,6 +1830,25 @@ mod tests {
         // A token isn't a variable
         let items = completions("@let --brand #3b82f6\n@el [padding $", Position::new(1, 14));
         assert!(!items.iter().any(|i| i.label.starts_with("$--")));
+    }
+
+    #[test]
+    fn a_token_is_offered_where_it_is_read_in_var() {
+        let text = "@let --brand #3b82f6\n@el [--gap 8px, color var(--br";
+        let items = completions(text, Position::new(1, 30));
+        let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+        assert_eq!(labels, ["--brand", "--gap"]);
+        match &items[0].text_edit {
+            Some(CompletionTextEdit::Edit(edit)) => {
+                assert_eq!(edit.new_text, "--brand");
+                assert_eq!(edit.range.start, Position::new(1, 26));
+            }
+            _ => panic!("no edit"),
+        }
+        // In a plain `@let` value too
+        let text = "@let --brand #3b82f6\n@let hover color-mix(in srgb, var(";
+        let items = completions(text, Position::new(1, 34));
+        assert!(items.iter().any(|i| i.label == "--brand"), "{:?}", items);
     }
 
     #[test]
