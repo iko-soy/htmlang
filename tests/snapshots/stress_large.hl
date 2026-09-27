@@ -24,7 +24,7 @@
   }
 
 @let @icon-button [label, color var(--primary)]
-  @button [padding 8 16, background $color, hover:background $--dark, color white, border-radius 6, border none, cursor pointer, transition all 0.2s, font-size 14]
+  @button [padding 8 16, background $color, hover:background var(--dark), color white, border-radius 6, border none, cursor pointer, transition all 0.2s, font-size 14]
     $label
 
 @let @badge [label, variant blue]
@@ -32,63 +32,63 @@
     @text $label
 
 @let @card [title]
-  @el [background white, dark:background #1e293b, border-radius $--radius, padding $--gap, border 1 solid $--border, dark:border 1 solid #334155, hover:box-shadow 0 4 12 rgba(0,0,0,0.1), transition all 0.2s, animation fade-in 0.3s ease]
-    @text [font-weight bold, font-size 18, color $--dark, dark:color white] $title
+  @el [background white, dark:background #1e293b, border-radius var(--radius), padding var(--gap), border 1 solid var(--border), dark:border 1 solid #334155, hover:box-shadow 0 4 12 rgba(0,0,0,0.1), transition all 0.2s, animation fade-in 0.3s ease]
+    @text [font-weight bold, font-size 18, color var(--dark), dark:color white] $title
     @el [margin-top 8]
       @children
 
 @let @stat-card [label, value, change]
-  @el [background white, dark:background #1e293b, border-radius $--radius, padding $--gap, border 1 solid $--border, dark:border 1 solid #334155]
-    @text [font-size 14, color $--gray] $label
-    @text [font-weight bold, font-size 28, color $--dark, dark:color white, margin-top 4] $value
-    @text [font-size 12, color $--secondary, margin-top 2] $change
+  @el [background white, dark:background #1e293b, border-radius var(--radius), padding var(--gap), border 1 solid var(--border), dark:border 1 solid #334155]
+    @text [font-size 14, color var(--gray)] $label
+    @text [font-weight bold, font-size 28, color var(--dark), dark:color white, margin-top 4] $value
+    @text [font-size 12, color var(--secondary), margin-top 2] $change
 
 @let @nav-link [url, label, active false]
   @if $active == true
-    @link [color $--primary, font-weight bold, padding 8 12, background #eff6ff, dark:background #1e3a5f, border-radius 6] $url $label
+    @link [color var(--primary), font-weight bold, padding 8 12, background #eff6ff, dark:background #1e3a5f, border-radius 6] $url $label
   @else
-    @link [color $--gray, hover:color $--primary, padding 8 12, hover:background #f1f5f9, dark:hover:background #334155, border-radius 6, transition all 0.15s] $url $label
+    @link [color var(--gray), hover:color var(--primary), padding 8 12, hover:background #f1f5f9, dark:hover:background #334155, border-radius 6, transition all 0.15s] $url $label
 
 @let @sidebar-section [title]
-  @el [margin-bottom $--gap-lg]
-    @text [font-weight bold, font-size 12, color $--gray, text-transform uppercase, letter-spacing 1, margin-bottom $--gap-sm] $title
+  @el [margin-bottom var(--gap-lg)]
+    @text [font-weight bold, font-size 12, color var(--gray), text-transform uppercase, letter-spacing 1, margin-bottom var(--gap-sm)] $title
     @children
 
 @let @avatar [initials, size 32]
-  @el [width $size, height $size, border-radius 50%, background $--primary, color white, display flex, align-items center, justify-content center, font-size 14, font-weight bold]
+  @el [width $size, height $size, border-radius 50%, background var(--primary), color white, display flex, align-items center, justify-content center, font-size 14, font-weight bold]
     @text $initials
 
 @let @table-row [col1, col2, col3, col4]
-  @row [spacing 0, padding 12 16, border-bottom 1 solid $--border, dark:border-bottom 1 solid #334155, hover:background #f8fafc, dark:hover:background #1e293b]
+  @row [spacing 0, padding 12 16, border-bottom 1 solid var(--border), dark:border-bottom 1 solid #334155, hover:background #f8fafc, dark:hover:background #1e293b]
     @el [width 200]
       @text [font-size 14] $col1
     @el [width 150]
-      @text [font-size 14, color $--gray] $col2
+      @text [font-size 14, color var(--gray)] $col2
     @el [width 120]
       @text [font-size 14] $col3
     @el [width fill]
-      @text [font-size 14, color $--gray] $col4
+      @text [font-size 14, color var(--gray)] $col4
 
 @let @breadcrumb-item [url, label, is-last false]
   @if $is-last == true
-    @text [color $--dark, dark:color white, font-size 14] $label
+    @text [color var(--dark), dark:color white, font-size 14] $label
   @else
     @row [spacing 8]
-      @link [color $--gray, hover:color $--primary, font-size 14] $url $label
-      @text [color $--border, font-size 14] /
+      @link [color var(--gray), hover:color var(--primary), font-size 14] $url $label
+      @text [color var(--border), font-size 14] /
 
 @let @alert [message, type info]
   @if $type == info
-    @el [background #eff6ff, border 1 solid #bfdbfe, border-radius $--radius, padding 12 16]
+    @el [background #eff6ff, border 1 solid #bfdbfe, border-radius var(--radius), padding 12 16]
       @text [color #1e40af, font-size 14] $message
   @else if $type == success
-    @el [background #f0fdf4, border 1 solid #bbf7d0, border-radius $--radius, padding 12 16]
+    @el [background #f0fdf4, border 1 solid #bbf7d0, border-radius var(--radius), padding 12 16]
       @text [color #166534, font-size 14] $message
   @else if $type == warning
-    @el [background #fffbeb, border 1 solid #fde68a, border-radius $--radius, padding 12 16]
+    @el [background #fffbeb, border 1 solid #fde68a, border-radius var(--radius), padding 12 16]
       @text [color #92400e, font-size 14] $message
   @else
-    @el [background #fef2f2, border 1 solid #fecaca, border-radius $--radius, padding 12 16]
+    @el [background #fef2f2, border 1 solid #fecaca, border-radius var(--radius), padding 12 16]
       @text [color #991b1b, font-size 14] $message
 
 @let @progress-bar [percent, color var(--primary)]
@@ -96,18 +96,18 @@
     @el [width $percent%, height fill, background $color, border-radius 4]
 
 @let @tag [label]
-  @el [display inline-block, padding 4 10, background #f1f5f9, dark:background #334155, color $--gray, dark:color #94a3b8, border-radius 4, font-size 12, margin 2]
+  @el [display inline-block, padding 4 10, background #f1f5f9, dark:background #334155, color var(--gray), dark:color #94a3b8, border-radius 4, font-size 12, margin 2]
     @text $label
 
 @let @notification-dot
-  @el [width 8, height 8, border-radius 50%, background $--danger]
+  @el [width 8, height 8, border-radius 50%, background var(--danger)]
 
 @let @divider
-  @el [width fill, height 1, background $--border, dark:background #334155, margin 8 0]
+  @el [width fill, height 1, background var(--border), dark:background #334155, margin 8 0]
 
 @let @toggle [checked false]
   @if $checked == true
-    @el [width 40, height 22, border-radius 11, background $--primary, padding 2, cursor pointer, transition all 0.2s]
+    @el [width 40, height 22, border-radius 11, background var(--primary), padding 2, cursor pointer, transition all 0.2s]
       @el [width 18, height 18, border-radius 50%, background white, margin-left 18, transition all 0.2s]
   @else
     @el [width 40, height 22, border-radius 11, background #cbd5e1, dark:background #475569, padding 2, cursor pointer, transition all 0.2s]
@@ -121,13 +121,13 @@
 
 @row [spacing 0, min-height 100vh]
 
-  @el [width 260, background white, dark:background #0f172a, border-right 1 solid $--border, dark:border-right 1 solid #1e293b, padding $--gap, spacing $--gap-sm]
+  @el [width 260, background white, dark:background #0f172a, border-right 1 solid var(--border), dark:border-right 1 solid #1e293b, padding var(--gap), spacing var(--gap-sm)]
 
     @row [spacing 12, padding 8, align-items center]
       @avatar [initials HL, size 36]
       @el [spacing 2]
-        @text [font-weight bold, font-size 16, color $--dark, dark:color white] htmlang
-        @text [font-size 12, color $--gray] Dashboard v2.0
+        @text [font-weight bold, font-size 16, color var(--dark), dark:color white] htmlang
+        @text [font-size 12, color var(--gray)] Dashboard v2.0
 
     @divider
 
@@ -151,58 +151,58 @@
     @sidebar-section [title Shortcuts]
       @el [spacing 4]
         @row [spacing 8, align-items center]
-          @el [width 6, height 6, border-radius 50%, background $--secondary]
-          @text [font-size 13, color $--gray] Online (12)
+          @el [width 6, height 6, border-radius 50%, background var(--secondary)]
+          @text [font-size 13, color var(--gray)] Online (12)
         @row [spacing 8, align-items center]
-          @el [width 6, height 6, border-radius 50%, background $--accent]
-          @text [font-size 13, color $--gray] Away (3)
+          @el [width 6, height 6, border-radius 50%, background var(--accent)]
+          @text [font-size 13, color var(--gray)] Away (3)
         @row [spacing 8, align-items center]
           @el [width 6, height 6, border-radius 50%, background #cbd5e1]
-          @text [font-size 13, color $--gray] Offline (5)
+          @text [font-size 13, color var(--gray)] Offline (5)
 
-    @el [margin-top auto, padding 12, background #f1f5f9, dark:background #1e293b, border-radius $--radius]
+    @el [margin-top auto, padding 12, background #f1f5f9, dark:background #1e293b, border-radius var(--radius)]
       @row [spacing 8, align-items center]
         @avatar [initials JD, size 28]
         @el [spacing 0]
-          @text [font-size 13, font-weight bold, color $--dark, dark:color white] Jane Doe
-          @text [font-size 11, color $--gray] jane@example.com
+          @text [font-size 13, font-weight bold, color var(--dark), dark:color white] Jane Doe
+          @text [font-size 11, color var(--gray)] jane@example.com
 
-  @el [width fill, background $--light, dark:background #0f172a]
+  @el [width fill, background var(--light), dark:background #0f172a]
 
-    @header [padding 12 24, background white, dark:background #0f172a, border-bottom 1 solid $--border, dark:border-bottom 1 solid #1e293b]
+    @header [padding 12 24, background white, dark:background #0f172a, border-bottom 1 solid var(--border), dark:border-bottom 1 solid #1e293b]
       @row [spacing 16, align-items center]
         @el [spacing 2]
           @row [spacing 8]
             @breadcrumb-item [url /, label Home]
             @breadcrumb-item [url /dashboard, label Dashboard, is-last true]
-          @text [font-weight bold, font-size 22, color $--dark, dark:color white] Dashboard Overview
+          @text [font-weight bold, font-size 22, color var(--dark), dark:color white] Dashboard Overview
 
         @el [width fill]
 
         @row [spacing 12, align-items center]
-          @input [type=search, placeholder=Search..., padding 8 12, border-radius 6, border 1 solid $--border, dark:border 1 solid #334155, dark:background #1e293b, dark:color white, width 240, focus:border 1 solid $--primary, transition all 0.2s]
+          @input [type=search, placeholder=Search..., padding 8 12, border-radius 6, border 1 solid var(--border), dark:border 1 solid #334155, dark:background #1e293b, dark:color white, width 240, focus:border 1 solid var(--primary), transition all 0.2s]
           @el [position relative]
             @icon-button [label Alerts]
             @el [position absolute, top -2, right -2]
               @notification-dot
-          @icon-button [label Settings, color $--gray]
+          @icon-button [label Settings, color var(--gray)]
 
-    @el [padding $--gap-lg, overflow-y auto]
+    @el [padding var(--gap-lg), overflow-y auto]
 
       @alert [message Welcome back! You have 3 new notifications and 2 pending tasks., type info]
 
-      @row [spacing $--gap, margin-top $--gap-lg, sm:flex-direction column, lg:flex-direction row]
+      @row [spacing var(--gap), margin-top var(--gap-lg), sm:flex-direction column, lg:flex-direction row]
         @stat-card [label Total Revenue, value $48\,295, change +12.5% from last month]
         @stat-card [label Active Users, value 2\,847, change +8.2% from last week]
         @stat-card [label Conversion Rate, value 3.24%, change +0.4% from yesterday]
         @stat-card [label Open Tickets, value 142, change -5.1% from last month]
 
-      @row [spacing $--gap, margin-top $--gap-lg]
+      @row [spacing var(--gap), margin-top var(--gap-lg)]
 
         @card [title Revenue Overview]
           @el [height 200, background #f8fafc, dark:background #0f172a, border-radius 6, margin-top 12, display flex, align-items flex-end, padding 16, gap 8]
             @each $height in 40,65,45,80,55,70,90,60,75,85,50,95
-              @el [width fill, height $height%, background $--primary, hover:background #2563eb, border-radius 4 4 0 0, transition all 0.2s, min-width 20]
+              @el [width fill, height $height%, background var(--primary), hover:background #2563eb, border-radius 4 4 0 0, transition all 0.2s, min-width 20]
 
         @card [title Activity Feed]
           @el [spacing 12, margin-top 12]
@@ -210,25 +210,25 @@
               @row [spacing 12, align-items center, padding 8, hover:background #f8fafc, dark:hover:background #1e293b, border-radius 6]
                 @avatar [initials $member, size 32]
                 @el [spacing 2, width fill]
-                  @text [font-size 14, font-weight bold, color $--dark, dark:color white] $member
-                  @text [font-size 12, color $--gray] Updated project files
-                @text [font-size 11, color $--gray] 2h ago
+                  @text [font-size 14, font-weight bold, color var(--dark), dark:color white] $member
+                  @text [font-size 12, color var(--gray)] Updated project files
+                @text [font-size 11, color var(--gray)] 2h ago
 
-      @row [spacing $--gap, margin-top $--gap-lg, sm:flex-direction column, lg:flex-direction row]
+      @row [spacing var(--gap), margin-top var(--gap-lg), sm:flex-direction column, lg:flex-direction row]
 
-        @el [width fill, spacing $--gap]
+        @el [width fill, spacing var(--gap)]
 
           @card [title Project Status]
             @el [spacing 0, margin-top 12]
-              @row [spacing 0, padding 8 16, background #f8fafc, dark:background #0f172a, border-bottom 1 solid $--border]
+              @row [spacing 0, padding 8 16, background #f8fafc, dark:background #0f172a, border-bottom 1 solid var(--border)]
                 @el [width 200]
-                  @text [font-weight bold, font-size 12, color $--gray, text-transform uppercase] Project
+                  @text [font-weight bold, font-size 12, color var(--gray), text-transform uppercase] Project
                 @el [width 150]
-                  @text [font-weight bold, font-size 12, color $--gray, text-transform uppercase] Status
+                  @text [font-weight bold, font-size 12, color var(--gray), text-transform uppercase] Status
                 @el [width 120]
-                  @text [font-weight bold, font-size 12, color $--gray, text-transform uppercase] Progress
+                  @text [font-weight bold, font-size 12, color var(--gray), text-transform uppercase] Progress
                 @el [width fill]
-                  @text [font-weight bold, font-size 12, color $--gray, text-transform uppercase] Due Date
+                  @text [font-weight bold, font-size 12, color var(--gray), text-transform uppercase] Due Date
 
               @table-row [col1 Project Alpha, col2 In Progress, col3 75%, col4 Dec 15 2025]
               @table-row [col1 Project Beta, col2 Review, col3 90%, col4 Nov 30 2025]
@@ -241,8 +241,8 @@
               @each $project in $projects
                 @el [spacing 4]
                   @row [spacing 0]
-                    @text [font-size 13, color $--dark, dark:color white, width fill] $project
-                    @text [font-size 13, color $--gray] 67%
+                    @text [font-size 13, color var(--dark), dark:color white, width fill] $project
+                    @text [font-size 13, color var(--gray)] 67%
                   @progress-bar [percent 67, color var(--primary)]
 
           @card [title Recent Activity Log]
@@ -251,11 +251,11 @@
               @each $entry, $i in $log-entries
                 @row [spacing 12, padding 8 12, align-items center]
                   @el [width 24, height 24, border-radius 50%, background #eff6ff, dark:background #1e3a5f, display flex, align-items center, justify-content center]
-                    @text [font-size 10, color $--primary, font-weight bold] $i
-                  @text [font-size 14, color $--dark, dark:color white, width fill] $entry
-                  @text [font-size 11, color $--gray] just now
+                    @text [font-size 10, color var(--primary), font-weight bold] $i
+                  @text [font-size 14, color var(--dark), dark:color white, width fill] $entry
+                  @text [font-size 11, color var(--gray)] just now
 
-        @el [width 340, sm:width fill, spacing $--gap]
+        @el [width 340, sm:width fill, spacing var(--gap)]
 
           @card [title Quick Actions]
             @el [spacing 8, margin-top 12]
@@ -270,9 +270,9 @@
                 @row [spacing 10, align-items center, padding 6 8, hover:background #f1f5f9, dark:hover:background #1e293b, border-radius 6, transition all 0.15s]
                   @avatar [initials $member, size 28]
                   @el [spacing 0, width fill]
-                    @text [font-size 13, font-weight bold, color $--dark, dark:color white] $member
-                    @text [font-size 11, color $--gray] Developer
-                  @el [width 8, height 8, border-radius 50%, background $--secondary]
+                    @text [font-size 13, font-weight bold, color var(--dark), dark:color white] $member
+                    @text [font-size 11, color var(--gray)] Developer
+                  @el [width 8, height 8, border-radius 50%, background var(--secondary)]
 
           @card [title Tags]
             @row [spacing 0, wrap, margin-top 8]
@@ -293,104 +293,104 @@
             @el [spacing 0, margin-top 12]
               @let notifications New deployment completed,PR review requested,Build failed on staging,Meeting in 30 minutes,Subscription renewal due
               @each $note in $notifications
-                @row [spacing 10, padding 10 12, border-bottom 1 solid $--border, dark:border-bottom 1 solid #334155, align-items center]
+                @row [spacing 10, padding 10 12, border-bottom 1 solid var(--border), dark:border-bottom 1 solid #334155, align-items center]
                   @notification-dot
-                  @text [font-size 13, color $--dark, dark:color white, width fill] $note
-                  @text [font-size 11, color $--gray] now
+                  @text [font-size 13, color var(--dark), dark:color white, width fill] $note
+                  @text [font-size 11, color var(--gray)] now
 
           @card [title Settings]
             @el [spacing 12, margin-top 12]
               @row [spacing 0, align-items center]
-                @text [font-size 14, color $--dark, dark:color white, width fill] Dark Mode
+                @text [font-size 14, color var(--dark), dark:color white, width fill] Dark Mode
                 @toggle [checked true]
               @row [spacing 0, align-items center]
-                @text [font-size 14, color $--dark, dark:color white, width fill] Notifications
+                @text [font-size 14, color var(--dark), dark:color white, width fill] Notifications
                 @toggle [checked true]
               @row [spacing 0, align-items center]
-                @text [font-size 14, color $--dark, dark:color white, width fill] Auto-save
+                @text [font-size 14, color var(--dark), dark:color white, width fill] Auto-save
                 @toggle [checked false]
               @row [spacing 0, align-items center]
-                @text [font-size 14, color $--dark, dark:color white, width fill] Compact View
+                @text [font-size 14, color var(--dark), dark:color white, width fill] Compact View
                 @toggle [checked false]
 
-      @el [margin-top $--gap-lg]
+      @el [margin-top var(--gap-lg)]
         @card [title Data Table]
           @el [spacing 0, margin-top 12]
             @row [spacing 16, margin-bottom 12, align-items center]
-              @input [type=search, placeholder=Filter results..., padding 8 12, border-radius 6, border 1 solid $--border, width 240]
+              @input [type=search, placeholder=Filter results..., padding 8 12, border-radius 6, border 1 solid var(--border), width 240]
               @el [width fill]
               @row [spacing 8]
                 @each $cat in $categories
-                  @button [padding 6 12, border-radius 4, border 1 solid $--border, background white, dark:background #1e293b, hover:background #f1f5f9, color $--gray, hover:color $--dark, font-size 13, cursor pointer, transition all 0.15s] $cat
+                  @button [padding 6 12, border-radius 4, border 1 solid var(--border), background white, dark:background #1e293b, hover:background #f1f5f9, color var(--gray), hover:color var(--dark), font-size 13, cursor pointer, transition all 0.15s] $cat
 
-            @row [spacing 0, padding 8 16, background #f8fafc, dark:background #0f172a, border-bottom 2 solid $--border, border-radius 6 6 0 0]
+            @row [spacing 0, padding 8 16, background #f8fafc, dark:background #0f172a, border-bottom 2 solid var(--border), border-radius 6 6 0 0]
               @el [width 60]
-                @text [font-weight bold, font-size 12, color $--gray, text-transform uppercase] ID
+                @text [font-weight bold, font-size 12, color var(--gray), text-transform uppercase] ID
               @el [width 200]
-                @text [font-weight bold, font-size 12, color $--gray, text-transform uppercase] Name
+                @text [font-weight bold, font-size 12, color var(--gray), text-transform uppercase] Name
               @el [width 150]
-                @text [font-weight bold, font-size 12, color $--gray, text-transform uppercase] Category
+                @text [font-weight bold, font-size 12, color var(--gray), text-transform uppercase] Category
               @el [width 120]
-                @text [font-weight bold, font-size 12, color $--gray, text-transform uppercase] Status
+                @text [font-weight bold, font-size 12, color var(--gray), text-transform uppercase] Status
               @el [width fill]
-                @text [font-weight bold, font-size 12, color $--gray, text-transform uppercase] Updated
+                @text [font-weight bold, font-size 12, color var(--gray), text-transform uppercase] Updated
 
             @each $status in $statuses
               @each $project in $projects
-                @row [spacing 0, padding 10 16, border-bottom 1 solid $--border, dark:border-bottom 1 solid #334155, hover:background #f8fafc, dark:hover:background #1e293b, cursor pointer, transition all 0.1s]
+                @row [spacing 0, padding 10 16, border-bottom 1 solid var(--border), dark:border-bottom 1 solid #334155, hover:background #f8fafc, dark:hover:background #1e293b, cursor pointer, transition all 0.1s]
                   @el [width 60]
-                    @text [font-size 13, color $--gray] #42
+                    @text [font-size 13, color var(--gray)] #42
                   @el [width 200]
                     @row [spacing 8, align-items center]
                       @avatar [initials $project, size 24]
-                      @text [font-size 14, color $--dark, dark:color white] $project
+                      @text [font-size 14, color var(--dark), dark:color white] $project
                   @el [width 150]
-                    @text [font-size 13, color $--gray] $status
+                    @text [font-size 13, color var(--gray)] $status
                   @el [width 120]
                     @badge [label $status, variant var(--secondary)]
                   @el [width fill]
-                    @text [font-size 13, color $--gray] 2 hours ago
+                    @text [font-size 13, color var(--gray)] 2 hours ago
 
-            @row [spacing 16, padding 12 16, align-items center, border-top 1 solid $--border]
-              @text [font-size 13, color $--gray] Showing 1-20 of 142 results
+            @row [spacing 16, padding 12 16, align-items center, border-top 1 solid var(--border)]
+              @text [font-size 13, color var(--gray)] Showing 1-20 of 142 results
               @el [width fill]
               @row [spacing 4]
-                @button [padding 6 10, border-radius 4, border 1 solid $--border, background white, dark:background #1e293b, color $--gray, font-size 13, cursor pointer] Prev
-                @button [padding 6 10, border-radius 4, border 1 solid $--primary, background $--primary, color white, font-size 13, cursor pointer] 1
-                @button [padding 6 10, border-radius 4, border 1 solid $--border, background white, dark:background #1e293b, color $--gray, font-size 13, cursor pointer] 2
-                @button [padding 6 10, border-radius 4, border 1 solid $--border, background white, dark:background #1e293b, color $--gray, font-size 13, cursor pointer] 3
-                @button [padding 6 10, border-radius 4, border 1 solid $--border, background white, dark:background #1e293b, color $--gray, font-size 13, cursor pointer] Next
+                @button [padding 6 10, border-radius 4, border 1 solid var(--border), background white, dark:background #1e293b, color var(--gray), font-size 13, cursor pointer] Prev
+                @button [padding 6 10, border-radius 4, border 1 solid var(--primary), background var(--primary), color white, font-size 13, cursor pointer] 1
+                @button [padding 6 10, border-radius 4, border 1 solid var(--border), background white, dark:background #1e293b, color var(--gray), font-size 13, cursor pointer] 2
+                @button [padding 6 10, border-radius 4, border 1 solid var(--border), background white, dark:background #1e293b, color var(--gray), font-size 13, cursor pointer] 3
+                @button [padding 6 10, border-radius 4, border 1 solid var(--border), background white, dark:background #1e293b, color var(--gray), font-size 13, cursor pointer] Next
 
-    @footer [padding $--gap-lg 24, background white, dark:background #0f172a, border-top 1 solid $--border, dark:border-top 1 solid #1e293b]
-      @row [spacing $--gap-lg, sm:flex-direction column, lg:flex-direction row]
+    @footer [padding var(--gap-lg) 24, background white, dark:background #0f172a, border-top 1 solid var(--border), dark:border-top 1 solid #1e293b]
+      @row [spacing var(--gap-lg), sm:flex-direction column, lg:flex-direction row]
         @el [spacing 8, width fill]
-          @text [font-weight bold, font-size 14, color $--dark, dark:color white] htmlang Dashboard
-          @text [font-size 12, color $--gray] Built with htmlang - a declarative HTML language
-          @text [font-size 11, color $--gray] Copyright 2025 htmlang contributors
+          @text [font-weight bold, font-size 14, color var(--dark), dark:color white] htmlang Dashboard
+          @text [font-size 12, color var(--gray)] Built with htmlang - a declarative HTML language
+          @text [font-size 11, color var(--gray)] Copyright 2025 htmlang contributors
 
         @el [spacing 4]
-          @text [font-weight bold, font-size 12, color $--gray, text-transform uppercase, margin-bottom 4] Product
-          @link [color $--gray, hover:color $--primary, font-size 13] /features Features
-          @link [color $--gray, hover:color $--primary, font-size 13] /pricing Pricing
-          @link [color $--gray, hover:color $--primary, font-size 13] /changelog Changelog
-          @link [color $--gray, hover:color $--primary, font-size 13] /roadmap Roadmap
+          @text [font-weight bold, font-size 12, color var(--gray), text-transform uppercase, margin-bottom 4] Product
+          @link [color var(--gray), hover:color var(--primary), font-size 13] /features Features
+          @link [color var(--gray), hover:color var(--primary), font-size 13] /pricing Pricing
+          @link [color var(--gray), hover:color var(--primary), font-size 13] /changelog Changelog
+          @link [color var(--gray), hover:color var(--primary), font-size 13] /roadmap Roadmap
 
         @el [spacing 4]
-          @text [font-weight bold, font-size 12, color $--gray, text-transform uppercase, margin-bottom 4] Resources
-          @link [color $--gray, hover:color $--primary, font-size 13] /docs Documentation
-          @link [color $--gray, hover:color $--primary, font-size 13] /api API Reference
-          @link [color $--gray, hover:color $--primary, font-size 13] /guides Guides
-          @link [color $--gray, hover:color $--primary, font-size 13] /examples Examples
+          @text [font-weight bold, font-size 12, color var(--gray), text-transform uppercase, margin-bottom 4] Resources
+          @link [color var(--gray), hover:color var(--primary), font-size 13] /docs Documentation
+          @link [color var(--gray), hover:color var(--primary), font-size 13] /api API Reference
+          @link [color var(--gray), hover:color var(--primary), font-size 13] /guides Guides
+          @link [color var(--gray), hover:color var(--primary), font-size 13] /examples Examples
 
         @el [spacing 4]
-          @text [font-weight bold, font-size 12, color $--gray, text-transform uppercase, margin-bottom 4] Company
-          @link [color $--gray, hover:color $--primary, font-size 13] /about About
-          @link [color $--gray, hover:color $--primary, font-size 13] /blog Blog
-          @link [color $--gray, hover:color $--primary, font-size 13] /careers Careers
-          @link [color $--gray, hover:color $--primary, font-size 13] /contact Contact
+          @text [font-weight bold, font-size 12, color var(--gray), text-transform uppercase, margin-bottom 4] Company
+          @link [color var(--gray), hover:color var(--primary), font-size 13] /about About
+          @link [color var(--gray), hover:color var(--primary), font-size 13] /blog Blog
+          @link [color var(--gray), hover:color var(--primary), font-size 13] /careers Careers
+          @link [color var(--gray), hover:color var(--primary), font-size 13] /contact Contact
 
         @el [spacing 4]
-          @text [font-weight bold, font-size 12, color $--gray, text-transform uppercase, margin-bottom 4] Legal
-          @link [color $--gray, hover:color $--primary, font-size 13] /privacy Privacy Policy
-          @link [color $--gray, hover:color $--primary, font-size 13] /terms Terms of Service
-          @link [color $--gray, hover:color $--primary, font-size 13] /cookies Cookie Policy
+          @text [font-weight bold, font-size 12, color var(--gray), text-transform uppercase, margin-bottom 4] Legal
+          @link [color var(--gray), hover:color var(--primary), font-size 13] /privacy Privacy Policy
+          @link [color var(--gray), hover:color var(--primary), font-size 13] /terms Terms of Service
+          @link [color var(--gray), hover:color var(--primary), font-size 13] /cookies Cookie Policy

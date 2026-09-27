@@ -32,8 +32,9 @@
 //! `if(cond, a, b)` (`b` may be left out: empty), tests (`contains(s, x)`,
 //! `starts-with(s, x)`, `ends-with(s, x)`), text (`uppercase`, `lowercase`,
 //! `capitalize`, `trim`, `length`, `reverse`, `truncate(s, n)`,
-//! `replace(s, old, new)`, `default(s, fallback)`) and colors
-//! (`lighten(c, pct)`, `darken(c, pct)`, `alpha(c, a)`, `mix(c1, c2, pct)`).
+//! `replace(s, old, new)`, `default(s, fallback)`). A colour variant is
+//! CSS, not a function here: `color-mix(in srgb, var(--brand), black 8%)`
+//! is an attribute's value, written as it is.
 //! `length`, `contains` and `reverse` work on the items of a list; the other
 //! text functions take text, and a list is an error (a text with commas in
 //! it is written in quotes or with `\,`, so it isn't a list).
@@ -186,10 +187,11 @@ fn tokenize(
                     i += 1 + len;
                 }
                 None => {
-                    return Err(Error::Invalid(format!(
-                        "`$` without a variable name in `{}`",
-                        src.trim()
-                    )));
+                    let n = interp::custom_property_len(&src[i + 1..]);
+                    return Err(Error::Invalid(match n {
+                        0 => format!("`$` without a variable name in `{}`", src.trim()),
+                        n => interp::custom_property_message(&src[i + 1..i + 1 + n]),
+                    }));
                 }
             }
         } else if let Some(op) = OPERATORS
@@ -415,6 +417,9 @@ impl Parser<'_> {
                     Some(Problem::Invalid { message, .. } | Problem::Record { message, .. }) => {
                         Err(Error::Invalid(message))
                     }
+                    Some(Problem::CustomProperty { name, .. }) => {
+                        Err(Error::Invalid(interp::custom_property_message(&name)))
+                    }
                 }
             }
             Token::Var(name) => {
@@ -520,10 +525,6 @@ const FUNCTIONS: &[(&str, usize)] = &[
     ("truncate", 2),
     ("replace", 3),
     ("default", 2),
-    ("lighten", 2),
-    ("darken", 2),
-    ("alpha", 2),
-    ("mix", 3),
 ];
 
 /// Check that `name` is a built-in function and gets `count` arguments.
@@ -571,7 +572,6 @@ fn call(name: &str, args: Vec<Value>) -> Result<Value, String> {
             .and_then(Value::as_num)
             .ok_or_else(|| format!("{}() needs a number as argument {}", name, i + 1))
     };
-    let color = |rgb: (u8, u8, u8)| Value::Str(format!("#{:02x}{:02x}{:02x}", rgb.0, rgb.1, rgb.2));
     Ok(match name {
         "contains" => Value::Bool(match &args[0] {
             Value::List(list) => list.items.iter().any(|item| item.equals(&args[1])),
@@ -617,74 +617,8 @@ fn call(name: &str, args: Vec<Value>) -> Result<Value, String> {
             let mut args = args;
             args.swap_remove(usize::from(empty))
         }
-        "lighten" | "darken" | "alpha" | "mix" => {
-            let c = text(0)?;
-            let Some(rgb) = parse_hex_rgb(&c) else {
-                return Err(format!("{}() needs a hex color, got `{}`", name, c));
-            };
-            match name {
-                "lighten" => color(lighten_color(rgb, num(1)? / 100.0)),
-                "darken" => color(darken_color(rgb, num(1)? / 100.0)),
-                "alpha" => {
-                    let a = (num(1)?.clamp(0.0, 1.0) * 255.0) as u8;
-                    Value::Str(format!("#{:02x}{:02x}{:02x}{:02x}", rgb.0, rgb.1, rgb.2, a))
-                }
-                _ => {
-                    let other = text(1)?;
-                    let Some(other) = parse_hex_rgb(&other) else {
-                        return Err(format!("mix() needs a hex color, got `{}`", other));
-                    };
-                    color(mix_colors(rgb, other, num(2)? / 100.0))
-                }
-            }
-        }
         _ => return Err(format!("unknown function `{}()`", name)),
     })
-}
-
-pub(crate) fn parse_hex_rgb(s: &str) -> Option<(u8, u8, u8)> {
-    let s = s.strip_prefix('#')?;
-    if !s.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return None;
-    }
-    match s.len() {
-        3 => {
-            let r = u8::from_str_radix(&s[0..1], 16).ok()?;
-            let g = u8::from_str_radix(&s[1..2], 16).ok()?;
-            let b = u8::from_str_radix(&s[2..3], 16).ok()?;
-            Some((r * 17, g * 17, b * 17))
-        }
-        6 => {
-            let r = u8::from_str_radix(&s[0..2], 16).ok()?;
-            let g = u8::from_str_radix(&s[2..4], 16).ok()?;
-            let b = u8::from_str_radix(&s[4..6], 16).ok()?;
-            Some((r, g, b))
-        }
-        _ => None,
-    }
-}
-
-fn lighten_color(rgb: (u8, u8, u8), amount: f64) -> (u8, u8, u8) {
-    let r = rgb.0 as f64 + (255.0 - rgb.0 as f64) * amount.clamp(0.0, 1.0);
-    let g = rgb.1 as f64 + (255.0 - rgb.1 as f64) * amount.clamp(0.0, 1.0);
-    let b = rgb.2 as f64 + (255.0 - rgb.2 as f64) * amount.clamp(0.0, 1.0);
-    (r.round() as u8, g.round() as u8, b.round() as u8)
-}
-
-fn darken_color(rgb: (u8, u8, u8), amount: f64) -> (u8, u8, u8) {
-    let factor = 1.0 - amount.clamp(0.0, 1.0);
-    let r = (rgb.0 as f64 * factor).round() as u8;
-    let g = (rgb.1 as f64 * factor).round() as u8;
-    let b = (rgb.2 as f64 * factor).round() as u8;
-    (r, g, b)
-}
-
-fn mix_colors(c1: (u8, u8, u8), c2: (u8, u8, u8), weight: f64) -> (u8, u8, u8) {
-    let w = weight.clamp(0.0, 1.0);
-    let r = (c1.0 as f64 * (1.0 - w) + c2.0 as f64 * w).round() as u8;
-    let g = (c1.1 as f64 * (1.0 - w) + c2.1 as f64 * w).round() as u8;
-    let b = (c1.2 as f64 * (1.0 - w) + c2.2 as f64 * w).round() as u8;
-    (r, g, b)
 }
 
 #[cfg(test)]
@@ -760,7 +694,7 @@ mod tests {
         // and / or stop at the side that decides
         assert_eq!(ev0("$n != 0 and 10 / $n > 1"), Ok("false".into()));
         assert_eq!(ev0("$n == 0 or 10 / $n > 1"), Ok("true".into()));
-        assert_eq!(ev0("$on or darken(red, 10)"), Ok("true".into()));
+        assert_eq!(ev0("$on or truncate(abc, x)"), Ok("true".into()));
         // The branch not taken is still read: its syntax, function names and
         // argument counts are checked; its variables and values are not
         assert_eq!(ev0("if($on, 1, $undefined)"), Ok("1".into()));
@@ -806,9 +740,6 @@ mod tests {
         assert_eq!(ev("truncate($name, 2)").to_string(), "Wo...");
         assert_eq!(ev("replace($name, o, 0)").to_string(), "W0rld");
         assert_eq!(ev("default($empty, none)").to_string(), "none");
-        assert_eq!(ev("darken(#ffffff, 50)").to_string(), "#808080");
-        assert_eq!(ev("mix(#000000, #ffffff, 50)").to_string(), "#808080");
-        assert_eq!(ev("alpha(#3b82f6, 0.5)").to_string(), "#3b82f67f");
     }
 
     #[test]
@@ -856,6 +787,15 @@ mod tests {
         assert!(eval("1 / 0", &none).is_err());
         assert!(eval("nope(1)", &none).is_err());
         assert!(eval("uppercase(a, b)", &none).is_err());
-        assert!(eval("darken(red, 10)", &none).is_err());
+        // Colour maths is CSS's (`color-mix()`), and a custom property is
+        // read with `var()`
+        for gone in ["darken", "lighten", "alpha", "mix"] {
+            let error = eval(&format!("{}(red, 10)", gone), &none).unwrap_err();
+            assert!(error.to_string().contains("unknown function"), "{}", error);
+        }
+        let error = eval("$--brand == red", &none).unwrap_err().to_string();
+        assert!(error.contains("`var(--brand)`"), "{}", error);
+        let error = eval("\"a $--brand\"", &none).unwrap_err().to_string();
+        assert!(error.contains("`var(--brand)`"), "{}", error);
     }
 }

@@ -19,8 +19,7 @@
 @meta description Launchpad turns static pages into a product site in minutes.
 @meta og:title Launchpad
 
--- Design tokens: CSS custom properties on :root, usable as var(--name) and
--- $--name
+-- Design tokens: CSS custom properties on :root, read as var(--name)
 @let --brand #2563eb
 @let --ink #0f172a
 @let --muted #64748b
@@ -38,7 +37,7 @@
 
 -- Functions: parameters are attributes, extra attributes style the root
 @let @primary-link [href]
-  @link [$button, background var(--brand), color white, hover:background ${darken($--brand, 8)}] $href
+  @link [$button, background var(--brand), color white, hover:background color-mix(in srgb, var(--brand), black 8%)] $href
     @children
 
 @let @secondary-link [href]

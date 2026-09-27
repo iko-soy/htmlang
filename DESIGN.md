@@ -36,7 +36,8 @@ Every example block in this file is compiled by the test suite
   the source doesn't ask for, and it doesn't leave out anything you wrote:
   what can't go into the page is an error.
 - **Everything runs at compile time.** Variables, expressions, loops and
-  conditions are resolved when the page is built.
+  conditions are resolved when the page is built. What CSS computes in the
+  browser (`var()`, `calc()`, `color-mix()`) stays CSS, written as it is.
 
 ## Syntax
 
@@ -1265,16 +1266,34 @@ function named `@if` could never be called, so both are warnings.
 
 `@let --name value` declares the CSS custom property `--name` on `:root`,
 for the whole page. Its value is written as it is, with no pixels added,
-so a length takes its unit (`@let --radius 8px`). `var(--name)` refers to
-it at run time, so an element (`[dark:--name value]`, see
+so a length takes its unit (`@let --radius 8px`). A token is read one way,
+`var(--name)`, in the browser, so an element (`[dark:--name value]`, see
 [Custom properties](#custom-properties)) or a stylesheet can still
-redefine it. `$--name` is its value at compile time, for use in
-expressions:
+redefine it. It is not a variable: `$--name` is an error that says to
+write `var(--name)`.
+
+A colour variant of a token is CSS too, so it follows the token wherever
+it is redefined: `color-mix()` mixes two colours, and a relative colour
+(`rgb(from ...)`) keeps a colour's channels except those you write (`/ 0.5`
+for its alpha). `in srgb` mixes the red, green and blue channels, as most
+colour tools do; `in oklab` gives steps that look more even, a good choice
+for new tokens.
+
+| For | Write |
+|---|---|
+| A darker colour | `color-mix(in srgb, var(--brand), black 10%)` |
+| A lighter colour | `color-mix(in srgb, var(--brand), white 10%)` |
+| A transparent colour | `rgb(from var(--brand) r g b / 0.5)` |
+| Two colours mixed | `color-mix(in srgb, var(--brand), #f43f5e 50%)` |
 
 ```
 @let --brand #3b82f6
 @let --radius 8px
-@el [background var(--brand), border-radius var(--radius), border 1 solid ${darken($--brand, 10)}] Themed
+@page [dark:--brand #60a5fa] Themed
+@el [background var(--brand), border-radius var(--radius), border 1 solid color-mix(in srgb, var(--brand), black 10%)] Themed
+@row
+  @each $shade in 0, 10, 20, 30
+    @el [background color-mix(in srgb, var(--brand), black $shade%)] $shade%
 ```
 
 ## Expressions
@@ -1290,7 +1309,12 @@ Conditions and computed values (`@let x = ...`) are expressions:
 | Choice | `if(CONDITION, A, B)`, where `B` may be left out (empty) |
 | Tests | `contains(s, x)` (in a text, or as an item of a list), `starts-with(s, x)`, `ends-with(s, x)` |
 | Text | `uppercase(s)`, `lowercase(s)`, `capitalize(s)`, `trim(s)`, `length(s)` (the items of a list, or the characters of a text), `reverse(s)` (a list's items, or a text's characters), `truncate(s, n)`, `replace(s, old, new)`, `default(s, fallback)` (the fallback when `s` is empty text or an empty list) |
-| Color | `lighten(c, pct)`, `darken(c, pct)`, `alpha(c, a)`, `mix(c1, c2, pct)` |
+
+Colour maths is CSS's, not an expression's: see
+[CSS custom properties](#css-custom-properties). A CSS function such as
+`color-mix()` goes in an attribute's value as it is, or in a plain
+`@let` value (`@let hover color-mix(in srgb, var(--brand), black 8%)`),
+not in `@let x = ...` or `${...}`.
 
 Variables are looked up during evaluation, so a value that contains `==` or
 spaces is still one value. An invalid expression is a compile error, and so
@@ -1310,8 +1334,8 @@ expression (see [Variables](#variables)):
 
 ```
 @let name htmlang
-@let base #3b82f6
-@text [color ${darken($base, 10)}] ${uppercase($name)} has ${length($name)} letters
+@let size 12
+@text [font-size ${$size + 4}] ${uppercase($name)} has ${length($name)} letters
 ```
 
 ## Control flow

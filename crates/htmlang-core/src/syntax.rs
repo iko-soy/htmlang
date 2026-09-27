@@ -624,13 +624,16 @@ fn visible_in<'a>(block: &'a [Node], line: usize, out: &mut Vec<Visible<'a>>) {
                     LetForm::Bundle(_) => DefinitionKind::Bundle,
                     _ => DefinitionKind::Value,
                 };
-                // `@let t.greeting` gives the record `t` a field
+                // `@let t.greeting` gives the record `t` a field; `@let
+                // --brand` is a custom property, read with `var(--brand)`
                 let name = def.name.split('.').next().unwrap_or(&def.name);
-                out.push(Visible {
-                    name,
-                    kind: VisibleKind::Let(kind),
-                    span: def.name_span,
-                });
+                if !name.starts_with("--") {
+                    out.push(Visible {
+                        name,
+                        kind: VisibleKind::Let(kind),
+                        span: def.name_span,
+                    });
+                }
                 if let (true, LetForm::Function(function)) = (inside, &def.form) {
                     out.extend(function.params.iter().map(|p| Visible {
                         name: &p.name,
@@ -2157,12 +2160,12 @@ fn shadowed(name: &str) -> Option<String> {
 /// name `$name` reaches (`t.greeting` too, for a record's field), or a
 /// custom property `--name`.
 fn is_definition_name(name: &str) -> bool {
+    if name.starts_with("--") {
+        return crate::interp::custom_property_len(name) == name.len();
+    }
     let n = crate::interp::name_len(name);
     if n == 0 || matches!(&name[..n], "true" | "false" | "not" | "and" | "or") {
         return false;
-    }
-    if name.starts_with("--") {
-        return n == name.len();
     }
     name[n..].split('.').skip(1).all(|field| {
         !field.is_empty()

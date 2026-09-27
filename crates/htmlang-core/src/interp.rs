@@ -9,7 +9,10 @@
 //!
 //! - `$` followed by a letter or `_` starts a name, which goes on with
 //!   letters, digits, `_` and `-` (a `-` only when a name character follows
-//!   it). `$--name` is the value of the custom property `--name`.
+//!   it).
+//! - `$--name` is an error: a custom property is read one way, with
+//!   `var(--name)`, in the browser, so it follows a token redefined under
+//!   `dark:`. See [`custom_property_len`].
 //! - `.field` continues the name only when the value is a record or a list
 //!   (`$post.title`, `$tags.0`). After `@let lang fr`, `$lang.json` is
 //!   `fr.json`, and `$a..$b` is two names.
@@ -85,6 +88,8 @@ pub fn css_string_body(text: &str) -> String {
 pub enum Problem {
     /// A name with no definition.
     Undefined { name: String, offset: usize },
+    /// `$--name`: a custom property, which is read with `var(--name)`.
+    CustomProperty { name: String, offset: usize },
     /// A `${...}` whose expression doesn't evaluate.
     Invalid { message: String, offset: usize },
     /// A record put where text goes, which it has none of: it would print
@@ -151,13 +156,29 @@ fn word_len(s: &str, first: impl Fn(char) -> bool) -> usize {
 /// The length of the variable name at the start of `s` (the text after a
 /// `$`), by syntax alone, or 0 when `s` doesn't start one.
 pub fn name_len(s: &str) -> usize {
+    word_len(s, |c| c.is_alphabetic() || c == '_')
+}
+
+/// The length of the custom property's name `--name` at the start of `s`
+/// (the text after a `$`), or 0. `$--name` is not a variable and not text
+/// either: it is an error that says to write `var(--name)`.
+pub fn custom_property_len(s: &str) -> usize {
     match s.strip_prefix("--") {
-        Some(rest) => match word_len(rest, char::is_alphabetic) {
+        Some(rest) => match word_len(rest, |c| c.is_alphanumeric() || c == '_') {
             0 => 0,
             n => n + 2,
         },
-        None => word_len(s, |c| c.is_alphabetic() || c == '_'),
+        None => 0,
     }
+}
+
+/// What is wrong with `$NAME`, where `name` is a custom property's name
+/// (`--brand`).
+pub fn custom_property_message(name: &str) -> String {
+    format!(
+        "`${}` is not a variable: a custom property is read with `var({})`",
+        name, name
+    )
 }
 
 /// Whether `s` is a whole name path, `name` or `name.field.field`.
@@ -307,8 +328,15 @@ pub fn interpolate_for(text: &str, scope: &dyn Scope, sink: Sink) -> (String, Ve
         }
         let after = &text[dollar + 1..];
         let Some((reference, len)) = reference(after, scope) else {
-            out.push('$');
-            pos = dollar + 1;
+            let n = custom_property_len(after);
+            if n > 0 {
+                problems.push(Problem::CustomProperty {
+                    name: after[..n].to_string(),
+                    offset: dollar,
+                });
+            }
+            out.push_str(&text[dollar..dollar + 1 + n]);
+            pos = dollar + 1 + n;
             continue;
         };
         let written = &text[dollar..dollar + 1 + len];
@@ -478,14 +506,9 @@ pub(crate) mod tests {
     }
 
     fn vars() -> Map {
-        Map::new(&[
-            ("lang", "fr"),
-            ("n", "3"),
-            ("n-1", "two"),
-            ("--brand", "#3b82f6"),
-        ])
-        .with("post", record(&[("title", "Hello")]))
-        .with("tags", text_list(&["a", "b"]))
+        Map::new(&[("lang", "fr"), ("n", "3"), ("n-1", "two")])
+            .with("post", record(&[("title", "Hello")]))
+            .with("tags", text_list(&["a", "b"]))
     }
 
     fn fill(text: &str) -> String {
@@ -500,7 +523,6 @@ pub(crate) mod tests {
         assert_eq!(fill("${lang}uage"), "fruage");
         assert_eq!(fill("$lang- $lang:"), "fr- fr:");
         assert_eq!(fill("$n-1"), "two");
-        assert_eq!(fill("$--brand"), "#3b82f6");
         assert_eq!(fill("1..$n"), "1..3");
         // A name ends at `..`
         assert_eq!(fill("$n..$n $post.title..x"), "3..3 Hello..x");
@@ -510,6 +532,27 @@ pub(crate) mod tests {
     fn a_dollar_before_anything_else_is_text() {
         assert_eq!(fill("$5 and $$ and $"), "$5 and $$ and $");
         assert_eq!(fill("a $-x ${"), "a $-x ${");
+    }
+
+    #[test]
+    fn a_custom_property_is_not_a_variable() {
+        let (out, problems) = interpolate("x $--brand-dark $-- $--1", &vars());
+        assert_eq!(out, "x $--brand-dark $-- $--1");
+        assert_eq!(
+            problems,
+            [
+                Problem::CustomProperty {
+                    name: "--brand-dark".into(),
+                    offset: 2
+                },
+                Problem::CustomProperty {
+                    name: "--1".into(),
+                    offset: 20
+                }
+            ]
+        );
+        assert!(custom_property_message("--brand").contains("`var(--brand)`"));
+        assert_eq!(names("$--e $f"), ["f"]);
     }
 
     #[test]
@@ -571,10 +614,7 @@ pub(crate) mod tests {
 
     #[test]
     fn names_by_syntax() {
-        assert_eq!(
-            names("$a.b ${c} ${upper($d)} $5 $--e"),
-            ["a", "c", "d", "--e"]
-        );
+        assert_eq!(names("$a.b ${c} ${upper($d)} $5 $--e"), ["a", "c", "d"]);
         assert_eq!(names(r"\$a \\$b \\\$c"), ["b"]);
         assert_eq!(
             name_spans("x ${ size }px ${$n + ${m}} $a- b"),

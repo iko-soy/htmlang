@@ -65,7 +65,9 @@ unless you write some, and nothing is added that you didn't ask for.
   declares it for the whole page, and `[--gap 16px, md:--gap 24px]` sets
   it on an element and everything inside it, so dark mode redefines a
   token once (`@page [dark:--surface #0b1220]`) instead of every colour
-  that uses it.
+  that uses it. A token is read one way, `var(--surface)`, and a colour
+  variant is CSS's too (`color-mix(in srgb, var(--brand), black 8%)`,
+  `rgb(from var(--brand) r g b / 0.5)`), so it follows the token.
   Prefixes make a style conditional: `hover:`, `md:`, `dark:`, and every
   CSS pseudo-class and pseudo-element under its CSS name (`first-child:`,
   `nth-child(odd):`, `has(> img):`, `marker:`, `backdrop:`).

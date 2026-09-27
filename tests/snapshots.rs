@@ -136,6 +136,11 @@ fn snapshot_css_vars() {
 }
 
 #[test]
+fn snapshot_colour_variants() {
+    snapshot_test("colour_variants");
+}
+
+#[test]
 fn snapshot_form_elements() {
     snapshot_test("form_elements");
 }
@@ -2877,68 +2882,94 @@ fn test_theme_directive() {
 }
 
 #[test]
-fn test_color_filter_lighten() {
-    let result = htmlang::parser::parse(
-        "@let primary #3b82f6\n@el [background ${lighten($primary, 20)}] Content",
+fn colour_variants_are_css_and_follow_their_token() {
+    // What lighten(), darken(), alpha() and mix() computed is CSS's
+    // color-mix() and relative colour, in srgb, reading the token at run
+    // time, so a token redefined under dark: changes its variants too
+    let html = compile(
+        "@let --brand #3b82f6\n\
+         @page [dark:--brand #60a5fa] Tokens\n\
+         @link [background var(--brand), hover:background color-mix(in srgb, var(--brand), black 8%)] /a A\n\
+         @each $shade in 0, 10\n  \
+           @el [background color-mix(in srgb, var(--brand), white $shade%)] $shade\n\
+         @el [background rgb(from var(--brand) r g b / 0.2)] alpha\n\
+         @el [background color-mix(in srgb, var(--brand), #f43f5e 50%)] mix",
     );
-    let html = htmlang::codegen::generate(&result.document);
-    // Lighten #3b82f6 by 20% should produce a lighter blue
-    assert!(
-        html.contains("background:#"),
-        "lighten filter should produce hex color, got: {}",
-        html
-    );
-    // Verify it's not the original color
-    assert!(
-        !html.contains("background:#3b82f6"),
-        "lighten should change the color"
-    );
+    for css in [
+        ":root{--brand:#3b82f6;}",
+        "--brand:#60a5fa",
+        ":hover{background:color-mix(in srgb, var(--brand), black 8%);}",
+        "background:color-mix(in srgb, var(--brand), white 0%);",
+        "background:color-mix(in srgb, var(--brand), white 10%);",
+        "background:rgb(from var(--brand) r g b / 0.2);",
+        "background:color-mix(in srgb, var(--brand), #f43f5e 50%);",
+    ] {
+        assert!(html.contains(css), "missing {}: {}", css, html);
+    }
 }
 
 #[test]
-fn test_color_filter_darken() {
-    let result = htmlang::parser::parse(
-        "@let primary #ffffff\n@el [background ${darken($primary, 50)}] Content",
-    );
-    let html = htmlang::codegen::generate(&result.document);
-    // Darken white by 50% should produce gray (#808080 approximately)
-    assert!(
-        html.contains("background:#"),
-        "darken filter should produce hex color, got: {}",
-        html
-    );
-    assert!(
-        !html.contains("background:#ffffff"),
-        "darken should change the color"
-    );
+fn the_colour_functions_are_gone() {
+    for call in [
+        "darken(#ffffff, 50)",
+        "lighten(#3b82f6, 20)",
+        "alpha(#3b82f6, 0.5)",
+        "mix(#000000, #ffffff, 50)",
+    ] {
+        let diagnostics = parse_diagnostics(&format!("@el [background ${{{}}}] Content", call));
+        assert!(
+            diagnostics.iter().any(|d| d.code == "invalid-expression"
+                && d.severity == htmlang::parser::Severity::Error
+                && d.message.contains("unknown function")),
+            "{}: {:?}",
+            call,
+            diagnostics
+        );
+    }
 }
 
 #[test]
-fn test_color_filter_alpha() {
-    let result = htmlang::parser::parse(
-        "@let primary #3b82f6\n@el [background ${alpha($primary, 0.5)}] Content",
-    );
-    let html = htmlang::codegen::generate(&result.document);
-    // Should produce 8-digit hex with alpha
-    assert!(
-        html.contains("background:#3b82f67f"),
-        "alpha filter should add alpha channel, got: {}",
-        html
-    );
-}
-
-#[test]
-fn test_color_filter_mix() {
-    let result = htmlang::parser::parse(
-        "@let primary #000000\n@el [background ${mix($primary, #ffffff, 50)}] Content",
-    );
-    let html = htmlang::codegen::generate(&result.document);
-    // Mix black and white at 50% should produce gray
-    assert!(
-        html.contains("background:#808080") || html.contains("background:#7f7f7f"),
-        "mix filter should blend colors, got: {}",
-        html
-    );
+fn a_custom_property_is_read_with_var_not_as_a_variable() {
+    // `$--name` is an error that says to write `var(--name)`, wherever it
+    // is written: a value, text, an expression, a condition (columns count
+    // from 0)
+    for (source, column) in [
+        ("@let --gap 8px\n@el [padding $--gap] x", 13),
+        ("@let --gap 8px\n@el gap is $--gap", 11),
+        ("@let --gap 8px\n@el [padding ${$--gap}] x", 13),
+        (
+            "@let --gap 8px\n@let pad = $--gap\n@el [padding $pad] x",
+            11,
+        ),
+        ("@let --gap 8px\n@if $--gap\n  @el x", 4),
+    ] {
+        let diagnostics = parse_diagnostics(source);
+        let found = diagnostics
+            .iter()
+            .find(|d| d.message.contains("`$--gap` is not a variable"))
+            .unwrap_or_else(|| panic!("{}: {:?}", source, diagnostics));
+        assert_eq!(found.severity, htmlang::parser::Severity::Error);
+        assert!(found.message.contains("`var(--gap)`"), "{}", found.message);
+        assert_eq!((found.line, found.column), (2, Some(column)), "{}", source);
+        assert!(
+            !diagnostics.iter().any(|d| d.code == "undefined-variable"),
+            "{}: {:?}",
+            source,
+            diagnostics
+        );
+    }
+    // In a value or in text, the compiler says what to write instead
+    let diagnostics = parse_diagnostics("@let --gap 8px\n@el [padding $--gap] x");
+    assert_eq!(diagnostics[0].code, "invalid-value");
+    assert_eq!(diagnostics[0].subject.as_deref(), Some("$--gap"));
+    assert_eq!(diagnostics[0].suggestion.as_deref(), Some("var(--gap)"));
+    // `\$--x` is written as it is, and so is `$--` before no name
+    let html = compile("@el costs \\$--gap and $-- here");
+    assert!(html.contains("costs $--gap and $-- here"), "{}", html);
+    // A token is a custom property, not a variable: it isn't offered or
+    // counted as one, and the name `gap` is still free
+    let html = compile("@let --gap 8px\n@let gap 4\n@el [padding $gap, margin var(--gap)] x");
+    assert!(html.contains("padding:4px;margin:var(--gap);"), "{}", html);
 }
 
 #[test]

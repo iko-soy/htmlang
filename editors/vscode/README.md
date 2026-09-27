@@ -51,7 +51,8 @@ Syntax highlighting, snippets, and language server support for
 - **Code actions**: fixes keyed on diagnostic codes (replace a misspelled
   name, prefix (`@tdd:` as `@td:`, `@a:` as `@link:`) or slot name, put a pseudo-element's prefix last
   (`before:hover:` as `hover:before:`), replace `@a` with `@link`, write a slot name as one word, add a missing `alt` or `type`, include the file that defines an
-  unknown function, write a quoted font stack as `A\, B`, drop the `$` from
+  unknown function, write a quoted font stack as `A\, B`, write `$--x` as
+  `var(--x)`, drop the `$` from
   `@let $x` and add it to `@each x`, pass a parameter as `name value`
   instead of `name=value`), removing unused
   definitions, and extracting a selection

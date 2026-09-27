@@ -29,7 +29,7 @@
       "@let --${5:muted} ${6:#64748b}",
       "$0"
     ],
-    "description": "CSS custom properties on :root, values as written (a length takes its unit): var(--name) at run time, \\$--name at compile time; [--name value] sets one on an element and everything inside it"
+    "description": "CSS custom properties on :root, values as written (a length takes its unit): read as var(--name), and colour variants as color-mix(in srgb, var(--name), black 10%); [--name value] sets one on an element and everything inside it"
   },
   "Dark mode tokens": {
     "prefix": "@page-theme",

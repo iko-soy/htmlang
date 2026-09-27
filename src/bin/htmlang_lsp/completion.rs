@@ -1333,7 +1333,7 @@ fn color_value_completions(before: &str, range: Range) -> Option<Vec<CompletionI
         ),
     ];
 
-    let items: Vec<CompletionItem> = colors
+    let mut items: Vec<CompletionItem> = colors
         .iter()
         .map(|(label, value, detail)| {
             let doc = if value.starts_with('#') {
@@ -1358,6 +1358,35 @@ fn color_value_completions(before: &str, range: Range) -> Option<Vec<CompletionI
             }
         })
         .collect();
+
+    // A variant of a colour is CSS: a mix, or one channel changed
+    let variants = [
+        (
+            "color-mix()",
+            "color-mix(in srgb, ${1:var(--brand)}, ${2:black} ${3:10}%)",
+            "A mix of two colours: with black or white, a darker or lighter one",
+        ),
+        (
+            "rgb(from)",
+            "rgb(from ${1:var(--brand)} r g b / ${2:0.5})",
+            "A colour with another alpha (a relative colour)",
+        ),
+    ];
+    items.extend(
+        variants
+            .iter()
+            .map(|(label, snippet, detail)| CompletionItem {
+                label: label.to_string(),
+                kind: Some(CompletionItemKind::FUNCTION),
+                detail: Some(detail.to_string()),
+                text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                    range,
+                    new_text: snippet.to_string(),
+                })),
+                insert_text_format: Some(InsertTextFormat::SNIPPET),
+                ..Default::default()
+            }),
+    );
 
     Some(items)
 }
@@ -1756,6 +1785,27 @@ mod tests {
             Some(CompletionTextEdit::Edit(edit)) => assert_eq!(edit.new_text, "dark:--surface "),
             _ => panic!("no edit"),
         }
+    }
+
+    #[test]
+    fn a_colour_s_variants_are_offered_as_css() {
+        let text = "@let --brand #3b82f6\n@el [hover:background ";
+        let items = completions(text, Position::new(1, 22));
+        let mix = items.iter().find(|i| i.label == "color-mix()").unwrap();
+        match &mix.text_edit {
+            Some(CompletionTextEdit::Edit(edit)) => {
+                assert!(
+                    edit.new_text.starts_with("color-mix(in srgb, "),
+                    "{}",
+                    edit.new_text
+                )
+            }
+            _ => panic!("no edit"),
+        }
+        assert!(items.iter().any(|i| i.label == "rgb(from)"));
+        // A token isn't a variable
+        let items = completions("@let --brand #3b82f6\n@el [padding $", Position::new(1, 14));
+        assert!(!items.iter().any(|i| i.label.starts_with("$--")));
     }
 
     #[test]

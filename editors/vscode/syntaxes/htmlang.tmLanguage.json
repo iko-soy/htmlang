@@ -209,7 +209,7 @@
     },
     "variable": {
       "name": "variable.other.htmlang",
-      "match": "\\$(?:--[a-zA-Z]|[a-zA-Z_])[a-zA-Z0-9_]*(?:-+[a-zA-Z0-9_]+)*|\\$\\{[^{}]*\\}"
+      "match": "\\$[a-zA-Z_][a-zA-Z0-9_]*(?:-+[a-zA-Z0-9_]+)*|\\$\\{[^{}]*\\}"
     },
     "range": {
       "name": "keyword.operator.range.htmlang",

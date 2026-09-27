@@ -207,11 +207,11 @@
           if($compact, padding 8, padding 16),
           border-radius $unit,
           color white,
-          background ${darken($--brand, $shade)}
+          background color-mix(in srgb, var(--brand), black $shade%)
         ]
           darken $shade%
-      @el [padding 16, border-radius $unit, background ${alpha($--brand, 0.2)}] alpha 0.2
-      @el [padding 16, border-radius $unit, background ${mix($--brand, #f43f5e, 50)}] mix
+      @el [padding 16, border-radius $unit, background rgb(from var(--brand) r g b / 0.2)] alpha 0.2
+      @el [padding 16, border-radius $unit, background color-mix(in srgb, var(--brand), #f43f5e 50%)] mix
     @if contains($tags, css)
       @text [color var(--muted)] contains(\$tags, css) is true
 
@@ -275,7 +275,7 @@
         @select [id=topic, name=topic, padding 10, border-radius 6]
           @option [value=news] News
           @option [value=releases] Releases
-        @button [type=submit, padding 10, border 0, border-radius 6, background var(--brand), color white, font-weight 700, cursor pointer, hover:background ${darken($--brand, 10)}] Subscribe
+        @button [type=submit, padding 10, border 0, border-radius 6, background var(--brand), color white, font-weight 700, cursor pointer, hover:background color-mix(in srgb, var(--brand), black 10%)] Subscribe
       @el [spacing $unit, flex 1 1 280px]
         @details [$card]
           @summary [font-weight 600, cursor pointer] What does this compile to?

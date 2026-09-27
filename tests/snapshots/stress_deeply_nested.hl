@@ -5,7 +5,7 @@
 @let --radius 8px
 
 @let @deep-card [title]
-  @el [background white, dark:background #1e293b, border-radius $--radius, padding 16, border 1 solid $--border]
+  @el [background white, dark:background #1e293b, border-radius var(--radius), padding 16, border 1 solid var(--border)]
     @text [font-weight bold, font-size 16] $title
     @children
 
@@ -19,7 +19,7 @@
   @el [background #f0f9ff, border-radius 12, padding 20, border 1 solid #bae6fd]
     @text [font-weight bold, font-size 20, color #0369a1] Level 1 - App Shell
     @row [spacing 16, margin-top 16]
-      @el [background white, border-radius 8, padding 16, border 1 solid $--border, width fill]
+      @el [background white, border-radius 8, padding 16, border 1 solid var(--border), width fill]
         @text [font-weight bold, font-size 16, color #1e293b] Level 2 - Sidebar
         @el [spacing 8, margin-top 12]
           @el [background #f1f5f9, border-radius 6, padding 12]
@@ -55,7 +55,7 @@
                 @el [padding 8 12, hover:background #e2e8f0, border-radius 4]
                   @text [font-size 13, color #64748b] $item
 
-      @el [background white, border-radius 8, padding 16, border 1 solid $--border, width fill]
+      @el [background white, border-radius 8, padding 16, border 1 solid var(--border), width fill]
         @text [font-weight bold, font-size 16, color #1e293b] Level 2 - Main Content
         @el [spacing 12, margin-top 12]
           @deep-card [title Level 3 - Dashboard Card]
@@ -86,9 +86,9 @@
           @deep-card [title Level 3 - Form Card]
             @inner-panel [label Level 4 - Form Section]
               @el [spacing 8, margin-top 8]
-                @el [padding 8, border 1 solid $--border, border-radius 4]
+                @el [padding 8, border 1 solid var(--border), border-radius 4]
                   @text [font-size 12, color #64748b, margin-bottom 4] Level 5 - Field Group
-                  @input [type=text, placeholder=Name, padding 6 10, border-radius 4, border 1 solid $--border, width fill]
+                  @input [type=text, placeholder=Name, padding 6 10, border-radius 4, border 1 solid var(--border), width fill]
                   @el [margin-top 4, padding 4 8, background #fef2f2, border-radius 4]
                     @text [font-size 11, color #991b1b] Level 6 - Validation Error
                     @el [margin-top 2]
@@ -96,9 +96,9 @@
                       @el [margin-top 1, padding 2 4, background #fee2e2, border-radius 2]
                         @text [font-size 9, color #b91c1c] Level 8 - Error Code
 
-                @el [padding 8, border 1 solid $--border, border-radius 4]
+                @el [padding 8, border 1 solid var(--border), border-radius 4]
                   @text [font-size 12, color #64748b, margin-bottom 4] Level 5 - Select Group
-                  @select [padding 6 10, border-radius 4, border 1 solid $--border, width fill]
+                  @select [padding 6 10, border-radius 4, border 1 solid var(--border), width fill]
                     @option [value=a] Option A
                     @option [value=b] Option B
                     @option [value=c] Option C
@@ -108,12 +108,12 @@
               @el [spacing 6, margin-top 8]
                 @let top-categories Electronics,Clothing,Books
                 @each $cat in $top-categories
-                  @el [padding 8, border 1 solid $--border, border-radius 4, hover:background #f8fafc]
+                  @el [padding 8, border 1 solid var(--border), border-radius 4, hover:background #f8fafc]
                     @text [font-size 14, font-weight bold, color #1e293b] Level 5 - $cat
                     @el [spacing 4, margin-top 6, margin-left 12]
                       @el [padding 6, background #f8fafc, border-radius 4]
                         @row [spacing 8, align-items center]
-                          @el [width 8, height 8, border-radius 2, background $--primary]
+                          @el [width 8, height 8, border-radius 2, background var(--primary)]
                           @text [font-size 12, color #475569] Level 6 - Subcategory
                         @el [margin-top 4, margin-left 16]
                           @text [font-size 11, color #94a3b8] Level 7 - Item
@@ -123,16 +123,16 @@
   @el [background #fefce8, border-radius 12, padding 20, border 1 solid #fde68a, margin-top 20]
     @text [font-weight bold, font-size 20, color #854d0e] Level 1 - Settings Panel
     @el [spacing 12, margin-top 16]
-      @el [background white, border-radius 8, padding 16, border 1 solid $--border]
+      @el [background white, border-radius 8, padding 16, border 1 solid var(--border)]
         @text [font-weight bold, font-size 16, color #1e293b] Level 2 - Account Settings
         @el [spacing 8, margin-top 12]
           @el [background #f8fafc, border-radius 6, padding 12]
             @text [font-size 14, color #475569] Level 3 - Profile Section
-            @el [margin-top 8, padding 10, border 1 solid $--border, border-radius 6]
+            @el [margin-top 8, padding 10, border 1 solid var(--border), border-radius 6]
               @text [font-size 13, color #1e293b] Level 4 - Avatar Upload
               @el [margin-top 6, width 80, height 80, border-radius 50%, background #e2e8f0, display flex, align-items center, justify-content center]
                 @text [font-size 24, color #94a3b8, font-weight bold] Level 5 - Initials
-                @el [position absolute, bottom 0, right 0, width 24, height 24, border-radius 50%, background $--primary, display flex, align-items center, justify-content center]
+                @el [position absolute, bottom 0, right 0, width 24, height 24, border-radius 50%, background var(--primary), display flex, align-items center, justify-content center]
                   @text [font-size 10, color white] Level 6 - Edit Icon
                   @el [margin-top 1]
                     @text [font-size 8, color #bfdbfe] Level 7 - Tooltip
@@ -143,26 +143,26 @@
             @text [font-size 14, color #475569] Level 3 - Preferences
             @el [spacing 6, margin-top 8]
               @each $pref in Language,Timezone,Currency
-                @row [spacing 8, align-items center, padding 6 8, border 1 solid $--border, border-radius 4]
+                @row [spacing 8, align-items center, padding 6 8, border 1 solid var(--border), border-radius 4]
                   @text [font-size 13, color #1e293b, width fill] Level 4 - $pref
                   @el [padding 4 12, background #f1f5f9, border-radius 4]
                     @text [font-size 12, color #64748b] Level 5 - Current Value
 
-      @el [background white, border-radius 8, padding 16, border 1 solid $--border]
+      @el [background white, border-radius 8, padding 16, border 1 solid var(--border)]
         @text [font-weight bold, font-size 16, color #1e293b] Level 2 - Notification Preferences
         @el [spacing 6, margin-top 12]
           @let channels Email,Push,SMS,Slack
           @each $channel in $channels
-            @row [spacing 8, align-items center, padding 8, border-bottom 1 solid $--border]
+            @row [spacing 8, align-items center, padding 8, border-bottom 1 solid var(--border)]
               @text [font-size 14, color #1e293b, width fill] $channel Notifications
-              @el [width 36, height 20, border-radius 10, background $--primary, padding 2]
+              @el [width 36, height 20, border-radius 10, background var(--primary), padding 2]
                 @el [width 16, height 16, border-radius 50%, background white, margin-left 16]
 
   @el [background #fdf2f8, border-radius 12, padding 20, border 1 solid #fbcfe8, margin-top 20]
     @text [font-weight bold, font-size 20, color #9d174d] Level 1 - Monitoring
     @row [spacing 16, margin-top 16]
       @each $service in API,Database,Cache,Queue
-        @el [background white, border-radius 8, padding 12, border 1 solid $--border, width fill]
+        @el [background white, border-radius 8, padding 12, border 1 solid var(--border), width fill]
           @text [font-weight bold, font-size 14, color #1e293b] Level 2 - $service
           @el [margin-top 8, background #f0fdf4, border-radius 6, padding 8]
             @text [font-size 12, color #166534] Level 3 - Healthy

@@ -3,8 +3,8 @@
 @let --spacing 20px
 @let --radius 8px
 
-@el [spacing $--spacing]
-  @el [background var(--primary), border-radius $--radius, padding $--spacing]
+@el [spacing var(--spacing)]
+  @el [background var(--primary), border-radius var(--radius), padding var(--spacing)]
     @text [color white] Using CSS vars
-  @el [border 1 solid var(--primary), border-radius $--radius, padding $--spacing]
+  @el [border 1 solid var(--primary), border-radius var(--radius), padding var(--spacing)]
     @text [color var(--primary)] Border with var

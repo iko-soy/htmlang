@@ -328,6 +328,7 @@ impl ParseContext {
         for mut problem in problems {
             match &mut problem {
                 interp::Problem::Undefined { offset, .. }
+                | interp::Problem::CustomProperty { offset, .. }
                 | interp::Problem::Invalid { offset, .. }
                 | interp::Problem::Record { offset, .. } => {
                     // An offset into the protected text, as one into `raw`
@@ -527,6 +528,19 @@ impl ParseContext {
                     line,
                     format!("invalid expression: {}", message),
                 );
+                match column {
+                    Some(column) => diagnostic.column(column + offset),
+                    None => diagnostic,
+                }
+            }
+            interp::Problem::CustomProperty { name, offset } => {
+                let diagnostic = Diagnostic::error(
+                    code::INVALID_VALUE,
+                    line,
+                    interp::custom_property_message(&name),
+                )
+                .subject(format!("${}", name))
+                .suggest(Some(format!("var({})", name)));
                 match column {
                     Some(column) => diagnostic.column(column + offset),
                     None => diagnostic,
@@ -2544,10 +2558,11 @@ fn name_column(head: &syntax::Head, line: usize) -> Option<usize> {
     (head.name_span.line == line).then_some(head.name_span.column)
 }
 
-/// Define `$name` (and, for `--name`, the CSS custom property, which gets
-/// quoted text with its quotes). `@let name.field value` gives the record
-/// `$name` that field (or the list `$name` a new item at that index), as
-/// a new value in this block.
+/// Define `$name`, or, for `--name`, the CSS custom property on `:root`
+/// (which gets quoted text with its quotes, and is read with
+/// `var(--name)`, never as a variable). `@let name.field value` gives the
+/// record `$name` that field (or the list `$name` a new item at that
+/// index), as a new value in this block.
 fn set_variable(name: &str, value: Value, line_num: usize, ctx: &mut ParseContext) {
     if name.starts_with("--") {
         let css = value
@@ -2573,6 +2588,7 @@ fn set_variable(name: &str, value: Value, line_num: usize, ctx: &mut ParseContex
             }
             None => ctx.css_vars.push((name.to_string(), css)),
         }
+        return;
     }
     let mut path = name.split('.');
     let root = path.next().unwrap_or(name);
@@ -5784,10 +5800,7 @@ fn validate_tree(
                 };
                 let (bg_color, fg_color) = (color("background"), color("color"));
                 if let (Some(bg), Some(fg)) = (bg_color, fg_color)
-                    && let (Some(bg_rgb), Some(fg_rgb)) = (
-                        crate::expr::parse_hex_rgb(bg),
-                        crate::expr::parse_hex_rgb(fg),
-                    )
+                    && let (Some(bg_rgb), Some(fg_rgb)) = (parse_hex_rgb(bg), parse_hex_rgb(fg))
                 {
                     let ratio = contrast_ratio(bg_rgb, fg_rgb);
                     if ratio < 4.5 {
@@ -6077,6 +6090,24 @@ fn relative_luminance(r: u8, g: u8, b: u8) -> f64 {
     0.2126 * linearize(r) + 0.7152 * linearize(g) + 0.0722 * linearize(b)
 }
 
+/// The red, green and blue of a `#rgb` or `#rrggbb` colour.
+fn parse_hex_rgb(s: &str) -> Option<(u8, u8, u8)> {
+    let s = s.strip_prefix('#')?;
+    if !s.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let channel = |i: usize, len: usize| u8::from_str_radix(&s[i..i + len], 16).ok();
+    match s.len() {
+        3 => Some((
+            channel(0, 1)? * 17,
+            channel(1, 1)? * 17,
+            channel(2, 1)? * 17,
+        )),
+        6 => Some((channel(0, 2)?, channel(2, 2)?, channel(4, 2)?)),
+        _ => None,
+    }
+}
+
 fn contrast_ratio(c1: (u8, u8, u8), c2: (u8, u8, u8)) -> f64 {
     let l1 = relative_luminance(c1.0, c1.1, c1.2);
     let l2 = relative_luminance(c2.0, c2.1, c2.2);
@@ -6193,8 +6224,9 @@ fn track_var_refs(input: &str, used: &mut HashSet<String>) {
 fn check_unused(ctx: &mut ParseContext, exported: &HashSet<String>) {
     // Check unused @let variables
     for (name, &line) in &ctx.let_lines {
-        if name.starts_with("--") || exported.contains(name) {
-            // CSS vars are always used; a library's names are for other files
+        if exported.contains(name) {
+            // A library's names are for other files (a custom property
+            // isn't a variable, so it is never listed here)
             continue;
         }
         if !ctx.used_variables.contains(name) {

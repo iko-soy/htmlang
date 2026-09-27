@@ -1201,6 +1201,18 @@ mod tests {
     }
 
     #[test]
+    fn a_custom_property_read_with_a_dollar_is_written_with_var() {
+        let found = fixes("@let --gap 8px\n@el [padding $--gap] x\n");
+        let (_, edits) = found
+            .iter()
+            .find(|(t, _)| t == "Replace with 'var(--gap)'")
+            .unwrap_or_else(|| panic!("{:?}", found));
+        assert_eq!(edits[0].new_text, "var(--gap)");
+        assert_eq!(edits[0].range.start, Position::new(1, 13));
+        assert_eq!(edits[0].range.end, Position::new(1, 19));
+    }
+
+    #[test]
     fn a_misspelled_element_prefix_is_replaced() {
         let found = fixes("@table [@tdd:padding 8, @a:color red] x\n");
         let (_, edits) = found
@@ -1399,7 +1411,7 @@ mod tests {
     fn variable_tokens_end_where_the_compiler_ends_names() {
         assert_eq!(
             variable_refs("$lang.json costs $5, ${x} $--brand $a- b"),
-            [(0, 5), (23, 24), (26, 34), (35, 37)]
+            [(0, 5), (23, 24), (35, 37)]
         );
         // `\$a` is a dollar sign
         assert_eq!(variable_refs(r"\$a $b"), [(4, 6)]);

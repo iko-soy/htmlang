@@ -1,0 +1,12 @@
+-- Colour variants are CSS (color-mix() and relative colours) reading a
+-- token with var(), so they follow the token when dark mode redefines it
+@let --brand #3b82f6
+@let --radius 8px
+@page [dark:--brand #60a5fa] Colour variants
+@link [background var(--brand), border-radius var(--radius), hover:background color-mix(in srgb, var(--brand), black 8%)] /signup Sign up
+@row
+  @each $shade in 0, 10, 20, 30
+    @el [background color-mix(in srgb, var(--brand), black $shade%)] darken $shade%
+  @el [background color-mix(in srgb, var(--brand), white 20%)] lighten 20%
+  @el [background rgb(from var(--brand) r g b / 0.2)] alpha 0.2
+  @el [background color-mix(in srgb, var(--brand), #f43f5e 50%)] mix
