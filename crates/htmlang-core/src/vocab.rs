@@ -5,7 +5,8 @@
 //!   property (`spacing`, `center-x`, `width fill`, ...), handled in codegen;
 //! - a standard CSS property, copied into the generated CSS unchanged;
 //! - an HTML attribute, written `key=value` (or bare, for booleans such as
-//!   `required`) and emitted on the element.
+//!   `required` and for `data-` and `hx-` attributes) and emitted on the
+//!   element.
 
 /// htmlang's own attributes (those that are neither a CSS property nor an
 /// HTML attribute).
@@ -157,6 +158,31 @@ pub const BOOLEAN_HTML_ATTRS: &[&str] = &[
     "loop", "multiple", "muted", "nomodule", "novalidate", "open", "playsinline", "popover",
     "readonly", "required", "reversed", "sandbox", "selected",
 ];
+
+/// The families of HTML attributes whose names are open: ARIA's, the
+/// author's own `data-` attributes, and htmx's `hx-` attributes.
+pub const HTML_ATTRIBUTE_FAMILIES: &[&str] = &["aria-", "data-", "hx-"];
+
+/// An HTML attribute by its name: a common one, or one of a family whose
+/// names are open (`aria-label`, `data-id`, `hx-get`).
+pub fn is_html_attribute(name: &str) -> bool {
+    HTML_ATTRIBUTES.contains(&name)
+        || HTML_ATTRIBUTE_FAMILIES
+            .iter()
+            .any(|family| in_family(name, family))
+}
+
+/// An HTML attribute written bare, as a flag, and rendered without a value:
+/// a boolean one (`required`), or a `data-` or `hx-` attribute, whose
+/// presence is what it says (`data-open`, htmx's `hx-preserve`). ARIA's
+/// attributes always take a value.
+pub fn is_html_flag(name: &str) -> bool {
+    BOOLEAN_HTML_ATTRS.contains(&name) || in_family(name, "data-") || in_family(name, "hx-")
+}
+
+fn in_family(name: &str, family: &str) -> bool {
+    name.len() > family.len() && name.starts_with(family)
+}
 
 /// Common HTML attribute names, used to suggest `key=value` when one is
 /// written like a style (`type email`). Any name works with `=`.

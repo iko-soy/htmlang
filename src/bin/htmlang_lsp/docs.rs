@@ -399,10 +399,12 @@ fn attribute_hover(name: &str) -> Option<String> {
             "**{name}** \u{2014} Boolean HTML attribute, written bare: `[{name}]`."
         ));
     }
-    if vocab::HTML_ATTRIBUTES.contains(&name)
-        || name.starts_with("aria-")
-        || name.starts_with("data-")
-    {
+    if vocab::is_html_flag(name) {
+        return Some(format!(
+            "**{name}** \u{2014} HTML attribute, written `{name}=value`, or bare for one with no value: `[{name}]`."
+        ));
+    }
+    if vocab::is_html_attribute(name) {
         return Some(format!(
             "**{name}** \u{2014} HTML attribute, written `{name}=value`."
         ));

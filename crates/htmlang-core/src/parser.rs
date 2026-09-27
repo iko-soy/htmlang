@@ -44,10 +44,10 @@ struct FnDef {
     slots: Vec<String>,
     /// Whether its body has a `@children` for the content of a call.
     has_children: bool,
-    /// Its scoped `@style`, nested under its `.hl-fn-NAME` class: written
-    /// into the page once the function is called (see
-    /// `Document::scoped_css`).
-    scoped: Option<String>,
+    /// Its scoped `@style`: its class (`hl-fn-NAME-HASH`), and the
+    /// stylesheet nested under it, written into the page once the function
+    /// is called (see `Document::scoped_css`).
+    scoped: Option<(String, String)>,
     /// What was visible where it was defined: its body and its defaults
     /// see this, plus its parameters.
     env: Env,
@@ -1963,9 +1963,12 @@ impl Evaluator {
         let line_num = node.span.line;
         let body = &node.children;
         // An @style block at the top of the body is scoped to the
-        // function: its rules apply inside a `.hl-fn-NAME` wrapper (a
+        // function: its rules apply inside a `.hl-fn-NAME-HASH` wrapper (a
         // generated class never has a second `-`, so the two can't meet).
-        // It is written into the page when the function is called.
+        // The hash is the stylesheet's, so two functions of one name with
+        // two stylesheets, in two files, don't style each other's elements
+        // in a page that has both. It is written into the page when the
+        // function is called.
         let (style, body): (Vec<&syntax::Node>, Vec<&syntax::Node>) =
             body.iter().partition(|node| node.is_directive("style"));
         let scoped = (!style.is_empty()).then(|| {
@@ -1976,13 +1979,17 @@ impl Evaluator {
                     verbatim_content(node)
                 })
                 .collect();
+            let digits = crate::codegen::CLASS_DIGITS;
+            let hash = crate::codegen::hash_digits(crate::codegen::stable_hash(&css), digits);
+            let class = format!("hl-fn-{}-{}", name, hash);
             // Nested under the scope class, so any CSS works (multi-line
             // rules, at-rules)
-            if css.trim().is_empty() {
+            let css = if css.trim().is_empty() {
                 String::new()
             } else {
-                format!(".hl-fn-{} {{\n{}}}", name, css)
-            }
+                format!(".{} {{\n{}}}", class, css)
+            };
+            (class, css)
         });
 
         // A default is filled in only when a call leaves its parameter
@@ -2287,7 +2294,7 @@ impl Evaluator {
 
         // Attributes that aren't parameters style the function's root
         // element, and a scoped @style's class goes on it too.
-        let scope_class = fn_def.scoped.is_some().then(|| format!("hl-fn-{}", name));
+        let scope_class = fn_def.scoped.as_ref().map(|(class, _)| class.clone());
         if !forwarded.is_empty() || scope_class.is_some() {
             let mut roots = result_nodes.iter_mut().filter_map(|n| match n {
                 Node::Element(e) => Some(e),
@@ -2321,7 +2328,7 @@ impl Evaluator {
                     }
                     // The scoped `@style` goes into the page once, when the
                     // function is first called
-                    if let Some(css) = &fn_def.scoped
+                    if let Some((_, css)) = &fn_def.scoped
                         && !css.is_empty()
                         && !ctx.scoped_css.contains(css)
                     {
@@ -2618,8 +2625,7 @@ fn read_page(
         // one is written
         let mut seen: HashMap<String, usize> = HashMap::new();
         for attr in read {
-            let boolean = attr.value.is_none()
-                && crate::vocab::BOOLEAN_HTML_ATTRS.contains(&attr.key.as_str());
+            let boolean = attr.value.is_none() && crate::vocab::is_html_flag(&attr.key);
             // Where it is written, when it is written in the list itself
             let nth = seen.entry(attr.key.clone()).or_default();
             let column = list
@@ -3656,6 +3662,9 @@ fn parse_single_element(
                 }
             } else {
                 let column = Some(token.span.column);
+                if let Some(d) = text_as_url(&kind, &token, ctx) {
+                    ctx.push_once(d);
+                }
                 argument = Some(
                     ctx.fill_value(&token.raw, text.span.line, column, Sink::Text)
                         .0,
@@ -3810,6 +3819,35 @@ fn bad_leading_token(
     };
     let d = Diagnostic::error(code::UNEXPECTED_ARGUMENT, token.span.line, message)
         .subject(token.raw.clone());
+    Some(at_attribute(d, Some(token.span.column), ctx))
+}
+
+/// A first word taken as a URL that reads as text: a word with a capital
+/// and nothing a URL or a file name has, as in `@link [hx-get=/panel] Open
+/// panel`, whose href would be `Open`. It still is (a relative URL can be
+/// such a word), with a warning.
+fn text_as_url(kind: &ElementKind, token: &syntax::Arg, ctx: &ParseContext) -> Option<Diagnostic> {
+    const URLS: &[&str] = &["href", "src", "srcset", "action", "data"];
+    let word = token.raw.as_str();
+    let reads_as_text = word.starts_with(char::is_uppercase)
+        && !word.contains([
+            '/', '.', ':', '#', '?', '=', '&', '%', '~', '$', '{', '\\', '"',
+        ]);
+    if !reads_as_text || !kind.arg().attributes().iter().any(|a| URLS.contains(a)) {
+        return None;
+    }
+    let name = kind.name();
+    let attr = leading_name(kind);
+    let text = if takes_no_text(kind) {
+        String::new()
+    } else {
+        format!(": write the {attr} before the text, or put the text on the lines under it")
+    };
+    let message = format!(
+        "@{name} takes '{word}', its first word, as its {attr}{text}. A relative URL that \
+         starts with a capital is written `./{word}`"
+    );
+    let d = Diagnostic::warning(code::TEXT_AS_URL, token.span.line, message).subject(word);
     Some(at_attribute(d, Some(token.span.column), ctx))
 }
 
@@ -4881,7 +4919,7 @@ fn check_attribute(
     attr: &Attribute,
     line: usize,
     column: Option<usize>,
-    after_another: bool,
+    before: Option<&Attribute>,
     ctx: &mut ParseContext,
 ) -> bool {
     use crate::vocab;
@@ -4909,12 +4947,6 @@ fn check_attribute(
             &attr.key,
         );
     }
-    let is_html_name = |name: &str| {
-        vocab::HTML_ATTRIBUTES.contains(&name)
-            || name.starts_with("aria-")
-            || name.starts_with("data-")
-    };
-
     let Some(value) = &attr.value else {
         // `inline` puts a file into the page as it compiles, which no
         // state or media condition can undo
@@ -4933,7 +4965,7 @@ fn check_attribute(
         if vocab::HTMLANG_FLAGS.contains(&base) {
             return true;
         }
-        if vocab::BOOLEAN_HTML_ATTRS.contains(&base) {
+        if vocab::is_html_flag(base) {
             if !prefixed {
                 return true;
             }
@@ -4958,7 +4990,7 @@ fn check_attribute(
                 &attr.key,
             );
         }
-        if is_html_name(base) && !prefixed {
+        if vocab::is_html_attribute(base) && !prefixed {
             return fail(
                 ctx,
                 code::HTML_ATTRIBUTE_FORM,
@@ -4969,7 +5001,7 @@ fn check_attribute(
                 base,
             );
         }
-        return unknown_attribute(attr, base, line, column, after_another, true, ctx);
+        return unknown_attribute(attr, base, line, column, before, true, ctx);
     };
 
     if vocab::HTMLANG_FLAGS.contains(&base) {
@@ -4989,7 +5021,7 @@ fn check_attribute(
     {
         return check_css_value(attr, base, line, column, ctx);
     }
-    if is_html_name(base) && !prefixed {
+    if vocab::is_html_attribute(base) && !prefixed {
         let diagnostic = Diagnostic::error(
             code::HTML_ATTRIBUTE_FORM,
             line,
@@ -5004,7 +5036,7 @@ fn check_attribute(
         return false;
     }
     let passes = vocab::is_property_name(base);
-    unknown_attribute(attr, base, line, column, after_another, !passes, ctx)
+    unknown_attribute(attr, base, line, column, before, !passes, ctx)
         && check_css_value(attr, base, line, column, ctx)
 }
 
@@ -5015,8 +5047,8 @@ fn check_attribute(
 fn could_be_parameter(attr: &Attribute) -> bool {
     use crate::vocab;
     let key = attr.key.as_str();
-    let flag = attr.value.is_none()
-        && (vocab::HTMLANG_FLAGS.contains(&key) || vocab::BOOLEAN_HTML_ATTRS.contains(&key));
+    let flag =
+        attr.value.is_none() && (vocab::HTMLANG_FLAGS.contains(&key) || vocab::is_html_flag(key));
     !attr.html
         && !flag
         && !vocab::is_style_attribute(key)
@@ -5071,7 +5103,7 @@ fn unknown_attribute(
     base: &str,
     line: usize,
     column: Option<usize>,
-    after_another: bool,
+    before: Option<&Attribute>,
     error: bool,
     ctx: &mut ParseContext,
 ) -> bool {
@@ -5117,6 +5149,36 @@ fn unknown_attribute(
     // itself
     let suggestion =
         suggest_closest(base, &crate::vocab::all_attributes()).filter(|&closest| closest != base);
+    // `hx-trigger=load, every 2s`: right after a `key=value`, a name that
+    // isn't close to one htmlang knows is the rest of that value, which
+    // the comma ended. It is left out.
+    let cut = before.filter(|b| b.html && b.value.is_some());
+    let rest = match &attr.value {
+        Some(value) => format!("{} {}", attr.key, value),
+        None => attr.key.clone(),
+    };
+    let joined = cut.map(|cut| {
+        let value = cut.value.as_deref().unwrap_or("");
+        (
+            format!("{}={}", cut.key, value),
+            format!("{}={}\\, {}", cut.key, value, rest),
+        )
+    });
+    if let (Some((cut, joined)), None) = (&joined, suggestion) {
+        let diagnostic = Diagnostic::error(
+            code::SPLIT_VALUE,
+            line,
+            format!(
+                "unknown attribute '{}' after `{}`: if '{}' is the rest of its value, the comma \
+                 ended it. To keep a comma in a value, write `\\,`: `{}`",
+                base, cut, rest, joined
+            ),
+        )
+        .subject(base);
+        let diagnostic = at_attribute(diagnostic, column, ctx);
+        ctx.diagnostics.push(diagnostic);
+        return false;
+    }
     let mut message = match (&suggestion, error) {
         (Some(closest), true) => {
             format!(
@@ -5138,12 +5200,19 @@ fn unknown_attribute(
     // sans-serif`: the comma ended the attribute, and the rest of the
     // value became one
     let rest_of_a_value = !base.starts_with(|c: char| c.is_ascii_alphabetic() || c == '-')
-        || (suggestion.is_none() && attr.value.is_none() && after_another);
-    if rest_of_a_value && error {
+        || (suggestion.is_none() && attr.value.is_none() && before.is_some());
+    if joined.is_some() || (rest_of_a_value && error) {
         if !message.ends_with('?') {
             message.push('.');
         }
-        message.push_str(" A comma separates attributes: to keep one in a value, write `\\,`");
+        match &joined {
+            Some((cut, joined)) => message.push_str(&format!(
+                " If it is the rest of `{}`, the comma ended it: write `{}`",
+                cut, joined
+            )),
+            None => message
+                .push_str(" A comma separates attributes: to keep one in a value, write `\\,`"),
+        }
     }
     let severity = if error {
         Severity::Error
@@ -5285,7 +5354,13 @@ fn read_attrs(
                         && !text_keys.contains(&attr.key);
                     if checked_here
                         && (misspelled_parameter(attr, text_keys, line, column(0), ctx)
-                            || !check_attribute(attr, line, column(0), !attrs.is_empty(), ctx))
+                            || !check_attribute(
+                                attr,
+                                line,
+                                column(0),
+                                attrs.last().map(|(a, _)| a),
+                                ctx,
+                            ))
                     {
                         continue;
                     }
@@ -5389,11 +5464,11 @@ fn read_attrs(
         if validate {
             let seen = (normal_key(&attr.key), attr.html);
             if out.seen_keys.contains(&seen) {
-                let message = if attr.html {
-                    format!("duplicate attribute '{}='", attr.key)
-                } else {
-                    format!("duplicate attribute '{}': the later one wins", attr.key)
-                };
+                let written = if attr.html { "=" } else { "" };
+                let message = format!(
+                    "duplicate attribute '{}{}': the later one wins",
+                    attr.key, written
+                );
                 let diagnostic = Diagnostic::warning(code::DUPLICATE_ATTRIBUTE, line, message)
                     .subject(attr.key.as_str());
                 let diagnostic = at_attribute(diagnostic, column(0), ctx);
@@ -5438,8 +5513,8 @@ fn read_attrs(
         // A style or a flag: its name is checked, and what can't be
         // written into the page is an error and left out
         let checked = validate && !attr.html && !(ctx.in_bundle && could_be_parameter(&attr));
-        let after_another = !out.attrs.is_empty();
-        if checked && !check_attribute(&attr, line, column(0), after_another, ctx) {
+        let before = out.attrs.last().map(|(a, _)| a);
+        if checked && !check_attribute(&attr, line, column(0), before, ctx) {
             continue;
         }
 
@@ -5583,7 +5658,7 @@ fn prefixed_member(
     };
     if validate {
         let fine = if attr.value.is_none() || could_be_parameter(attr) {
-            check_attribute(&prefixed, line, column, false, ctx)
+            check_attribute(&prefixed, line, column, None, ctx)
         } else {
             check_prefixes(&prefixed, line, column, ctx)
         };
@@ -5994,6 +6069,7 @@ fn check_branch(
         attrs: branch.attrs().to_vec(),
         span: token.span,
         closed: true,
+        quoted_close: None,
     };
     let grouped = syntax::Attr {
         key: prefix.to_string(),
@@ -6478,7 +6554,7 @@ fn dropped_by_the_element(elem: &Element, diagnostics: &mut Vec<Diagnostic>) {
         let styles: Vec<&Attribute> = elem
             .attrs
             .iter()
-            .filter(|a| !a.html && !crate::vocab::BOOLEAN_HTML_ATTRS.contains(&a.key.as_str()))
+            .filter(|a| !a.html && !crate::vocab::is_html_flag(&a.key))
             .collect();
         if !styles.is_empty() {
             error(
@@ -6740,7 +6816,7 @@ fn inline_svg(node: Node, line_num: usize, ctx: &mut ParseContext) -> Node {
                 continue;
             }
             (key, true, Some(_)) => key,
-            (key, false, None) if crate::vocab::BOOLEAN_HTML_ATTRS.contains(&key) => key,
+            (key, false, None) if crate::vocab::is_html_flag(key) => key,
             _ => {
                 left_out.push(attr.key.clone());
                 continue;

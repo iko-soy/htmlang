@@ -1,9 +1,11 @@
 //! Regression tests for bugs found in review. Each test names the behavior
 //! that used to be wrong.
 
+mod common;
+
 use std::path::PathBuf;
 
-use htmlang::codegen;
+use common::codegen;
 use htmlang::parser::{self, Severity};
 
 fn compile(input: &str) -> String {
@@ -478,15 +480,14 @@ fn inline_element_attributes_can_continue_on_the_next_line() {
         "@paragraph\n  Press {@kbd [\n    padding 2 6, border-radius 4\n  ] Ctrl+K} to search.\n",
     );
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
-    let html = htmlang::codegen::generate(&result.document);
+    let html = codegen::generate(&result.document);
     assert!(html.contains(">Ctrl+K</kbd> to search."), "{}", html);
 }
 
 #[test]
 fn lines_under_text_are_its_siblings() {
-    let html = htmlang::codegen::generate(
-        &htmlang::parser::parse("@el\n  Some text\n    more text\n").document,
-    );
+    let html =
+        codegen::generate(&htmlang::parser::parse("@el\n  Some text\n    more text\n").document);
     assert!(
         html.contains("<span>Some text</span><span>more text</span>"),
         "{}",
@@ -546,16 +547,28 @@ fn css_values_pass_through() {
 #[test]
 fn page_attributes_are_checked_like_any_element_s() {
     // `canonical` belongs in a `@head` link: on @page it is an unknown CSS
-    // property (for <body>), reported rather than dropped
-    let result = parser::parse("@page [lang=en, canonical https://x.dev] T\n");
-    assert!(
-        result
-            .diagnostics
-            .iter()
-            .any(|d| d.code == "unknown-attribute" && d.message.contains("'canonical'")),
-        "{:?}",
-        result.diagnostics
-    );
+    // property (for <body>), reported rather than dropped. Right after an
+    // HTML attribute, it may be the rest of that one's value too.
+    for (source, code) in [
+        (
+            "@page [canonical https://x.dev, lang=en] T\n",
+            "unknown-attribute",
+        ),
+        (
+            "@page [lang=en, canonical https://x.dev] T\n",
+            "split-value",
+        ),
+    ] {
+        let result = parser::parse(source);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.code == code && d.message.contains("'canonical'")),
+            "{:?}",
+            result.diagnostics
+        );
+    }
 }
 
 // --- One grammar: the syntax tree and the checks built on it ---
@@ -2321,4 +2334,138 @@ fn a_leading_argument_that_can_t_be_one_is_reported() {
         .map(|d| d.line)
         .collect();
     assert_eq!(lines, [1, 2], "{:?}", d);
+}
+
+// --- Found while looking at htmx's attributes ---
+
+#[test]
+fn an_attribute_after_a_bundle_or_a_function_s_own_wins() {
+    // The browser keeps the first of two attributes with one name, so
+    // writing both made the bundle's win over the one written after it
+    let out = compile("@let live [hx-get=/x, hx-trigger=load]\n@el [$live, hx-trigger=click] A\n");
+    assert!(
+        out.contains(r#"hx-get="/x" hx-trigger="click">"#),
+        "{}",
+        out
+    );
+    assert_eq!(out.matches("hx-trigger=").count(), 1, "{}", out);
+    let out = compile(
+        "@let @action [url]\n  @button [type=button, hx-post=$url, hx-target=#result] Save\n@action [url /save, hx-target=#other]\n",
+    );
+    assert!(out.contains(r##"hx-target="#other""##), "{}", out);
+    assert_eq!(out.matches("hx-target=").count(), 1, "{}", out);
+    let out = compile("@page [lang=en, lang=fr] T\n@text a\n");
+    assert!(out.contains(r#"<html lang="fr">"#), "{}", out);
+    let d = diagnostics_of("@el [hx-get=/a, hx-get=/b] B\n");
+    assert!(
+        d.iter()
+            .any(|d| d.code == "duplicate-attribute" && d.message.contains("later one wins")),
+        "{:?}",
+        d
+    );
+}
+
+#[test]
+fn a_comma_that_ends_an_html_attribute_s_value_is_reported() {
+    // The rest of `hx-trigger=load, every 2s` was a CSS property `every`,
+    // with a warning that didn't say why
+    let d = diagnostics_of("@el [hx-get=/poll, hx-trigger=load, every 2s] A\n");
+    let split = d
+        .iter()
+        .find(|d| d.code == "split-value")
+        .expect("split-value");
+    assert_eq!(split.severity, Severity::Error);
+    assert!(
+        split.message.contains(r"`hx-trigger=load\, every 2s`"),
+        "{}",
+        split.message
+    );
+    // A bare word, as in `hx-confirm=Sure, really?`
+    assert!(coded_in(
+        &diagnostics_of("@el [hx-confirm=Sure, really?] A\n"),
+        "split-value"
+    ));
+    // Close to a known name, it is that name misspelled, with a note
+    let d = diagnostics_of("@el [id=x, colr red] A\n");
+    let typo = d
+        .iter()
+        .find(|d| d.code == "unknown-attribute")
+        .expect("unknown-attribute");
+    assert!(typo.message.contains("'color'") && typo.message.contains(r"`id=x\, colr red`"));
+    // An escaped comma, or a known attribute after the comma, is fine
+    let out = compile("@el [hx-trigger=load\\, every 2s, color red] A\n");
+    assert!(out.contains(r#"hx-trigger="load, every 2s""#), "{}", out);
+}
+
+#[test]
+fn hx_attributes_are_html_attributes() {
+    // `hx-get /items` was a CSS property, with a warning
+    let d = diagnostics_of("@button [hx-get /items] B\n");
+    let form = d
+        .iter()
+        .find(|d| d.code == "html-attribute-form")
+        .expect("form");
+    assert_eq!(form.severity, Severity::Error);
+    assert!(form.message.contains("`hx-get=/items`"), "{}", form.message);
+    // htmx's flags are written bare, like `data-` ones; ARIA's take a value
+    let out = compile("@el [hx-preserve, data-open, id=player] A\n");
+    assert!(
+        out.contains(r#"id="player" hx-preserve data-open>"#),
+        "{}",
+        out
+    );
+    assert!(coded_in(
+        &diagnostics_of("@el [aria-hidden] A\n"),
+        "html-attribute-form"
+    ));
+    assert!(coded_in(
+        &diagnostics_of("@el [md:hx-preserve] A\n"),
+        "invalid-prefix"
+    ));
+}
+
+#[test]
+fn link_text_taken_as_the_url_is_reported() {
+    // `Open` became the href, and `panel` the text, without a word
+    let d = diagnostics_of("@link [hx-get=/panel, hx-target=#main] Open panel\n");
+    let d = d
+        .iter()
+        .find(|d| d.code == "text-as-url")
+        .expect("text-as-url");
+    assert_eq!(d.severity, Severity::Warning);
+    assert!(
+        d.message.contains("'Open'") && d.message.contains("href"),
+        "{}",
+        d.message
+    );
+    assert!(coded_in(&diagnostics_of("@form Sign in\n"), "text-as-url"));
+    for fine in [
+        "@link /about About\n",
+        "@link about About us\n",
+        "@link ./Home Home\n",
+        "@link https://example.com Out\n",
+        "@link $url More\n",
+        "@image [alt=Logo] Logo.svg\n",
+        "@optgroup Citrus\n  @option Lemon\n",
+    ] {
+        assert!(!coded_in(&diagnostics_of(fine), "text-as-url"), "{}", fine);
+    }
+}
+
+#[test]
+fn a_bracket_inside_single_quotes_is_reported() {
+    // The `]` in `alert(']')` ended the list, and the rest became text
+    let d = diagnostics_of("@button [type=button, hx-on:click=alert(']')] Go\n");
+    let d = d
+        .iter()
+        .find(|d| d.code == "unbalanced-quote")
+        .expect("unbalanced-quote");
+    assert_eq!(d.column, Some(41));
+    // Escaped, it is in the value; an apostrophe in text is fine
+    let out = compile("@button [type=button, hx-on:click=alert('\\]')] Go\n");
+    assert!(out.contains(r#"hx-on:click="alert(']')">Go"#), "{}", out);
+    assert!(!coded_in(
+        &diagnostics_of("@el [title=Don't] It's fine\n"),
+        "unbalanced-quote"
+    ));
 }

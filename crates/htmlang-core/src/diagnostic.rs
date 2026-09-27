@@ -77,6 +77,9 @@ impl Diagnostic {
 pub mod code {
     // Syntax: found while reading the file, before anything runs
     pub const UNCLOSED_BRACKET: &str = "unclosed-bracket";
+    /// A `]` that ends an attribute list inside what reads as a `'...'`
+    /// string in a value (`hx-on:click=alert(']')`).
+    pub const UNBALANCED_QUOTE: &str = "unbalanced-quote";
     pub const UNEXPECTED_BODY: &str = "unexpected-body";
     pub const UNEXPECTED_ARGUMENT: &str = "unexpected-argument";
     pub const MISSING_ARGUMENT: &str = "missing-argument";
@@ -115,6 +118,12 @@ pub mod code {
     pub const INVALID_COLOR: &str = "invalid-color";
     pub const INVALID_EXPRESSION: &str = "invalid-expression";
     pub const INVALID_JSON: &str = "invalid-json";
+    /// A name htmlang doesn't know right after a `key=value`: the rest of
+    /// the value, which a comma ended (`hx-trigger=load, every 2s`).
+    pub const SPLIT_VALUE: &str = "split-value";
+    /// A leading argument taken as a URL that reads as text (`@link
+    /// [hx-get=/x] Open panel`, whose href is `Open`).
+    pub const TEXT_AS_URL: &str = "text-as-url";
 
     // Definitions and functions
     pub const UNUSED_VARIABLE: &str = "unused-variable";
@@ -142,6 +151,9 @@ pub mod code {
     // Files
     pub const UNREADABLE_FILE: &str = "unreadable-file";
     pub const CIRCULAR_INCLUDE: &str = "circular-include";
+    /// Two files of one build whose different styles got one class name:
+    /// a name is a hash of its style (`htmlang build` checks).
+    pub const CLASS_COLLISION: &str = "class-collision";
     pub const UNSET_ENVIRONMENT: &str = "unset-environment";
 
     // Context: an attribute or element where it has no effect
@@ -174,6 +186,7 @@ pub mod code {
     /// Every code, for tools and tests.
     pub const ALL: &[&str] = &[
         UNCLOSED_BRACKET,
+        UNBALANCED_QUOTE,
         UNEXPECTED_BODY,
         UNEXPECTED_ARGUMENT,
         MISSING_ARGUMENT,
@@ -195,6 +208,8 @@ pub mod code {
         INVALID_COLOR,
         INVALID_EXPRESSION,
         INVALID_JSON,
+        SPLIT_VALUE,
+        TEXT_AS_URL,
         UNUSED_VARIABLE,
         UNUSED_BUNDLE,
         UNUSED_FUNCTION,
@@ -209,6 +224,7 @@ pub mod code {
         INVALID_SLOT_NAME,
         UNREADABLE_FILE,
         CIRCULAR_INCLUDE,
+        CLASS_COLLISION,
         UNSET_ENVIRONMENT,
         NO_EFFECT,
         BLOCK_IN_PARAGRAPH,

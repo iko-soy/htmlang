@@ -72,15 +72,26 @@ An attribute can take one of three forms:
   (`spacing 20`, `color red`).
 - `key=value` is an **HTML attribute** (`id=main`, `type=email`,
   `aria-label=Close`).
-- A bare word is a **flag**: a layout attribute such as `center-x`, or a
-  boolean HTML attribute such as `required`, `disabled`, `hidden` or `open`.
+- A bare word is a **flag**: a layout attribute such as `center-x`, a
+  boolean HTML attribute such as `required`, `disabled`, `hidden` or `open`,
+  or a `data-` or `hx-` attribute that has no value (`data-open`,
+  `hx-preserve`).
 
 A comma inside `(...)`, `[...]` or `"..."` doesn't split attributes. Anywhere else,
 `\,` keeps a comma in the value:
 
 ```
 @el [transition opacity 0.3s\, transform 0.3s, font-family "Open Sans"\, sans-serif]
+@el [hx-get=/news, hx-trigger=load\, every 60s]
 ```
+
+Right after a `key=value`, a name htmlang doesn't know is most likely the
+rest of that value, which a comma ended: `[hx-trigger=load, every 60s]` is
+an error (`split-value`) that shows the value written with `\,`.
+
+An attribute given twice, by a bundle and after it, by a function and its
+call, or written twice, takes the later value. An HTML attribute is
+written once, with that value.
 
 A variable fills an attribute's value (`padding $gap`, `alt=$title`), never
 its name or a whole attribute: attributes come from a
@@ -154,7 +165,7 @@ values, `@let`, `@page` and `@meta`.
 | `\@`, `\--` | `@`, `--` | a line of text that starts with `@` or `--` |
 | `\$` | `$` | a `$` before a name, which would start a variable |
 | `\{`, `\}` | `{`, `}` | braces that don't start or end an inline element |
-| `\[`, `\]` | `[`, `]` | brackets that don't open or close an attribute list |
+| `\[`, `\]` | `[`, `]` | brackets that don't open or close an attribute list; a `'...'` in a value (`alert(']')`) doesn't hide one, so a list that seems to end inside one is reported (`unbalanced-quote`) |
 | `\,` | `,` | a comma in an attribute's value |
 | `\"` | `"` | a quote that doesn't start or end quoted text |
 | `\\` | `\` | a backslash before one of these characters |
@@ -723,7 +734,7 @@ own attributes are for it alone.
 
 Each style under an element prefix compiles to a rule in CSS's `@scope`,
 on the element's class, in the layer `hl-inside` (see [CSS](#css)):
-`@scope (.hl-a) { :scope td { padding: 8px } }`. `@scope`'s proximity
+`@scope (.hl-2k9xq0m) { :scope td { padding: 8px } }`. `@scope`'s proximity
 rule is what makes the nearest element win. `@scope` is Baseline 2025,
 supported by Chrome and Edge 118, Safari 17.4 and Firefox 146; an older
 browser ignores these rules, so the elements inside keep the styles they
@@ -906,7 +917,10 @@ since it holds only the `@option` lines under it. A value with a space in
 it is quoted, as such a label: `@optgroup "Citrus fruits"`. The first word is
 always the argument, so on an element whose attribute is often left out
 (`@form`, `@video`, `@audio`), text goes on the lines under it: `@form Sign
-in` would make `Sign` the form's action.
+in` would make `Sign` the form's action. A first word that reads as text,
+a capitalized word with nothing of a URL in it, is taken with a warning
+(`text-as-url`): `@link [hx-get=/panel] Open panel` makes `Open` the link's
+`href`. A relative URL like that one is written `./Open`.
 
 The attribute can be written as an attribute instead, and it means the same:
 `@link [href=/about]` with its text on the lines under it, or
@@ -943,12 +957,13 @@ only the file. It isn't shown, so a style on it is an error.
 
 HTML attributes are written `key=value`: `id=main`, `class=note`,
 `href=/about`, `type=email`, `alt=Logo`, `target=_blank`,
-`aria-label=Close menu`, `data-id=42`. Any name works, one with a colon
-in it included (`xml:lang=en`, `x-on:click=open`): before an `=` a colon is
-part of the name, not a prefix. Boolean attributes are
-written bare: `required`, `disabled`, `checked`, `hidden`, `open`, `popover`.
-An HTML attribute written like a style (`type email`) is an error that
-shows the `key=value` form. A style
+`aria-label=Close menu`, `data-id=42`, `hx-get=/items`. Any name works,
+one with a colon in it included (`xml:lang=en`, `hx-on:click=open()`):
+before an `=` a colon is part of the name, not a prefix. Boolean attributes
+are written bare: `required`, `disabled`, `checked`, `hidden`, `open`,
+`popover`, and so are `data-` and `hx-` attributes that have no value
+(`hx-preserve`). An HTML attribute written like a style (`type email`,
+`hx-get /items`) is an error that shows the `key=value` form. A style
 and an HTML attribute can share a name, because the `=` tells them apart:
 
 ```
@@ -1548,8 +1563,18 @@ for a single rule, on its line:
 @el [animation fade-in 0.3s ease, class=note] Fades in
 ```
 
-Each element with styles gets a short generated class, `hl-a`, `hl-b`, ...,
-and elements with the same styles share one. The `hl-` prefix is htmlang's:
+Each element with styles gets a generated class, and elements with the
+same styles share one. A class is named by its style: `hl-` and seven
+characters of a hash of what it sets (`hl-2k9xq0m`), so one style has one
+name in every file. A fragment put into a page (`--partial` output that a
+server returns, or any HTML of one file put into another's page) means
+the same there, and its rules restyle nothing of the page's: a class of
+both is the same style. Two different styles of one file never share a
+name (the later one takes more characters), and `htmlang build` checks
+the whole site: two files whose different styles hash to one name are an
+error (`class-collision`), which one more attribute on either style
+fixes. A function's scoped `@style` is named by the function and a hash
+of the stylesheet, `hl-fn-card-1x0a9zq`. The `hl-` prefix is htmlang's:
 a class of your own that starts with it gets a warning, since the generated
 rules would apply to it too. Every style goes into the class under its own
 name, with its value as written (plus pixels, see
@@ -1572,7 +1597,7 @@ the specificity:
 | Layer | Holds |
 |---|---|
 | `hl-reset` | The reset |
-| `hl-kind` | The defaults of each element's kind, as `:where(.hl-a)` |
+| `hl-kind` | The defaults of each element's kind, as `:where(.hl-2k9xq0m)` |
 | `hl-inside` | The styles an element gets from an element prefix on an element around it (`@td:padding 8`, see [Styling the elements inside](#styling-the-elements-inside)), and functions' scoped `@style` |
 | `htmlang` | Each element's own styles, and its parent's `children:` styles |
 

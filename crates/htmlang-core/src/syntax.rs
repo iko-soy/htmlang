@@ -136,6 +136,10 @@ pub struct AttrList {
     pub span: Span,
     /// Whether the closing `]` was found.
     pub closed: bool,
+    /// The closing `]`, when it looks like it was meant to be inside a
+    /// `'...'` string: a `'` before it in the list isn't closed, and the
+    /// word right after it has one, as in `hx-on:click=alert(']')`.
+    pub quoted_close: Option<Span>,
 }
 
 /// One attribute of a list, as written.
@@ -1506,6 +1510,25 @@ impl Reader<'_> {
             let (text, open) = self.text(0, self.text.len());
             (NodeKind::Text(text), open)
         };
+        if let NodeKind::Element(element) = &kind {
+            let closes = element
+                .chain
+                .iter()
+                .filter_map(|head| head.attrs.as_ref()?.quoted_close);
+            for close in closes {
+                problems.push(
+                    Diagnostic::warning(
+                        code::UNBALANCED_QUOTE,
+                        close.line,
+                        "this `]` ends the attribute list, but it looks like it is inside a \
+                         `'...'` in the value: write `\\]` to keep it in the value"
+                            .to_string(),
+                    )
+                    .column(close.column)
+                    .source(self.text.to_string()),
+                );
+            }
+        }
         if open {
             // An unclosed quote keeps the list open to the end of the file
             let mut quotes = 0;
@@ -1590,6 +1613,8 @@ impl Reader<'_> {
     fn attr_list(&self, open: usize, limit: usize) -> (AttrList, usize) {
         let mut depth = 0;
         let mut quoted = false;
+        // The `'`s outside `"..."`, which don't quote anything in htmlang
+        let mut apostrophes = 0;
         let mut close = None;
         let mut i = open;
         while i < limit {
@@ -1603,6 +1628,7 @@ impl Reader<'_> {
             match c {
                 '"' => quoted = !quoted,
                 _ if quoted => {}
+                '\'' => apostrophes += 1,
                 '[' => depth += 1,
                 ']' => {
                     depth -= 1;
@@ -1622,10 +1648,15 @@ impl Reader<'_> {
             .filter_map(|(s, e)| self.attr(s, e))
             .collect();
         let end = close.map_or(limit, |c| c + 1);
+        let quoted_close = close.filter(|&c| {
+            let word = self.text[c + 1..limit].split(char::is_whitespace).next();
+            apostrophes % 2 == 1 && word.is_some_and(|word| word.contains('\''))
+        });
         let list = AttrList {
             attrs,
             span: self.span(open, end),
             closed: close.is_some(),
+            quoted_close: quoted_close.map(|c| self.span(c, c + 1)),
         };
         (list, end)
     }

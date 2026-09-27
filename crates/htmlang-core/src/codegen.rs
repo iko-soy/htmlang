@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 
 use crate::ast::*;
 use crate::vocab::with_px;
@@ -17,33 +17,51 @@ const BREAKPOINTS: &[(&str, &str)] = &[
     ("2xl", "1536px"),
 ];
 
-/// The prefix of every generated class (`hl-a`, `hl-b`, ...), which keeps
-/// them out of the author's own class names.
+/// The prefix of every generated class (`hl-2k9xq0m`), which keeps them
+/// out of the author's own class names.
 pub const CLASS_PREFIX: &str = "hl-";
 
-/// Generate short CSS class names: a..z, then aa..a9, ba..b9, ..., z9, then
-/// aaa, ... The first character is always a letter; later ones are drawn from
-/// [a-z0-9]. The mapping is a bijection, so distinct indices never collide.
-pub(crate) fn short_class_name(idx: usize) -> String {
-    const REST: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
-    // Find the name length: 26 names of length 1, 26*36 of length 2, ...
-    let mut n = idx;
-    let mut len = 1;
-    let mut count = 26usize;
-    while n >= count {
-        n -= count;
-        len += 1;
-        count = count.saturating_mul(36);
+/// How many base-36 digits a class's name has after `hl-`: 7, about 36
+/// bits of its style's hash, so a site with 10,000 different styles has
+/// odds of about 6 in 10,000 that two of them share a name, which
+/// `htmlang build` reports (`class-collision`). Within one file, a style
+/// whose name is taken takes more digits.
+pub const CLASS_DIGITS: usize = 7;
+
+/// A stable hash of `text`: FNV-1a, then SplitMix64's finalizer, so every
+/// digit of a name depends on all of the text. It is the same on every
+/// platform and in every build, unlike `std`'s hasher.
+pub fn stable_hash(text: &str) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in text.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }
-    let mut tail = Vec::with_capacity(len - 1);
-    for _ in 1..len {
-        tail.push(REST[n % 36]);
-        n /= 36;
-    }
-    let mut name = String::with_capacity(len);
-    name.push((b'a' + n as u8) as char);
-    name.extend(tail.iter().rev().map(|&b| b as char));
-    name
+    hash = (hash ^ (hash >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    hash = (hash ^ (hash >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    hash ^ (hash >> 31)
+}
+
+/// `digits` base-36 digits of `hash`: `2k9xq0m`. With 13, all of it.
+pub fn hash_digits(hash: u64, digits: usize) -> String {
+    const DIGITS: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+    let mut n = hash;
+    (0..digits)
+        .map(|_| {
+            let digit = DIGITS[(n % 36) as usize] as char;
+            n /= 36;
+            digit
+        })
+        .collect()
+}
+
+/// A class htmlang generated: its name, and the hash of the style it
+/// stands for. One style has one name in every file, so a fragment's
+/// classes mean the same in any page it goes into.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Class {
+    pub name: String,
+    pub style: u64,
 }
 
 /// When a style applies: the at-rule prefixes it is under (their ranks,
@@ -254,8 +272,33 @@ fn at_rule(rank: usize, dev: bool) -> String {
     }
 }
 
+/// A style as text, for its hash: the defaults of its element's kind, its
+/// rules (the at-rules' ranks, the selector prefixes and the declarations
+/// of each) and the rules keyed on it, each part ended by a character CSS
+/// doesn't have.
+fn style_text(defaults: &str, rules: &[(Condition, String)], distinct: &str) -> String {
+    let mut text = format!("{defaults}\u{1}");
+    for (condition, body) in rules {
+        for rank in &condition.at {
+            text.push_str(&format!("{rank}\u{2}"));
+        }
+        text.push('\u{3}');
+        for prefix in &condition.selector {
+            text.push_str(prefix);
+            text.push('\u{2}');
+        }
+        text.push('\u{3}');
+        text.push_str(body);
+        text.push('\u{1}');
+    }
+    text.push_str(distinct);
+    text
+}
+
 struct StyleEntry {
     class_name: String,
+    /// The hash of the style, which names the class
+    style: u64,
     /// The defaults of the element's kind (its layout, a heading's
     /// `margin:0`, ...), less what its own attributes set. They are written
     /// as `:where(.hl-a)` in the layer `hl-kind`, so an element prefix
@@ -272,10 +315,11 @@ struct StyleEntry {
 
 struct StyleCollector {
     entries: Vec<StyleEntry>,
-    /// Maps a pre-hashed style signature to an index into `entries`.
-    /// Using u64 as the key keeps lookups allocation-free; on the rare case of
-    /// a hash collision we fall back to a full equality check against the entry.
+    /// Maps a style's hash to its entries (more than one only when two
+    /// styles hash alike, which the full comparison tells apart).
     index: HashMap<u64, Vec<usize>>,
+    /// The names given, which a style whose name is taken doesn't get
+    names: std::collections::HashSet<String>,
     /// Rules for an element's children, keyed on its class and written in
     /// the block of an at-rule condition: `(at-rules, selector, body)`, e.g.
     /// `([md], ":where(.a)>.b", "flex:1;")` (see [`Flow`]).
@@ -289,6 +333,7 @@ impl StyleCollector {
         StyleCollector {
             entries: Vec::new(),
             index: HashMap::new(),
+            names: std::collections::HashSet::new(),
             keyed: Vec::new(),
             keyed_seen: std::collections::HashSet::new(),
         }
@@ -314,14 +359,9 @@ impl StyleCollector {
             return None;
         }
         rules.sort_by_cached_key(|(condition, _)| condition.order());
-        use std::collections::hash_map::DefaultHasher;
-        let mut h = DefaultHasher::new();
-        defaults.hash(&mut h);
-        rules.hash(&mut h);
-        distinct.hash(&mut h);
-        let sig = h.finish();
+        let style = stable_hash(&style_text(&defaults, &rules, &distinct));
 
-        if let Some(indices) = self.index.get(&sig) {
+        if let Some(indices) = self.index.get(&style) {
             for &idx in indices {
                 let e = &self.entries[idx];
                 if e.defaults == defaults && e.rules == rules && e.distinct == distinct {
@@ -329,16 +369,32 @@ impl StyleCollector {
                 }
             }
         }
+        // The name is the hash's first digits, and more of them when
+        // another style of this file has those; after all 13, the entry's
+        // number tells the two apart
         let idx = self.entries.len();
-        let name = format!("{}{}", CLASS_PREFIX, short_class_name(idx));
+        let name = (CLASS_DIGITS..=13)
+            .map(|digits| format!("{}{}", CLASS_PREFIX, hash_digits(style, digits)))
+            .find(|name| !self.names.contains(name))
+            .unwrap_or_else(|| format!("{}{}{}", CLASS_PREFIX, hash_digits(style, 13), idx));
+        self.names.insert(name.clone());
         self.entries.push(StyleEntry {
             class_name: name.clone(),
+            style,
             defaults,
             rules,
             distinct,
         });
-        self.index.entry(sig).or_default().push(idx);
+        self.index.entry(style).or_default().push(idx);
         Some(name)
+    }
+
+    /// The classes given, in the order they were
+    fn classes(&self) -> impl Iterator<Item = Class> + '_ {
+        self.entries.iter().map(|e| Class {
+            name: e.class_name.clone(),
+            style: e.style,
+        })
     }
 
     /// All generated rules, in three layers (see [`LAYERS`]): the element
@@ -628,15 +684,22 @@ pub struct CodegenOptions {
 
 /// Generate HTML from a parsed document using the given options.
 pub fn generate_with(doc: &Document, opts: &CodegenOptions) -> String {
+    generate_with_classes(doc, opts).0
+}
+
+/// [`generate_with`], and the classes the document's styles were given,
+/// for a check across files that no name stands for two styles.
+pub fn generate_with_classes(doc: &Document, opts: &CodegenOptions) -> (String, Vec<Class>) {
+    let mut classes = Vec::new();
     let mut html = if opts.partial {
-        generate_partial_inner(doc, opts.dev)
+        generate_partial_inner(doc, opts.dev, &mut classes)
     } else {
-        generate_full_inner(doc, opts.dev)
+        generate_full_inner(doc, opts.dev, &mut classes)
     };
     if opts.minify {
         html = minify_html(&html);
     }
-    html
+    (html, classes)
 }
 
 pub fn generate(doc: &Document) -> String {
@@ -762,10 +825,10 @@ fn minify_html(html: &str) -> String {
     result
 }
 
-fn generate_full_inner(doc: &Document, dev: bool) -> String {
+fn generate_full_inner(doc: &Document, dev: bool, classes: &mut Vec<Class>) -> String {
     // Without `@page` the output is a fragment
     let Some(page) = &doc.page else {
-        return generate_partial_inner(doc, dev);
+        return generate_partial_inner(doc, dev, classes);
     };
     let mut styles = StyleCollector::new();
     let mut ctx = GenContext {
@@ -855,15 +918,9 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
     }
 
     // `@page`'s HTML attributes go on `<html>`
-    let mut html_attrs = String::new();
-    for attr in &page.html_attrs {
-        html_attrs.push(' ');
-        html_attrs.push_str(&attr.key);
-        if attr.html {
-            html_attrs.push_str("=\"");
-            html_attrs.push_str(&html_escape(attr.value.as_deref().unwrap_or("")));
-            html_attrs.push('"');
-        }
+    let mut root_attrs = String::new();
+    for attr in html_attrs(&page.html_attrs) {
+        push_html_attr(&mut root_attrs, attr);
     }
     let mut body_attrs = String::new();
     emit_class_attr(&mut body_attrs, body_class.as_deref(), None);
@@ -886,9 +943,10 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
         String::new()
     };
     let reset_css = reset_css(dev, true, &focus_visible_css);
+    classes.extend(styles.classes());
 
     format!(
-        "<!DOCTYPE html>{nl}<html{html_attrs}>{nl}<head>{nl}<meta charset=\"utf-8\">{nl}\
+        "<!DOCTYPE html>{nl}<html{root_attrs}>{nl}<head>{nl}<meta charset=\"utf-8\">{nl}\
          {meta_html}<style>{nl}{reset_css}{element_css}</style>{nl}</head>{nl}\
          <body{body_attrs}>{nl}{body}</body>{nl}</html>{nl}",
     )
@@ -1028,7 +1086,7 @@ fn reset_css(dev: bool, page: bool, focus_visible_css: &str) -> String {
 }
 
 /// Generate an HTML fragment: body + optional <style>, no <html>/<head>/<body> wrapper.
-fn generate_partial_inner(doc: &Document, dev: bool) -> String {
+fn generate_partial_inner(doc: &Document, dev: bool, classes: &mut Vec<Class>) -> String {
     let mut styles = StyleCollector::new();
     let mut ctx = GenContext {
         dev,
@@ -1048,6 +1106,7 @@ fn generate_partial_inner(doc: &Document, dev: bool) -> String {
     if !styles.entries.is_empty() || !doc.scoped_css.is_empty() {
         element_css.insert_str(0, &reset_css(dev, false, ""));
     }
+    classes.extend(styles.classes());
 
     if element_css.is_empty() {
         body
@@ -1198,24 +1257,40 @@ pub(crate) fn data_uri(path: &str, data: &[u8]) -> String {
 }
 
 /// Emit HTML attributes: `key=value` ones (except `id` / `class`, which
-/// are emitted with the generated class) and bare booleans like `required`.
+/// are emitted with the generated class) and flags like `required`.
 fn emit_html_attrs(out: &mut String, attrs: &[Attribute]) {
-    for attr in attrs {
+    for attr in html_attrs(attrs) {
         let key = attr.key.as_str();
-        if attr.html && key != "id" && key != "class" {
-            out.push(' ');
-            out.push_str(key);
-            out.push_str("=\"");
-            // Quoted text has already lost its quotes (see parser.rs)
-            out.push_str(&html_escape(attr.value.as_deref().unwrap_or("")));
-            out.push('"');
-        } else if !attr.html
-            && attr.value.is_none()
-            && crate::vocab::BOOLEAN_HTML_ATTRS.contains(&key)
-        {
-            out.push(' ');
-            out.push_str(key);
+        if key != "id" && key != "class" {
+            push_html_attr(out, attr);
         }
+    }
+}
+
+/// The HTML attributes of `attrs`, `key=value` ones and flags, each name
+/// once: the later one wins, as a style does. (Of two attributes with one
+/// name, the browser keeps the first, so a bundle's attribute or a
+/// function's own would win over one written after it.)
+fn html_attrs(attrs: &[Attribute]) -> impl Iterator<Item = &Attribute> {
+    let is_html =
+        |a: &Attribute| a.html || (a.value.is_none() && crate::vocab::is_html_flag(&a.key));
+    attrs.iter().enumerate().filter_map(move |(i, attr)| {
+        let later = attrs[i + 1..]
+            .iter()
+            .any(|other| is_html(other) && other.key == attr.key);
+        (is_html(attr) && !later).then_some(attr)
+    })
+}
+
+/// ` key="value"`, or ` key` for a flag.
+fn push_html_attr(out: &mut String, attr: &Attribute) {
+    out.push(' ');
+    out.push_str(&attr.key);
+    if attr.html {
+        out.push_str("=\"");
+        // Quoted text has already lost its quotes (see parser.rs)
+        out.push_str(&html_escape(attr.value.as_deref().unwrap_or("")));
+        out.push('"');
     }
 }
 
@@ -2372,5 +2447,33 @@ fn vlq_encode(value: i64, out: &mut String) {
         if v == 0 {
             break;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_name_is_a_stable_hash_of_the_style() {
+        // The same in every build and on every platform
+        assert_eq!(stable_hash(""), 0xf52a_15e9_a9b5_e89b);
+        assert_eq!(hash_digits(35, 3), "z00");
+        assert_eq!(hash_digits(u64::MAX, 13), "fsgs46211e5w3");
+    }
+
+    #[test]
+    fn a_name_taken_in_the_file_takes_more_digits() {
+        // These two styles' hashes end in the same 7 digits
+        let mut styles = StyleCollector::new();
+        let first = styles.get_class("width:129555px;".into(), Vec::new(), String::new());
+        let second = styles.get_class("width:170577px;".into(), Vec::new(), String::new());
+        let (first, second) = (first.unwrap(), second.unwrap());
+        assert_eq!(first.len(), 3 + CLASS_DIGITS, "{first}");
+        assert_eq!(second.len(), 3 + CLASS_DIGITS + 1, "{second}");
+        assert!(second.starts_with(&first), "{first} {second}");
+        // The same style gets the name it got before
+        let again = styles.get_class("width:170577px;".into(), Vec::new(), String::new());
+        assert_eq!(again.as_deref(), Some(second.as_str()));
     }
 }
