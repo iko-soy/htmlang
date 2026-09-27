@@ -67,7 +67,7 @@
 
   @section [spacing 32]
     @each $post in $posts
-      @post-card [post $post, featured ${default($post.featured, false)}]
+      @post-card [post $post, featured $post.featured]
     @else
       @text [color var(--muted)] Nothing here yet.
 

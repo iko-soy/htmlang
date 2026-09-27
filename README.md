@@ -68,9 +68,10 @@ unless you write some, and nothing is added that you didn't ask for.
   that uses it. A token is read one way, `var(--surface)`, and a colour
   variant is CSS's too (`color-mix(in srgb, var(--brand), black 8%)`,
   `rgb(from var(--brand) r g b / 0.5)`), so it follows the token.
-  Prefixes make a style conditional: `hover:`, `md:`, `dark:`, and every
-  CSS pseudo-class and pseudo-element under its CSS name (`first-child:`,
-  `nth-child(odd):`, `has(> img):`, `marker:`, `backdrop:`).
+  Prefixes make a style conditional: `hover:`, `md:`, `dark:`, and CSS's
+  common pseudo-classes and pseudo-elements under their CSS names
+  (`first-child:`, `nth-child(odd):`, `has(> img):`, `marker:`,
+  `backdrop:`; the list is in DESIGN.md).
   They stack (`md:dark:background`, `hover:children:opacity`), and one
   prefix covers a group or a bundle (`md:[padding 32, font-size 20]`,
   `md:$card`).
@@ -107,7 +108,7 @@ unless you write some, and nothing is added that you didn't ask for.
   `$name` fills in a value exactly where it is written (a line of text, an
   attribute's value, a file path), whole attributes come from a bundle or
   from `if()` (`if($active, [font-weight bold, aria-current=page])`), and
-  an undefined name is an error.
+  an undefined name is an error where the code runs.
 - **Values are typed: text, numbers, `true`/`false`, lists and records.**
   Commas make a list (`@let fruits apple, banana`), `1..5` is a range,
   `@data` loads JSON as records and lists, and a value passed as one `$name`
@@ -238,4 +239,5 @@ same parser, so the editor sees exactly what the compiler sees, relative
 `@include` and `@data` paths included. Every diagnostic has a stable code
 (`error[unknown-element]` on the command line, a `code` field in
 `--format json`), and the whole file is checked, including branches and
-functions that don't run.
+functions that don't run (a `$name` there is checked only where the code
+runs, since it may come from data).

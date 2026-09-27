@@ -120,7 +120,7 @@ fn examples_compile() {
     );
 }
 
-/// The table of layouts under DESIGN.md's Elements lists every element
+/// The table of layouts under DESIGN.md's HTML elements lists every element
 /// once, with the layout the compiler gives it.
 #[test]
 fn design_md_gives_every_element_its_layout() {

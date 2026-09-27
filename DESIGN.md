@@ -19,7 +19,8 @@ Every example block in this file is compiled by the test suite
 - **`@` starts structure, and any other line is content.** An element is `@name`,
   and a line without `@` is text.
 - **htmlang's own vocabulary is about layout.** It comes from elm-ui. An
-  element is a row, a column or text, `spacing` sets the gap between its children,
+  element is a row, a column, a grid or text (or keeps HTML's own layout),
+  `spacing` sets the gap between its children,
   and each child says how it sits in its parent (`width fill`, `center-x`,
   `align-right`). The layout attributes are the only styling words htmlang
   adds.
@@ -34,7 +35,9 @@ Every example block in this file is compiled by the test suite
   HTML file. Its CSS is inside, and it has no JavaScript unless you write
   some. The compiler doesn't add attributes, tags or rewritten values that
   the source doesn't ask for, and it doesn't leave out anything you wrote:
-  what can't go into the page is an error.
+  what can't go into the page is an error. The one exception is a style
+  whose value comes out empty, such as an optional field a record doesn't
+  have: it is simply not written.
 - **Everything runs at compile time.** Variables, expressions, loops and
   conditions are resolved when the page is built. What CSS computes in the
   browser (`var()`, `calc()`, `color-mix()`) stays CSS, written as it is.
@@ -48,7 +51,9 @@ Every example block in this file is compiled by the test suite
   children
 ```
 
-Children are indented under their parent. Attributes go inside `[...]`,
+Children are indented under their parent, with spaces or with tabs (a
+tab counts as one space, so a file that mixes them is a warning).
+Attributes go inside `[...]`,
 separated by commas, and the list may span several lines:
 
 ```
@@ -195,7 +200,10 @@ list, and `--name` with no space is not a comment but a
 `>` puts elements that have one child each on one line. The last element in
 the chain gets the indented children. A `>` is a chain only between two
 elements (`@name [attributes]`); in text it is just a character. A
-function call can be a link of a chain, like any element.
+function call can be a link of a chain, like any element. After an
+element's leading argument (`@link /about`) the rest of the line is text,
+so a link around an image is `@link [href=/] > @image logo.png` (the
+compiler warns when `> @name` follows a leading argument).
 
 ```
 @el [padding 16, background blue, border-radius 8] > @link https://example.com
@@ -231,7 +239,9 @@ error. Only `@script` takes attributes: an attribute list on `@raw`,
 ### Directives
 
 A directive is a built-in word that isn't an element. Each one takes a
-fixed kind of argument and a fixed kind of body:
+fixed kind of argument and a fixed kind of body. `@page` is the one
+directive that is also an element: it stands for the page's root, `<body>`,
+whose content is the rest of the file (see [Page and head](#page-and-head)).
 
 | Directive | Argument | Body |
 |---|---|---|
@@ -252,12 +262,15 @@ it would otherwise silently become a sibling.
 The compiler checks the whole file, including code that doesn't run: the
 branch of an `@if` or an `if()` that isn't taken, the body of a function that is never
 called and the body of a loop over an empty list. Unknown elements,
-functions and attributes are reported there too. Code that doesn't run may
-name a function defined anywhere in the file or in an included file, so a
-function's body can call a function defined further down; code that runs
-needs the function's `@let` to have run first. Only a name that depends on
-data, such as a variable a loop fills in, is checked just where the code
-runs.
+functions, attributes and prefixes are reported there too. In code that
+doesn't run, a call is checked against every function in the file and the
+files it includes; where the code runs, a name is looked up where it is
+written, so a function's body sees only what is defined above the function
+(a call to a function defined further down is reported when the body
+runs, and two functions can't call each other). A `$name` is checked only
+where the code runs, since any of them may come from data: an undefined
+variable in a branch that isn't taken, or in a function that is never
+called, isn't reported.
 
 **Names are checked, and values are CSS's.** A misspelled element, prefix,
 parameter or slot is an error, and so is an undefined variable. A CSS
@@ -297,7 +310,7 @@ flow.**
 | native | `@table`, `@caption`, `@select`, `@pre`, `@textarea`, `@video`, ... | HTML's own layout, which htmlang leaves alone |
 | void | `@input`, `@hr`, `@br`, `@image`, `@source` | Nothing: it takes no content |
 
-The table under [Elements](#elements) gives every element's layout. The
+The table under [HTML elements](#html-elements) gives every element's layout. The
 page itself is a column too: `@page` is the [root element](#page-and-head),
 `<body>`, so what is written at the top of a page stacks like the children
 of an `@el`, `height fill` there takes the rest of the window and
@@ -414,6 +427,16 @@ such as `@section`, `@ul` or `@h2`, is a warning inside `@paragraph`
 (`block-in-paragraph`): the browser would move it, and what follows it, out
 of the `<p>`.
 
+`@link` is text too, so a card written inside a link is an inline `<span>`
+that shrinks to its content. A clickable card is the link itself, laid out
+as a column with CSS:
+
+```
+@link [href=/post, display flex, flex-direction column, gap 8, padding 16, border 1 solid #e5e7eb]
+  @strong A post
+  @text Its summary.
+```
+
 ### Overlays: `@in-front` and `@behind`
 
 These layers work like elm-ui's `inFront` and `behind`. Their children fill
@@ -518,7 +541,10 @@ A value is checked only for what is wrong in any CSS. A `;`, `{` or `}`
 a `</style` (even quoted) would end the page's style element, so each is an
 error, including in a value that comes from a variable or from `@data`. A hex color that doesn't have 3, 4, 6 or 8 digits is a warning. A
 style whose value comes out empty, such as a field that a record doesn't
-have, is left out.
+have, is left out. Since a value is CSS's, a missing comma between two
+styles makes one value: `padding 8 color red` is `padding: 8px color red`,
+which the browser ignores. A style written as an HTML attribute
+(`padding=8`) is a warning that shows its style form.
 
 #### Custom properties
 
@@ -755,7 +781,7 @@ browser decides, and it is passed through like any CSS function:
 
 ## HTML
 
-### Elements
+### HTML elements
 
 The layout and text elements have elm-ui's names. Every other element has
 its HTML name: `@strong`, `@em`, `@small`, `@br`, `@sub`, `@caption`,
@@ -1072,13 +1098,16 @@ list.
   decimals, others with at most four (`${100 / 3}` is `33.3333`).
 - A list prints as written when the source wrote it, and otherwise as its
   items joined with `, `. A record has no text of its own, so writing one
-  where text goes is an error: write one of its fields.
+  (or a list of records) where text goes is an error: write one of its
+  fields, or loop over the list with `@each`.
+- A `$list` in a comma list is one item, a list inside the list:
+  `@let more $items, d` has two items. htmlang has no list concatenation.
 
 **Quoted text remembers that it was quoted.** A value written `"..."` (in a
 `@let`, an attribute or a function's argument) keeps its quotes in a CSS
 value, where CSS needs them, and loses them in text, in HTML attribute
-values and in parameters. It stays quoted when it passes through another
-`@let` or a parameter. Inside a quoted string of a CSS value, it inserts
+values and in expressions (`${length($x)}` counts no quotes). It stays
+quoted when it passes through another `@let` or a parameter. Inside a quoted string of a CSS value, it inserts
 what it says, without its own quotes:
 
 ```
@@ -1120,6 +1149,11 @@ inline in text (`{@key Ctrl+K}`):
   padding 40]` works the same as styling a built-in element, and
   `[paddin 40]` gets the same warning. A name close to one of the
   parameters (`titel Hi`) is a misspelled parameter, which is an error.
+  This needs the body to have a single root element: attributes on a call
+  whose body has several roots, or is text, are an error. A `class=` adds
+  to the root's own classes.
+- A parameter passed twice (in the call's list, or after a bundle that
+  passes it) takes the later value, as any attribute does.
 - Text after the attributes and the indented lines are the call's
   content, and replace `@children` in the body. A `@slot NAME` block
   directly under the call (or under an `@if`, `@else` or `@each` there)
@@ -1168,7 +1202,9 @@ Content that would go nowhere is an error, so a mistake can't drop it:
 - text or lines passed to a function whose body has no `@children`;
 - a `@slot NAME` block inside an element at the call, instead of directly
   under the call;
-- `@slot` or `@children` outside a function's body, or inline in text.
+- `@slot` or `@children` outside a function's body, or inline in text;
+- `@children` or `@slot` after an element's attributes (`@td [padding 8]
+  @children`), where it would be text: it goes on a line of its own.
 
 A slot's name is one word of letters, digits, `-` and `_`, starting with a
 letter, like a function's. Inside a body, a call can pass on what the
@@ -1199,6 +1235,9 @@ element says about itself wins over it, so a call's `[padding 20]` wins
 over the function's `& { padding: 12px; }`, as it would over the root's own
 defaults. Where CSS properties are all it needs, an element prefix on the
 root says the same without a stylesheet (`@aside [@h2:font-size 18]`).
+Only an `@style` at the top of the body is scoped: one under an `@if` or an
+element is the page's, where `&` is the whole page, so the compiler warns
+about a `&` there.
 
 ```
 @let @note [kind Note]
@@ -1234,7 +1273,8 @@ A function may call itself, under a condition that stops it, so it can
 render nested data such as a menu. A parameter passed one `$name` that
 holds a record or a list gets the whole value, fields and items
 included. Calls nest at most 64 deep: a function that calls itself with
-nothing to stop it is an error.
+nothing to stop it is an error. Since a body sees only what is defined
+above its function, two functions can't call each other.
 
 ```
 @data $menu [
@@ -1258,9 +1298,11 @@ row, column or grid, is reported at the call, once, and names the function. A
 problem in the text of a body is reported on its own line, or at the call
 when the function comes from `std.hl` or another file.
 
-A function can't take the name of a built-in element or a directive:
-`@let @button` would replace `@button` in every call after it, and a
-function named `@if` could never be called, so both are warnings.
+Naming a function after a built-in element or a directive is a warning:
+`@let @button` replaces `@button` in every call after it, and a function
+named `@if` could never be called. Inside its own body `@button` is the
+function too, so a function that wraps the element it is named after,
+outside an `@if`, is an error: give it another name.
 
 ### CSS custom properties
 
@@ -1270,7 +1312,10 @@ so a length takes its unit (`@let --radius 8px`). A token is read one way,
 `var(--name)`, in the browser, so an element (`[dark:--name value]`, see
 [Custom properties](#custom-properties)) or a stylesheet can still
 redefine it. It is not a variable: `$--name` is an error that says to
-write `var(--name)`.
+write `var(--name)`. Since `:root` is one place for the whole page, a
+`@let --name` goes at the top level of the file, once: inside an element,
+a loop or a function's body it is an error (set the property on an
+element with `[--name value]` instead), and declaring it again warns.
 
 A colour variant of a token is CSS too, so it follows the token wherever
 it is redefined: `color-mix()` mixes two colours, and a relative colour
@@ -1383,10 +1428,10 @@ the content to show when the list is empty.
 | `@data $name file.json` | Load a JSON file. Objects are records (`$name.key`) and arrays are lists |
 | `@data $name [...]` / `@data $name {...}` | Inline JSON, which may span several lines |
 | `@data $name dir/*.json` | A list with one record per file, in name order. `$item.file` is the file's name |
-| `@data $name env:NAME [default]` | An environment variable |
-| `@include file.hl` | Insert another file: its content and its definitions. A file that holds only `@let`s outputs nothing (a [library](#layouts)) |
+| `@data $name env:NAME DEFAULT` | An environment variable, with an optional default |
+| `@include file.hl` | Insert another file: its content and its definitions. A file that holds only definitions outputs nothing (a [library](#page-layouts)) |
 | `@markdown` / `@markdown file.md` | Markdown (an indented body or a file), converted to HTML |
-| `@image [inline] file.svg` | Put the file inside the page: SVG as markup, other images as base64. The SVG's root gets `width` and `height` (lengths, not `fill` or `shrink`), `color` or `fill` (as its `fill`) and the HTML attributes (`class=`, `aria-label=`, ...); any other style, and `alt=`, is an error, since the markup has no generated class. `inline` goes only on `@image`, without a prefix |
+| `@image [inline] file.svg` | Put the file inside the page: SVG as markup, other images as base64. The file is read next to the page, and one that can't be read is an error. The SVG's root gets `width` and `height` (lengths, not `fill` or `shrink`) and `color` or `fill` (as its `fill`) in its `style=`, where `var(--name)` works, and the HTML attributes (`class=`, `aria-label=`, ...); any other style, and `alt=`, is an error, since the markup has no generated class, and an element prefix (`@image:`) doesn't reach it. `inline` goes only on `@image`, without a prefix |
 
 Records keep their values whole, even when a value contains spaces or
 commas:
@@ -1404,7 +1449,7 @@ commas:
 @text ${length($team)} people
 ```
 
-### Layouts
+### Page layouts
 
 A layout is an ordinary function in a file of its own. It marks where content
 goes with `@slot NAME` (named blocks) and `@children` (everything in the call
@@ -1436,15 +1481,19 @@ The layout holds the page's `@page`, whose attributes can come from its
 parameters (`@page [background $bg] $title`). A page has one `@page`, so a
 second one is an error (`duplicate-page`): the page's own next to its
 layout's, or a layout called twice. The same `@meta` tag twice is written
-once. A file that holds only `@let`s, such as `layout.hl`, is a library:
-its definitions aren't reported unused, in it or in a page that includes
-it and uses only some of them, and `htmlang build`, `serve` and `watch`
-don't build it into a page of its own.
+once. A file that holds only `@let`s, such as `layout.hl`, is a library
+(it may also read `@data` and `@include` other libraries): its definitions
+aren't reported unused, in it or in a page that includes it and uses only
+some of them, and `htmlang build`, `serve` and `watch` don't build it into
+a page of its own. An included file's unused definitions are never
+reported in the file that includes it.
 
 ## Page and head
 
 `@page TITLE` makes the output a full HTML document. Without it, the output
-is a fragment. The page is the root element, and `@page`'s attributes are
+is a fragment, which has no `<head>`: `@meta` and `@head` in it are a
+warning. `--partial` writes a fragment of a page too, and warns that
+`@page`, `@meta` and `@head` are left out. The page is the root element, and `@page`'s attributes are
 checked like any element's:
 
 - Styles style `<body>`, prefixes included, so a page's colour, font and

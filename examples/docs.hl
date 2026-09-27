@@ -80,26 +80,23 @@
         and see it in the browser.
 
       @h2 [id=install] Install
-      @code-block
-        @code
-          cargo install --path .
+      @code-block > @code
+        cargo install --path .
 
       @h2 [id=first-page] Your first page
       @paragraph
         Create a file called {@code hello.hl}:
-      @code-block
-        @code
-          @page Hello
-          @el [padding 40, spacing 16]
-            @h1 Hi there
-            @paragraph
-              This is {@b htmlang}.
+      @code-block > @code
+        @page Hello
+        @el [padding 40, spacing 16]
+          @h1 Hi there
+          @paragraph
+            This is {@b htmlang}.
       @paragraph
         Then start the dev server and open the page. It recompiles and reloads
         whenever you save; press {@kbd [padding 1 6, border 1 solid var(--line), border-radius 4, font-size 14] Ctrl+C} to stop it.
-      @code-block
-        @code
-          htmlang serve .
+      @code-block > @code
+        htmlang serve .
 
       @callout [kind Tip]
         @paragraph

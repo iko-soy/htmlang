@@ -66,7 +66,7 @@
   @row [width fill, max-width 1100, center-x, spacing 24, align-items center]
     @text [font-weight 800, font-size 18] Launchpad
     @spacer
-    @nav [flex-direction row, spacing 20, color var(--muted), @link:hover:color var(--ink)]
+    @nav [flex-direction row, spacing 20, color var(--muted), @link:hover:color var(--ink), display none, md:display flex]
       @link #features Features
       @link #pricing Pricing
       @link /docs Docs
@@ -114,7 +114,7 @@
           @text [color var(--muted)] / month
         @ul [spacing 8, flex 1]
           @each $perk in $plan.perks
-            @li [before:content "✓  ", before:color var(--brand)] $perk
+            @li [flex-direction row, spacing 8, before:content "✓", before:color var(--brand)] $perk
         @if $plan.featured
           @primary-link [href /signup?plan=$plan.name, text-align center] Choose $plan.name
         @else

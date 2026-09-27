@@ -36,6 +36,7 @@
 -- Attribute bundles
 @let card [
   padding $gap,
+  color var(--ink),
   background var(--surface),
   border 1 solid var(--line),
   border-radius $unit
@@ -95,7 +96,7 @@
         @el [$card, text-align center, if($n == 1, col-span 2)] Cell $n
     @el [$card, height 120, overflow hidden]
       @behind
-        @el [background linear-gradient(135deg, #dbeafe, #fae8ff), height fill, justify-content flex-end, padding $unit] (behind)
+        @el [background linear-gradient(135deg, #dbeafe, #fae8ff), dark:background linear-gradient(135deg, #1e3a8a, #581c87), height fill, justify-content flex-end, padding $unit] (behind)
       @text [font-weight 700] @in-front and @behind layer content
       @in-front
         @text [align-right, align-bottom, padding $unit, font-size 12, color var(--muted)] painted on top
@@ -138,6 +139,14 @@
       @label [cursor pointer]
         @input [type=checkbox, margin-inline-end 8]
         Tick the box: has() styles the card around it
+    @paragraph
+      Colour maths is CSS too, so a variant follows its token wherever it is redefined:
+    @row [spacing $unit, wrap]
+      @each $shade in 0, 10, 20, 30
+        @el [padding 16, border-radius $unit, color white, background color-mix(in srgb, var(--brand), black $shade%)]
+          color-mix … black $shade%
+      @el [padding 16, border-radius $unit, background rgb(from var(--brand) r g b / 0.2)] rgb(from …) / 0.2
+      @el [padding 16, border-radius $unit, background color-mix(in srgb, var(--brand), #f43f5e 50%)] color-mix … 50%
 
   -- 4. Functions -----------------------------------------------------------
   @let @stat [value, caption, tone var(--brand)]
@@ -202,16 +211,9 @@
       \$name inserts a value and \${...} any expression: ${uppercase($name)}
       has ${length($name)} letters and ${length($tags)} tags.
     @row [spacing $unit, wrap]
-      @each $shade in 0, 10, 20, 30
-        @el [
-          if($compact, padding 8, padding 16),
-          border-radius $unit,
-          color white,
-          background color-mix(in srgb, var(--brand), black $shade%)
-        ]
-          darken $shade%
-      @el [padding 16, border-radius $unit, background rgb(from var(--brand) r g b / 0.2)] alpha 0.2
-      @el [padding 16, border-radius $unit, background color-mix(in srgb, var(--brand), #f43f5e 50%)] mix
+      @each $tag in $tags
+        @el [padding ${if($compact, 4, 8)} 12, border-radius $unit, background var(--subtle)]
+          ${capitalize($tag)}: ${length($tag)} letters
     @if contains($tags, css)
       @text [color var(--muted)] contains(\$tags, css) is true
 
@@ -293,7 +295,7 @@
           @figcaption [font-size 13, color var(--muted)] @figure and @figcaption
 
   -- Raw HTML is the escape hatch
-  @raw <hr style="border: none; border-top: 1px dashed #cbd5e1">
+  @raw <hr style="width: 100%; border: none; border-top: 1px dashed #cbd5e1">
 
   @footer [flex-direction row, spacing $unit, padding-block $gutter, color var(--muted), font-size 14, print:display none]
     @text © 2026 htmlang
