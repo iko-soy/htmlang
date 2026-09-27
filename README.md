@@ -7,15 +7,15 @@ themselves. Styling uses CSS properties under their CSS names, and every other
 element uses its HTML name.
 
 ```
-@page My Site
+@page [lang=en, background #f8fafc] My Site
 @let --brand #3b82f6
 
-@let card $title
+@let @card [title]
   @article [padding 20, spacing 8, border 1 solid #e5e7eb, border-radius 8, hover:border-color var(--brand)]
     @h3 $title
     @children
 
-@el [max-width 800, center-x, padding 40, spacing 24]
+@el [width fill, max-width 800, center-x, padding 40, spacing 24]
   @h1 [font-size 32] Hello
   @paragraph
     Built with {@text [font-weight bold, color var(--brand)] htmlang}.
@@ -32,23 +32,90 @@ unless you write some, and nothing is added that you didn't ask for.
 ## The language in brief
 
 - **`@` starts structure, and any other line is content.** Indentation nests
-  elements. Text after an element's attributes is its content, and `{...}`
-  puts an element inside a line of text.
-- **Layout comes from elm-ui.** `@el` lays out its children in a column and
-  `@row` in a row, and every other container is a column too. Layout
-  attributes (`spacing`, `width fill`, `center-x`, `align-right`, `wrap`) say
-  how an element sits inside its parent.
+  elements. Text after an element's attributes is its content, read like
+  any line of text, and `{...}` puts an element inside a line of text
+  (`@h1 Hello {@text [color red] world}`). The text of `@code` and
+  `@textarea` is shown as written, and the lines indented under them are
+  verbatim, HTML-escaped with their line breaks kept, so `@pre > @code`
+  over an indented block shows a code sample. `@raw`, `@style` and `@head`
+  take the rest of their line or an indented block, kept as written
+  (`@style .note { color: gray; }`). An element that points at a URL or a
+  file takes it as its first word, and the rest is its content: `@link
+  /about About us`, `@image logo.png`, `@form /subscribe`, `@script app.js`.
+- **Layout comes from elm-ui.** Every element has one layout. `@el` and the
+  containers (`@section`, `@nav`, `@ul`, `@li`, ...) are columns, `@row` is a
+  row and `@grid` a grid: in them each line of text is a child, and
+  `spacing` is the gap between the children. Text elements (`@paragraph`,
+  `@h1`, `@button`, `@td`) let their lines flow, joined with spaces, and an
+  `@el` inside text is laid out inline. Layout attributes (`width fill`,
+  `center-x`, `align-right`, `wrap`) say how an element sits inside its
+  parent, and follow the direction the parent's CSS sets: `@nav
+  [flex-direction row]` is a row, and `md:flex-direction row` makes a
+  column a row from that width up, children included. The page is the root
+  element: `@page`'s styles go on `<body>`, a column that fills the window,
+  and its `key=value` attributes on `<html>` (`@page [lang=en, background
+  #f8fafc] Home`).
 - **Styling is CSS.** Any other attribute is a CSS property with its CSS
   name and value: `padding 20`, `border 1 solid #eee`,
-  `grid-template-columns 1fr 2fr`. In lengths, a bare number means pixels.
-  Prefixes make a style conditional: `hover:`, `md:`, `dark:`, `first:`.
-- **HTML stays HTML.** Elements have their HTML names (`@nav`, `@ul`, `@form`,
-  `@details`), and HTML attributes are written `key=value` (`id=main`,
-  `type=email`) or bare (`required`).
+  `grid-template-columns 1fr 2fr`. In a length property, every bare
+  number is pixels (`box-shadow 0 2 4 black` is `0 2px 4px black`); numbers
+  in any other property (`flex 1`, `z-index 2`) and in custom properties
+  stay numbers.
+  A custom property is a style like any other: `@let --surface white`
+  declares it for the whole page, and `[--gap 16px, md:--gap 24px]` sets
+  it on an element and everything inside it, so dark mode redefines a
+  token once (`@page [dark:--surface #0b1220]`) instead of every colour
+  that uses it. A token is read one way, `var(--surface)`, and a colour
+  variant is CSS's too (`color-mix(in srgb, var(--brand), black 8%)`,
+  `rgb(from var(--brand) r g b / 0.5)`), so it follows the token.
+  Prefixes make a style conditional: `hover:`, `md:`, `dark:`, and CSS's
+  common pseudo-classes and pseudo-elements under their CSS names
+  (`first-child:`, `nth-child(odd):`, `has(> img):`, `marker:`,
+  `backdrop:`; the list is in DESIGN.md).
+  They stack (`md:dark:background`, `hover:children:opacity`), and one
+  prefix covers a group or a bundle (`md:[padding 32, font-size 20]`,
+  `md:$card`).
+  An element prefix styles every such element inside, at any depth:
+  `@table [@td:padding 8]` pads every cell, and
+  `@article [@h2:font-size 20, @code:background #f1f5f9]` styles what
+  `@markdown` writes. An element's own attributes still win, and the
+  nearest element that styles it wins over one further out.
+  A comma separates attributes, so a comma inside a value is written `\,`
+  (`transition opacity 0.3s\, transform 0.3s`), and quoted text keeps its
+  quotes only in CSS (`before:content "→ "`).
+- **Names are checked, values are CSS's.** A misspelled element, prefix,
+  parameter or slot is an error. A CSS property htmlang doesn't know is
+  passed through with a "did you mean" warning, and values go to the CSS as
+  written (`outline 2 solid red` is `outline: 2px solid red`, nothing
+  added). Nothing you write is left out of the page without an error.
+- **The generated CSS stays on htmlang's elements.** Its classes are
+  `hl-a`, `hl-b`, ..., in cascade layers (`hl-reset`, `hl-kind`,
+  `hl-inside`, `htmlang`), so your own CSS wins. An element's defaults (no
+  heading margins, no list markers, links in the text colour) go with its
+  own class, so `@markdown` and `@raw` HTML, and a page that embeds
+  `--partial` output, keep theirs.
+- **HTML stays HTML.** An element that isn't about layout or text has its
+  HTML name (`@nav`, `@ul`, `@form`, `@details`, `@strong`, `@em`, `@br`,
+  `@caption`), from a fixed list, so a typo is an error rather than a new
+  tag. HTML attributes are written `key=value` (`id=main`, `type=email`) or
+  bare (`required`).
 - **`@let` defines everything.** It defines values, computed values,
-  attribute bundles and functions. A layout is just a function with slots.
-- **Data comes in as lists and records.** `@data` loads JSON, and `@each` and
-  `@if` run at compile time.
+  attribute bundles and functions. A function's body puts a call's content
+  where `@children` is and fills `@slot NAME` from the call's `@slot NAME`
+  blocks, and content that would go nowhere (a misspelled slot, content for
+  a function without `@children`) is an error. A layout is just a function
+  with slots.
+  `$name` fills in a value exactly where it is written (a line of text, an
+  attribute's value, a file path), whole attributes come from a bundle or
+  from `if()` (`if($active, [font-weight bold, aria-current=page])`), and
+  an undefined name is an error where the code runs.
+- **Values are typed: text, numbers, `true`/`false`, lists and records.**
+  Commas make a list (`@let fruits apple, banana`), `1..5` is a range,
+  `@data` loads JSON as records and lists, and a value passed as one `$name`
+  keeps its type, so a record can go to a function (`@post-card [post $p]`).
+  `@each` and `@if` run at compile time. A definition is visible from its
+  line to the end of its block, and a function sees what is visible where
+  it is defined.
 
 ## Install
 
@@ -67,12 +134,12 @@ htmlang build src -o dist    # compile a whole site
 
 | Command | Purpose |
 |---|---|
-| `build <dir> [-o out] [--minify] [--strict]` | Compile every `.hl` file under a directory (into `out/` by default) |
+| `build <dir> [-o out] [--minify] [--strict]` | Compile every `.hl` file under a directory (into `out/` by default), except libraries: files that hold only `@let`s |
 | `serve [dir\|file] [-p PORT] [--open]` | Dev server with live reload |
 | `watch [dir\|file] [-o out]` | Recompile on change, without a server |
 | `check <file\|dir> [--format json]` | Report diagnostics without writing output |
 | `lint <file\|dir> [--format json]` | Stricter checks (accessibility, nesting) |
-| `fmt <file.hl>` | Format a file in place |
+| `fmt <file.hl>...` | Format files in place |
 | `lsp` | Run the language server over stdio |
 
 Compiling a file directly also takes `-w` / `--watch`, `--dev` (readable
@@ -94,29 +161,50 @@ is an HTML attribute:
 ```
 
 A prefix applies a style only in a state, from a screen width up, or under a
-media condition:
+media condition. Prefixes stack, and a prefix before a `[group]` applies to
+each style in it:
 
 ```
-@el [padding 16, md:padding 32, background #3b82f6, hover:background #2563eb, dark:background #1e3a8a]
+@el [padding 16, md:[padding 32, font-size 20], background #3b82f6, hover:background #2563eb, dark:[background #1e3a8a, hover:background #1e40af]]
   @text [color white] Click me
 ```
 
-`@let` defines values, bundles and functions. A function is called like an
-element: its parameters are attributes, and any other attributes style its
-root element.
+An element prefix, `@td:`, styles every such element inside, so rows a
+loop writes and HTML from `@markdown` need no attributes of their own:
+
+```
+@table [border-collapse collapse, @th:[padding 8, text-align left], @td:padding 8, @tr:nth-child(even):background #f8fafc]
+  @tr
+    @th Name
+  @tr
+    @td Ada
+```
+
+`@let` defines values, bundles and functions, in one namespace. A function
+has `@` before its name and its parameters in brackets (`label`, or
+`href #` with a default). It is called like an element, on its own line,
+in a chain or inline in text: its parameters are attributes, `name value`
+(a name alone is `true`), a parameter without a default must be passed,
+and any other attributes style its root element and are checked like
+attributes written there.
 
 ```
 @let --primary #3b82f6
 @let gap = 8 * 2
 @let rounded [border-radius 8, overflow hidden]
 
-@let button $label $href=#
+@let @cta [label, href #]
   @link [$rounded, padding 10 16, background var(--primary), color white] $href
     $label
+@let @key
+  @kbd [padding 1 6, border 1 solid #d1d5db, border-radius 4]
+    @children
 
 @row [spacing $gap]
-  @button [label Sign up]
-  @button [label Learn more, href /about, background #64748b]
+  @cta [label Sign up]
+  @cta [label Learn more, href /about, background #64748b]
+@paragraph
+  Press {@key Ctrl+K} to search.
 ```
 
 Data, loops and conditions run at compile time:
@@ -132,7 +220,7 @@ Data, loops and conditions run at compile time:
 @nav
   @row [spacing 16]
     @each $link in $links
-      @link [if($link.url == $current, font-weight bold)] $link.url $link.label
+      @link [if($link.url == $current, [font-weight bold, aria-current=page])] $link.url $link.label
 ```
 
 The [`examples/`](examples) directory has complete pages (a landing page, a
@@ -145,3 +233,11 @@ The VS Code extension in [`editors/vscode`](editors/vscode) provides syntax
 highlighting, snippets, and the language server (`htmlang-lsp`). The server
 gives diagnostics, completions, hover documentation, go to definition, rename
 and formatting.
+
+The compiler, the formatter and the language server read a file with the
+same parser, so the editor sees exactly what the compiler sees, relative
+`@include` and `@data` paths included. Every diagnostic has a stable code
+(`error[unknown-element]` on the command line, a `code` field in
+`--format json`), and the whole file is checked, including branches and
+functions that don't run (a `$name` there is checked only where the code
+runs, since it may come from data).

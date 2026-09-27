@@ -6,25 +6,74 @@ Syntax highlighting, snippets, and language server support for
 ## Features
 
 - **Syntax highlighting**: `@` elements and directives, `$variables`,
-  `[attribute]` lists with state and media prefixes, `key=value` HTML
-  attributes, `{@inline}` elements, colors, numbers and `-- comments`.
-- **Diagnostics**: parse errors, unknown elements and attributes with "did
-  you mean" suggestions, undefined and unused definitions, and accessibility
-  warnings.
-- **Completion** of elements, directives, layout attributes, CSS properties,
-  HTML attributes, prefixes, variables and functions. It triggers on `@`,
-  `$`, `[` and `,`.
-- **Hover** documentation for elements, directives and attributes (CSS
-  properties link to MDN), function signatures, variable values, and color
-  swatches.
-- **Navigation**: go to definition, find references and rename for
-  `$variables`, bundles and `@let` functions. `@include` paths are links.
-- **Code actions**: fixes for common diagnostics, removing unused definitions,
-  and extracting a selection into a `@let` function or attribute bundle.
+  `[attribute]` lists (`@page`'s included) with state and media prefixes
+  (stacked, `md:hover:`, and on a group or bundle, `md:[...]`, `dark:$card`)
+  and element prefixes (`@td:`, `@link:hover:`),
+  `if(...)` and its `[groups]`, `key=value` HTML attributes (`xml:lang=` too), the leading argument of
+  `@link`, `@image`, `@script` and the other elements that take one, quoted text, escapes (`\,`, `\$`, `\]`), `{@inline}` elements
+  (shown as text in `@code` and `@textarea`), the one-line body of `@raw`,
+  `@style` and `@head` as raw text,
+  `@each $item in` headers and ranges (`1..5`), custom and vendor-prefixed
+  property names (`--gap`, `md:--gap`, `-webkit-text-stroke`), colors,
+  numbers and `-- comments` (`--` followed by a space, also between the lines
+  of an attribute list).
+- **Diagnostics**: the compiler's own, each with its code: parse errors,
+  unknown elements, prefixes and CSS properties with "did you mean"
+  suggestions, anything that would be left out of the page, undefined and
+  unused definitions, and accessibility warnings. The whole file is
+  checked, including branches and functions that don't run, and relative
+  `@include` and `@data` paths resolve from the file's folder.
+- **Completion** of elements, directives, layout attributes (`spacing`,
+  `wrap` and `grid-cols` only on a row, column or grid), CSS properties,
+  HTML attributes (not the one an element's leading argument already
+  gives, as `href=` in `@link [] /about About`; on `@page`, `lang=`,
+  `dir=`, `class=` and `favicon` first), the custom properties the file
+  names (`--surface`, and `dark:--surface` after a prefix, and inside
+  `var(`, where a token is read), colour variants after a colour property
+  (`color-mix()`, `rgb(from)`), prefixes (the CSS
+  pseudo-classes and pseudo-elements htmlang knows, one with an argument placing the
+  cursor between its parentheses, as `nth-child(|):`; and
+  after one, those that can follow it, as `md:hover:`; after a
+  pseudo-element such as `before:`, only media, width and container
+  prefixes; after `@`, the element prefixes, `@td:`, of the elements with
+  an HTML tag of their own, and after one, CSS properties only), bundles
+  after prefixes (`md:$card`), only styles inside a prefixed group
+  (`md:[...]`), `if()` (and attributes inside its branches),
+  the variables visible where you type (definitions above in the block and
+  the blocks around it, `@each` variables and a function's parameters),
+  functions and the parameters a function call hasn't passed yet, the slot names of a call's `@slot`
+  blocks, and elements and functions inside `{@...}` in text. Only what
+  the element takes is offered: `inline` on `@image`, nothing on
+  `@fragment`, HTML attributes on `@script`; and nothing for the new name
+  after `@let`. It triggers on `@`, `$`, `[` and `,`.
+- **Hover** documentation for elements (with their layout: column, row,
+  grid, text, native or void), directives, attributes (CSS
+  properties link to MDN), prefixes and stacks of them (`md:hover:`, `@td:`) and `if()`, function signatures with their slots and
+  whether they take content, a parameter's name where it is declared or
+  passed (required, or its default), variable values, and color swatches.
+- **Navigation**: go to definition (the definition a name means at that
+  line), find references and rename for
+  `$variables`, bundles, `@let @name` functions and custom properties
+  (`@let --brand`, `var(--brand)`). Renaming a parameter renames it at
+  every call too (`@card [title Hi]`). `@include`, `@markdown` and
+  `@data` file paths are links.
+- **Code actions**: fixes keyed on diagnostic codes (replace a misspelled
+  name, prefix (`@tdd:` as `@td:`, `@a:` as `@link:`) or slot name, put a pseudo-element's prefix last
+  (`before:hover:` as `hover:before:`), replace `@a` with `@link`, write a slot name as one word, add a missing `alt=` or `type=text`, write a
+  style given as an HTML attribute (`padding=4`) as `padding 4`, use a
+  bundle named without its `$` as `$card`, include the file that defines an
+  unknown function, write a quoted font stack as `A\, B`, write `$--x` as
+  `var(--x)`, drop the `$` from
+  `@let $x` and add it to `@each x`, pass a parameter as `name value`
+  instead of `name=value`), removing unused
+  definitions, and extracting a selection
+  into a `@let` function or attribute bundle, placed above the top-level
+  line it comes from so it sees the same definitions (a loop variable or
+  parameter the lines read becomes a parameter of the function).
 - **Outline and symbols**: the document outline, and `Ctrl-T` workspace
   search across every `.hl` file.
 - **Formatting**: `Format Document` and `Format Selection` use the same
-  formatter as `htmlang fmt`.
+  formatter as `htmlang fmt`; a formatted selection keeps its nesting.
 - **Also**: reference counts as code lenses on each `@let`, variable values
   as inlay hints, a color picker, folding, semantic tokens, signature help for
   function calls, and linked editing of a variable's uses.
@@ -44,8 +93,10 @@ to its absolute path. `htmlang.server.args` passes extra arguments to it.
 ## Snippets
 
 Snippets cover common patterns: `@page`, `@let-fn`, `@let-slots`,
-`@let-tokens`, `@navbar`, `@hero`, `@form`, `@grid`, `@each`, `@if`,
-`@layout` and more. Type a prefix and press `Tab` to expand it.
+`@let-tokens`, `@navbar`, `@hero`, `@form`, `@grid`, `@table` (its cells
+padded by `@td:`), `@markdown-styled`, `@each`, `@if`,
+`if(` (attributes chosen by a condition), `@code-sample` (`@pre > @code`
+over a block shown as written), `@layout` and more. Type a prefix and press `Tab` to expand it.
 
 ## Development
 

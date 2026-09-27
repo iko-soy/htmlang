@@ -1,0 +1,15 @@
+-- The page is the root element: @page's styles style <body>, its
+-- key=value attributes go on <html>, and favicon is its own word.
+@page [lang=en, dir=ltr, class=site, favicon missing-icon.png, color var(--ink), font-family Georgia\, serif, spacing 8, dark:background #0b1220, dark:color #e2e8f0, md:padding 16] The page is the root
+@let --ink #0f172a
+@meta description One page
+@meta description One page
+
+-- The top level is a column, like the children of an @el
+A line of text
+@text [background #fef3c7] Inline elements stack too
+@link /about About
+@header [padding 16] Header
+@main [height fill, padding 16]
+  @el [center-y, center-x] In the middle of the rest of the window
+@footer [padding 16] Footer

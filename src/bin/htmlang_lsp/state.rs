@@ -15,23 +15,41 @@ use crate::analysis::document_symbols;
 pub struct DocumentEntry {
     pub text: String,
     pub version: i32,
+    /// The directory of the file, so relative `@include` and `@data` paths
+    /// resolve as they do on the command line. `None` for unsaved buffers.
+    pub base: Option<PathBuf>,
     parse: OnceLock<Arc<ParseResult>>,
+    tree: OnceLock<Arc<htmlang::syntax::Tree>>,
     symbols: OnceLock<Arc<Vec<SymbolInformation>>>,
 }
 
 impl DocumentEntry {
-    pub fn new(text: String, version: i32) -> Self {
+    pub fn new(text: String, version: i32, base: Option<PathBuf>) -> Self {
         Self {
             text,
             version,
+            base,
             parse: OnceLock::new(),
+            tree: OnceLock::new(),
             symbols: OnceLock::new(),
         }
     }
 
     pub fn parse(&self) -> Arc<ParseResult> {
         self.parse
-            .get_or_init(|| Arc::new(htmlang::parser::parse(&self.text)))
+            .get_or_init(|| {
+                Arc::new(htmlang::parser::parse_with_base(
+                    &self.text,
+                    self.base.as_deref(),
+                ))
+            })
+            .clone()
+    }
+
+    /// The syntax tree the compiler evaluates, shared by every feature.
+    pub fn tree(&self) -> Arc<htmlang::syntax::Tree> {
+        self.tree
+            .get_or_init(|| Arc::new(htmlang::syntax::parse(&self.text)))
             .clone()
     }
 
@@ -40,6 +58,13 @@ impl DocumentEntry {
             .get_or_init(|| Arc::new(document_symbols(&self.text)))
             .clone()
     }
+}
+
+/// The directory a document's relative paths resolve against.
+pub fn base_dir(uri: &Url) -> Option<PathBuf> {
+    uri.to_file_path()
+        .ok()
+        .and_then(|path| path.parent().map(Path::to_path_buf))
 }
 
 /// Apply a single content change event to a string. Used when the LSP client
@@ -272,5 +297,19 @@ mod tests {
         let mut s = String::from("ab\ncd");
         apply_change(&mut s, &change((0, 99), (0, 99), "!"), false);
         assert_eq!(s, "ab!\ncd");
+    }
+
+    #[test]
+    fn relative_includes_resolve_from_the_documents_folder() {
+        let dir = std::env::temp_dir().join(format!("htmlang-lsp-base-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("part.hl"), "@let @helper\n  @el\n    @children\n").unwrap();
+        std::fs::write(dir.join("site.json"), "{\"name\": \"Demo\"}").unwrap();
+        let uri = Url::from_file_path(dir.join("page.hl")).unwrap();
+        let text = "@include part.hl\n@data $site site.json\n@helper $site.name\n".to_string();
+        let entry = DocumentEntry::new(text, 1, base_dir(&uri));
+        let result = entry.parse();
+        std::fs::remove_dir_all(&dir).ok();
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     }
 }

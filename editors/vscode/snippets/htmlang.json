@@ -2,10 +2,10 @@
   "Page": {
     "prefix": "@page",
     "body": [
-      "@page [lang ${1:en}] ${2:My Page}",
+      "@page [lang=${1:en}] ${2:My Page}",
       "@let --${3:brand} ${4:#3b82f6}",
       "",
-      "@el [max-width ${5:800}, center-x, padding ${6:40}, spacing ${7:20}]",
+      "@el [width fill, max-width ${5:800}, center-x, padding ${6:40}, spacing ${7:20}]",
       "  $0"
     ],
     "description": "A page with a title, tokens and a centered column"
@@ -13,11 +13,10 @@
   "Page metadata": {
     "prefix": "@page-meta",
     "body": [
-      "@page [lang ${1:en}, favicon ${2:favicon.png}] ${3:My Page}",
+      "@page [lang=${1:en}, favicon ${2:favicon.png}] ${3:My Page}",
       "@meta description ${4:Page description}",
       "@meta og:title $3",
-      "@head",
-      "  <link rel=\"canonical\" href=\"${5:https://example.com/}\">",
+      "@head <link rel=\"canonical\" href=\"${5:https://example.com/}\">",
       "$0"
     ],
     "description": "A page with a description, Open Graph tags and a canonical link"
@@ -30,7 +29,17 @@
       "@let --${5:muted} ${6:#64748b}",
       "$0"
     ],
-    "description": "CSS custom properties: var(--name) at run time, \\$--name at compile time"
+    "description": "CSS custom properties on :root, values as written (a length takes its unit): read as var(--name), and colour variants as color-mix(in srgb, var(--name), black 10%); [--name value] sets one on an element and everything inside it"
+  },
+  "Dark mode tokens": {
+    "prefix": "@page-theme",
+    "body": [
+      "@let --${1:ink} ${2:#0f172a}",
+      "@let --${3:surface} ${4:white}",
+      "@page [color var(--$1), background var(--$3), dark:[--$1 ${5:#e2e8f0}, --$3 ${6:#0b1220}]] ${7:My Page}",
+      "$0"
+    ],
+    "description": "Colour tokens on :root, redefined once for dark mode on the page: everything that uses them follows"
   },
   "Attribute bundle": {
     "prefix": "@let-bundle",
@@ -43,7 +52,7 @@
   "Function": {
     "prefix": "@let-fn",
     "body": [
-      "@let ${1:card} \\$${2:title}",
+      "@let @${1:card} [${2:title}]",
       "  @el [${3:padding 20, spacing 8, border 1 solid #e5e7eb, border-radius 8}]",
       "    @text [font-weight bold] \\$$2",
       "    @children",
@@ -51,12 +60,12 @@
       "@$1 [$2 ${4:Hello}]",
       "  $0"
     ],
-    "description": "A function with a parameter and @children"
+    "description": "A function with a required parameter and @children"
   },
   "Function with slots": {
     "prefix": "@let-slots",
     "body": [
-      "@let ${1:panel} \\$${2:title}",
+      "@let @${1:panel} [${2:title}]",
       "  @article [${3:padding 20, spacing 12}]",
       "    @row [align-items center]",
       "      @h2 \\$$2",
@@ -76,7 +85,7 @@
   "Scoped style": {
     "prefix": "@let-style",
     "body": [
-      "@let ${1:note}",
+      "@let @${1:note}",
       "  @style",
       "    & { ${2:border-left: 4px solid #3b82f6;} }",
       "  @el [${3:padding 12 16}]",
@@ -129,7 +138,7 @@
   "Grid with named areas": {
     "prefix": "@grid-areas",
     "body": [
-      "@grid [grid-template-columns ${1:240px 1fr}, grid-template-areas \"${2:header header}\" \"${3:sidebar main}\", spacing ${4:20}]",
+      "@grid [grid-template-columns ${1:240 1fr}, grid-template-areas \"${2:header header}\" \"${3:sidebar main}\", spacing ${4:20}]",
       "  @header [grid-area header]",
       "    ${5:Header}",
       "  @aside [grid-area sidebar]",
@@ -146,14 +155,12 @@
       "  {\"label\": \"${2:Home}\", \"url\": \"/\"},",
       "  {\"label\": \"${3:About}\", \"url\": \"/about\"}",
       "]",
-      "@header [padding ${4:12 24}, border-bottom 1 solid #e5e7eb]",
-      "  @row [spacing ${5:20}, align-items center]",
-      "    @text [font-weight bold] ${6:Logo}",
-      "    @spacer",
-      "    @nav",
-      "      @row [spacing $5]",
-      "        @each \\$link in \\$$1",
-      "          @link [hover:text-decoration underline] \\$link.url \\$link.label",
+      "@header [flex-direction row, spacing ${5:20}, align-items center, padding ${4:12 24}, border-bottom 1 solid #e5e7eb]",
+      "  @text [font-weight bold] ${6:Logo}",
+      "  @spacer",
+      "  @nav [flex-direction row, spacing $5]",
+      "    @each \\$link in \\$$1",
+      "      @link [hover:text-decoration underline] \\$link.url \\$link.label",
       "$0"
     ],
     "description": "A header with a logo, a spacer and links from data"
@@ -211,6 +218,14 @@
     ],
     "description": "Loop over a list, with a fallback for an empty one"
   },
+  "Each in a range": {
+    "prefix": "@each range",
+    "body": [
+      "@each \\$${1:i} in ${2:1}..${3:5}",
+      "  $0"
+    ],
+    "description": "Loop over the numbers from a to b (add `step n` to skip)"
+  },
   "If": {
     "prefix": "@if",
     "body": [
@@ -221,13 +236,27 @@
     ],
     "description": "A conditional with an else branch"
   },
+  "Conditional attributes": {
+    "prefix": "if(",
+    "body": [
+      "if(${1:\\$condition}, [${2:font-weight 600}]${3:, [${4:font-weight 400}]})"
+    ],
+    "description": "Attributes chosen by a condition: each branch is an attribute, a [group] or a \\$bundle"
+  },
   "Dark mode": {
     "prefix": "@dark",
     "body": [
-      "@el [background ${1:white}, color ${2:#111827}, dark:background ${3:#111827}, dark:color ${4:#f9fafb}]",
+      "@el [background ${1:white}, color ${2:#111827}, dark:[background ${3:#111827}, color ${4:#f9fafb}]]",
       "  $0"
     ],
-    "description": "Light and dark colors on one element"
+    "description": "Light and dark colors on one element: a prefix applies to a [group] of styles"
+  },
+  "Responsive group": {
+    "prefix": "md:[",
+    "body": [
+      "${1:md}:[${2:padding 32}, ${3:font-size 20}]"
+    ],
+    "description": "Prefixes applied to a group of styles (or to a bundle: md:\\$card); prefixes stack, as in md:hover:color"
   },
   "Keyframes": {
     "prefix": "@keyframes",
@@ -246,8 +275,7 @@
   "Font face": {
     "prefix": "@font-face",
     "body": [
-      "@style",
-      "  @font-face { font-family: '${1:Inter}'; src: url('${2:fonts/inter.woff2}') format('woff2'); font-display: swap; }",
+      "@style @font-face { font-family: '${1:Inter}'; src: url('${2:fonts/inter.woff2}') format('woff2'); font-display: swap; }",
       "$0"
     ],
     "description": "A custom font in @style"
@@ -279,12 +307,53 @@
     ],
     "description": "An inline script"
   },
+  "Table": {
+    "prefix": "@table",
+    "body": [
+      "@table [border-collapse collapse, @th:padding ${4:8}, @td:padding ${4:8}]",
+      "  @caption ${1:Title}",
+      "  @thead",
+      "    @tr",
+      "      @th ${2:Name}",
+      "  @tbody",
+      "    @tr",
+      "      @td ${3:Value}",
+      "$0"
+    ],
+    "description": "A table with a caption, a header row and a body, its cells padded by the table"
+  },
+  "Styled Markdown": {
+    "prefix": "@markdown-styled",
+    "body": [
+      "@article [@h2:font-size ${1:20}, @code:background ${2:#f1f5f9}, @link:color ${3:#2563eb}]",
+      "  @markdown",
+      "    $0"
+    ],
+    "description": "Markdown whose headings, code and links are styled by the element around it"
+  },
+  "List with markers": {
+    "prefix": "@ul-markers",
+    "body": [
+      "@ul [list-style ${1:disc}, padding-inline-start 20, children:display list-item, children:marker:color ${2:currentColor}]",
+      "  @li ${3:Item}",
+      "$0"
+    ],
+    "description": "A list that shows its markers, with ::marker styled"
+  },
   "External script": {
     "prefix": "@script-src",
     "body": [
-      "@script [src=${1:app.js}, ${2:defer}]",
+      "@script [${2:defer}] ${1:app.js}",
       "$0"
     ],
     "description": "A script loaded from a file"
+  },
+  "Code sample": {
+    "prefix": "@code-sample",
+    "body": [
+      "@pre [padding ${1:16}, background ${2:#f8fafc}, overflow-x auto] > @code",
+      "  $0"
+    ],
+    "description": "A code sample: the lines under @code are shown as written, HTML-escaped"
   }
 }

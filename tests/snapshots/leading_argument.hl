@@ -1,0 +1,50 @@
+@page Leading argument
+-- The first word after the attributes fills the element's leading
+-- attribute; the rest of the text is its content
+@let next 3
+@let spaced /docs/getting started
+@let docs "/docs/a guide"
+@let @nav-link [to, label]
+  @link [padding 4] $to $label
+@nav [flex-direction row, spacing 12]
+  @link /about About {@b us}
+  @link [href=/contact, class=c]
+    Contact
+  @link $spaced Getting started
+  @link $docs The guide
+  @link /page/${$next + 1} Next page
+  @link "/my page" Mine
+  @nav-link [to /x, label X]
+@form [method=post, spacing 8] /subscribe
+  @label [for=email] Email
+  @input [type=email, name=email, id=email]
+  @button [type=submit] Sign up
+@form /search Search the site
+@image [alt=Logo, width 120] logo.png
+@image [alt=Team] "team photo.jpg"
+@image [src=hero.jpg, alt=Hero]
+-- @source's is srcset in @picture and src in @video
+@picture
+  @source [type=image/avif] hero.avif
+  @source [srcset=hero-2x.webp 2x, type=image/webp]
+  @image [alt=Hero] hero.jpg
+@video [controls, aria-label=Intro] intro.mp4
+  @source [type=video/webm] intro.webm
+  @track [kind=captions, srclang=en] intro.vtt
+  Your browser doesn't play this video.
+@audio [controls] song.mp3
+@iframe [title=Map, width fill, height 300] https://example.com/map
+@select [aria-label=Fruit]
+  @optgroup "Citrus fruits"
+    @option Lemon
+@embed [type=image/svg+xml] logo.svg
+@object [type=application/pdf] report.pdf
+  The report
+@map [name=m]
+  @area [shape=rect, coords=0\,0\,10\,10, alt=Corner] /corner
+-- @script: every HTML attribute passes through
+@script [type=module, nonce=abc, data-page=home, class=s] app.js
+@script
+  document.body.dataset.ready = "yes"
+@el > @script
+  if (a < b && c) { @notanelement(); }

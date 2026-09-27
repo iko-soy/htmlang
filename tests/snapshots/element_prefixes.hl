@@ -1,0 +1,42 @@
+-- Element prefixes: every such element inside, at any depth
+@page [@h2:margin-block-start 16] Element prefixes
+@let --line #e5e7eb
+@let team Ada, Grace, Linus
+
+-- A data table: the cells a loop writes need no attributes
+@table [border-collapse collapse, width 100%, @th:[padding 8, text-align left], @td:padding 8, @tr:border-bottom 1 solid var(--line), @tr:nth-child(even):background #f8fafc]
+  @tr
+    @th Name
+    @th Role
+  @each $name in $team
+    @tr
+      @td $name
+      -- Its own attributes win over the table's
+      @td [padding 2] Engineer
+
+-- Markdown has no attributes of its own
+@article [spacing 12, @h2:font-size 20, @code:[padding 1 4, background #f1f5f9], @link:hover:color #2563eb, md:@h2:font-size 24]
+  @markdown
+    ## Notes
+
+    Run `htmlang check` before you [publish](/publish).
+
+-- The nearest element wins, whatever the order
+@section [@td:padding 16, @td:color gray]
+  @table [@td:padding 4]
+    @tr
+      @td Inner
+
+-- Before the prefix: the element itself; after it: the elements inside
+@nav [flex-direction row, spacing 12, hover:@link:text-decoration underline, @link:hover:color #2563eb, @link:before:content "→ "]
+  @link /a A
+  @link /b B
+
+-- A bundle and a group under the prefix, and the headings' default margin
+@let muted [color #64748b, font-size 14]
+@main [@paragraph:$muted, @ul:[padding-inline-start 20, list-style disc], @li:display list-item]
+  @h2 Heading
+  @paragraph Muted text
+  @ul
+    @li One
+    @li Two

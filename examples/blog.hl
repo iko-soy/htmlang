@@ -1,6 +1,6 @@
 -- A blog index: a layout function with named slots, posts loaded from JSON,
 -- and loops and conditions over records.
-@page [lang en] Notes on the Web
+@page [lang=en] Notes on the Web
 @meta description Short essays on static HTML, layout and tooling.
 
 @let --ink #1f2937
@@ -13,8 +13,8 @@
 
 -- A layout is an ordinary function. @slot blocks are filled by name; the
 -- rest of the caller's content replaces @children.
-@let site
-  @el [max-width 720, center-x, padding 48 24, spacing 40, color var(--ink), line-height 1.6]
+@let @site
+  @el [width fill, max-width 720, center-x, padding 48 24, spacing 40, color var(--ink), line-height 1.6]
     @header [spacing 4]
       @link [font-weight 800, font-size 28, letter-spacing -0.5] / Notes on the Web
       @slot tagline
@@ -26,7 +26,7 @@
         Built with htmlang.
 
 -- A pill for each tag
-@let tag $name
+@let @tag [name]
   @link [
     padding 2 10,
     border-radius 999,
@@ -38,13 +38,11 @@
     #$name
 
 -- A post summary. `featured` is optional: a parameter with a default
-@let post-card $post $featured=false
+@let @post-card [post, featured false]
   @article [
     spacing 8,
-    padding if($featured, 24, 0),
     border-radius 12,
-    if($featured, background #f8fafc),
-    if($featured, border 1 solid var(--line))
+    if($featured, [padding 24, background #f8fafc, border 1 solid var(--line)])
   ]
     @if $featured
       @text [font-size 12, font-weight 700, text-transform uppercase, letter-spacing 1, color var(--accent)] Featured
@@ -58,9 +56,9 @@
     @paragraph [color var(--muted), line-clamp 2] $post.summary
 
 -- Multi-line content: a function whose body is text
-@let about
+@let @about
   I write about building for the web with as little machinery as possible:
-  plain HTML, a little CSS, and tools that {@text [font-style italic] stay out of the way}.
+  plain HTML, a little CSS, and tools that {@em stay out of the way}.
 
 @site
   @slot tagline
@@ -69,7 +67,7 @@
 
   @section [spacing 32]
     @each $post in $posts
-      @post-card [post $post, featured ${default($post.featured, false)}]
+      @post-card [post $post, featured $post.featured]
     @else
       @text [color var(--muted)] Nothing here yet.
 

@@ -1,10 +1,10 @@
 @page Container Test
 
-@el [container, container-name sidebar]
+@el [container-type inline-size, container-name sidebar]
   @el [width 200]
     @text Sidebar content
 
 -- Container query responsive children
-@el [container, max-width 800, padding 20]
+@el [container-type inline-size, max-width 800, padding 20]
   @el [background #f0f0f0, padding 16, cq-sm:padding 24, cq-lg:padding 32]
     @text Responsive to container width

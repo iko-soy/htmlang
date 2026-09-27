@@ -1,0 +1,19 @@
+@page Escapes \$5 \& quotes
+@meta description "Commas, quotes and backslashes"
+@let arrow "→ "
+@let areas "head head" "side main"
+@let price \$5
+@let @card [lede, mark "*"]
+  @el [before:content $mark, after:content " — $lede", padding 8]
+    $lede
+
+@el [transition opacity 0.3s\, transform 0.3s, font-family "Open Sans"\, sans-serif]
+  @text [before:content "\201C", after:content "\201D"] A quotation
+  @text [before:content $arrow] An arrow, with its quotes kept in CSS: $arrow
+  @el [display grid, grid-template-areas $areas]
+  @input [type=text, pattern=\d{3}-\d{4}, title=Costs $price, aria-label="Phone, US"]
+  @card [lede "Fast, simple"]
+  @card [lede Fast\, simple, mark $arrow]
+  @paragraph Braces {@mark \{and\}} brackets \[x\], a comma\, a quote \" and \\
+  @each $item in one\, two, three
+    @text $item

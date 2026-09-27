@@ -1,6 +1,8 @@
 -- A documentation page: a sidebar built from data, prose in htmlang and in
 -- Markdown, code samples, a table, and a component with scoped styles.
-@page [lang en] Getting started · htmlang docs
+-- `@h2:` and `@td:` style every heading and cell inside an element, the
+-- ones Markdown writes included.
+@page [lang=en, color var(--ink)] Getting started · htmlang docs
 
 @let --ink #0f172a
 @let --muted #64748b
@@ -25,14 +27,14 @@
   ]}
 ]
 
--- Code samples: @raw keeps the lines exactly as written, @ and all
-@let code-block
+-- Code samples: the lines under @code are shown exactly as written, @ and all
+@let @code-block
   @pre [padding 16, background var(--code-bg), border-radius 8, font-size 14, line-height 1.5, overflow-x auto]
     @children
 
 -- A callout with its own stylesheet. The @style rules are scoped to the
 -- function's root element; & is the root itself.
-@let callout $kind=Note
+@let @callout [kind Note]
   @style
     & { border-inline-start: 4px solid var(--accent); }
     .label { font-weight: 700; color: var(--accent); }
@@ -40,7 +42,7 @@
     @text [class=label] $kind
     @children
 
-@row [min-height 100vh, color var(--ink)]
+@row [height fill]
   -- Sidebar
   @aside [
     width 260,
@@ -62,14 +64,12 @@
               padding 6 12,
               border-radius 6,
               hover:background var(--code-bg),
-              if($item.id == $current, background var(--code-bg)),
-              if($item.id == $current, font-weight 600),
-              if($item.id == $current, aria-current=page)
+              if($item.id == $current, [background var(--code-bg), font-weight 600, aria-current=page])
             ] /docs/$item.id $item.label
 
   -- Content
   @main [width fill, padding 48 24, md:padding 48 56]
-    @article [max-width 760, spacing 20, line-height 1.7]
+    @article [max-width 760, spacing 20, line-height 1.7, @h2:[font-size 24, margin-block-start 16]]
       @el [spacing 8]
         @text [font-size 14, color var(--muted)] Introduction
         @h1 [font-size 40, line-height 1.2] Getting started
@@ -79,62 +79,68 @@
         guide takes about five minutes: install the compiler, write a page,
         and see it in the browser.
 
-      @h2 [id=install, font-size 24, margin-block-start 16] Install
-      @code-block
-        @raw
-          cargo install --path .
+      @h2 [id=install] Install
+      @code-block > @code
+        cargo install --path .
 
-      @h2 [id=first-page, font-size 24, margin-block-start 16] Your first page
+      @h2 [id=first-page] Your first page
       @paragraph
         Create a file called {@code hello.hl}:
-      @code-block
-        @raw
-          @page Hello
-          @el [padding 40, spacing 16]
-            @h1 Hi there
-            @paragraph
-              This is {@text [font-weight bold] htmlang}.
+      @code-block > @code
+        @page Hello
+        @el [padding 40, spacing 16]
+          @h1 Hi there
+          @paragraph
+            This is {@b htmlang}.
       @paragraph
         Then start the dev server and open the page. It recompiles and reloads
         whenever you save; press {@kbd [padding 1 6, border 1 solid var(--line), border-radius 4, font-size 14] Ctrl+C} to stop it.
-      @code-block
-        @raw
-          htmlang serve .
+      @code-block > @code
+        htmlang serve .
 
       @callout [kind Tip]
         @paragraph
           The output is one {@code .html} file with its CSS inside and no
           JavaScript, so you can open it straight from disk.
 
-      @h2 [font-size 24, margin-block-start 16] Commands
-      @table [border-collapse collapse, width 100%, font-size 15]
+      @h2 Commands
+      @table [
+        border-collapse collapse,
+        width 100%,
+        font-size 15,
+        @th:[padding 8, text-align left],
+        @td:padding 8,
+        @tr:border-bottom 1 solid var(--line),
+        @tr:last-child:border-bottom none
+      ]
         @thead
-          @tr [border-bottom 2 solid var(--line), text-align left]
-            @th [padding 8] Command
-            @th [padding 8] What it does
+          @tr [border-bottom 2 solid var(--line)]
+            @th Command
+            @th What it does
         @tbody
-          @tr [border-bottom 1 solid var(--line)]
-            @td [padding 8] htmlang page.hl
-            @td [padding 8] Compile one file to page.html
-          @tr [border-bottom 1 solid var(--line)]
-            @td [padding 8] htmlang serve .
-            @td [padding 8] Serve a folder with live reload
-          @tr [border-bottom 1 solid var(--line)]
-            @td [padding 8] htmlang build src -o dist
-            @td [padding 8] Compile a whole site
           @tr
-            @td [padding 8] htmlang check page.hl
-            @td [padding 8] Report problems without writing output
+            @td htmlang page.hl
+            @td Compile one file to page.html
+          @tr
+            @td htmlang serve .
+            @td Serve a folder with live reload
+          @tr
+            @td htmlang build src -o dist
+            @td Compile a whole site
+          @tr
+            @td htmlang check page.hl
+            @td Report problems without writing output
 
-      -- Longer prose can be Markdown
-      @markdown
-        ## Next steps
+      -- Longer prose can be Markdown, styled by the element around it
+      @section [@code:[padding 1 4, background var(--code-bg), border-radius 4], @li:margin-block 4]
+        @markdown
+          ## Next steps
 
-        - Read about **layout**: `@row`, `@el`, `spacing` and `width fill`.
-        - Style anything with CSS properties: `[padding 20, color navy]`.
-        - Turn repeated markup into functions with `@let`.
+          - Read about **layout**: `@row`, `@el`, `spacing` and `width fill`.
+          - Style anything with CSS properties: `[padding 20, color navy]`.
+          - Turn repeated markup into functions with `@let @name`.
 
-      @row [spacing 12, padding-block-start 24, border-top 1 solid var(--line), font-weight 600]
-        @link [color var(--accent)] /docs/overview ← Overview
+      @row [spacing 12, padding-block-start 24, border-top 1 solid var(--line), font-weight 600, @link:color var(--accent)]
+        @link /docs/overview ← Overview
         @spacer
-        @link [color var(--accent)] /docs/first-page Your first page →
+        @link /docs/first-page Your first page →

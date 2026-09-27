@@ -1,0 +1,31 @@
+-- Parameters are declared the way a call passes them
+@let brand #eff6ff
+@let @card [title, tone $brand, heading "About $title", mark "→ ", note ${if($title, set, unset)}]
+  @article [padding 16, background $tone, before:content $mark]
+    @h3 $heading
+    @text $note
+    @children
+
+@card [title Full, tone #f9fafb]
+@card [title Plain]
+  Children.
+-- A default sees the names visible where @card is defined: this later
+-- @let doesn't change it
+@let brand #fef3c7
+@card [title "A, b and \$c"]
+
+-- A flag: false unless the call names it
+@let @post-card [post, featured false, number ""]
+  @article [padding ${if($featured, 24, 8)}]
+    @if $featured
+      @text Featured
+    @if $number
+      @text $number.
+    @h2 $post
+
+@post-card [post First, featured, number 1]
+@post-card [post Second]
+@post-card [post Third, featured false]
+
+-- Attributes that aren't parameters style the root
+@post-card [post Styled, background #f8fafc, id=styled]

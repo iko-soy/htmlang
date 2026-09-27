@@ -1,0 +1,47 @@
+-- Custom properties are ordinary CSS properties: on any element, under any
+-- prefix, with their values as written
+@let --ink #0f172a
+@let --surface white
+@let --subtle #f8fafc
+@let --radius 8px
+@page [color var(--ink), background var(--surface), dark:--ink #e2e8f0, dark:--surface #0b1220, dark:--subtle #111a2e] Custom properties
+
+@section [padding 96 24, background var(--subtle)]
+  @article [padding 24, background var(--surface), border-radius var(--radius)]
+    Both follow dark mode, from the one place that sets it.
+
+-- A line of a list that starts with `--name` is a declaration
+@el [
+  -- the gap, wider on larger screens
+  --gap 16px,
+  md:--gap 24px,
+  spacing var(--gap)
+]
+  @text One
+  @text Two
+
+-- Values are written as they are: a custom property has no type
+@grid [--cols 3, --hue 200, grid-template-columns repeat(var(--cols), 1fr), background hsl(var(--hue) 80% 95%)]
+  @text a
+  @text b
+  @text c
+
+-- Under any prefix, and on any element
+@link [--underline 2px, hover:--underline 4px, text-decoration-thickness var(--underline)] /about About
+@row [children:--pad 4px, focus-within:--ring #3b82f6, has(img):--pad 8px, print:--pad 0]
+  @text [padding var(--pad)] x
+@paragraph Some {@strong [--weight 800, font-weight var(--weight)] inline} text
+
+-- In a bundle, and forwarded by a call to its root
+@let tinted [--tint #fef3c7, background var(--tint)]
+@let @box
+  @el [padding 8]
+    @children
+@box [$tinted, dark:--tint #422006]
+  Tinted
+
+-- Vendor-prefixed and SVG properties are written like any other
+@el [-webkit-text-stroke 1px black, -webkit-tap-highlight-color transparent]
+  Stroked
+@el [fill currentColor, stroke var(--ink), stroke-width 2, stroke-linecap round, stroke-dasharray 4 2]
+  Drawn

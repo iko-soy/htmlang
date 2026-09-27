@@ -11,8 +11,15 @@ use std::sync::Mutex;
 struct DiagnosticJson {
     file: String,
     line: usize,
+    column: Option<usize>,
+    code: &'static str,
     severity: String,
     message: String,
+}
+
+/// `error[unknown-element]`: the severity and the diagnostic's stable code.
+fn diagnostic_label(d: &htmlang::parser::Diagnostic) -> String {
+    format!("{}[{}]", severity_label(d.severity), d.code)
 }
 
 fn severity_label(s: htmlang::parser::Severity) -> &'static str {
@@ -46,6 +53,8 @@ fn compile(input_path: &str, cfg: &CompileConfig) -> (bool, Vec<PathBuf>) {
                     collector.lock().unwrap().push(DiagnosticJson {
                         file: input_path.to_string(),
                         line: 0,
+                        column: None,
+                        code: htmlang::diagnostic::code::UNREADABLE_FILE,
                         severity: "error".to_string(),
                         message: format!("{}", e),
                     });
@@ -58,7 +67,24 @@ fn compile(input_path: &str, cfg: &CompileConfig) -> (bool, Vec<PathBuf>) {
     };
 
     let base = Path::new(input_path).parent();
-    let result = htmlang::parser::parse_with_base(&input, base);
+    let mut result = htmlang::parser::parse_with_base(&input, base);
+    let doc = &result.document;
+    if cfg.partial
+        && (doc.page.is_some()
+            || !doc.meta_tags.is_empty()
+            || !doc.og_tags.is_empty()
+            || !doc.head_blocks.is_empty())
+    {
+        result
+            .diagnostics
+            .push(htmlang::diagnostic::Diagnostic::warning(
+                htmlang::diagnostic::code::NO_EFFECT,
+                1,
+                "--partial writes a fragment: @page's title and attributes, @meta and @head \
+                 have no <head> or <body> to go in, and are left out"
+                    .to_string(),
+            ));
+    }
 
     if cfg.format_json {
         if let Some(collector) = cfg.json_collector {
@@ -67,6 +93,8 @@ fn compile(input_path: &str, cfg: &CompileConfig) -> (bool, Vec<PathBuf>) {
                 collected.push(DiagnosticJson {
                     file: input_path.to_string(),
                     line: d.line,
+                    column: d.column.map(|c| c + 1),
+                    code: d.code,
                     severity: severity_label(d.severity).to_string(),
                     message: d.message.clone(),
                 });
@@ -74,7 +102,7 @@ fn compile(input_path: &str, cfg: &CompileConfig) -> (bool, Vec<PathBuf>) {
         }
     } else {
         for d in &result.diagnostics {
-            let prefix = severity_label(d.severity);
+            let prefix = diagnostic_label(d);
             if let Some(col) = d.column {
                 eprintln!("{}: line {}:{}: {}", prefix, d.line, col + 1, d.message);
             } else {
@@ -174,6 +202,12 @@ fn print_json_diagnostics(diagnostics: &[DiagnosticJson]) {
         json_object(&[
             ("file", json_escape_string(&d.file)),
             ("line", d.line.to_string()),
+            (
+                "column",
+                d.column
+                    .map_or_else(|| "null".to_string(), |c| c.to_string()),
+            ),
+            ("code", json_escape_string(d.code)),
             ("severity", json_escape_string(&d.severity)),
             ("message", json_escape_string(&d.message)),
         ])
@@ -348,15 +382,7 @@ fn lint_file(path: &str) -> Vec<String> {
         .diagnostics
         .iter()
         .chain(&lint)
-        .map(|d| {
-            format!(
-                "{}:{}:{}: {}",
-                path,
-                d.line,
-                severity_label(d.severity),
-                d.message
-            )
-        })
+        .map(|d| format!("{}:{}:{}: {}", path, d.line, diagnostic_label(d), d.message))
         .collect()
 }
 
@@ -377,8 +403,6 @@ fn open_in_browser(port: u16) {
 struct ProjectConfig {
     output: Option<String>,
     port: u16,
-    variables: Vec<(String, String)>,
-    breakpoints: Vec<(String, String)>,
     // Build options (can be overridden by CLI flags)
     dev: Option<bool>,
     minify: Option<bool>,
@@ -391,8 +415,6 @@ fn load_config(target: &Path) -> ProjectConfig {
     let mut config = ProjectConfig {
         output: None,
         port: 3000,
-        variables: Vec::new(),
-        breakpoints: Vec::new(),
         dev: None,
         minify: None,
         strict: None,
@@ -421,9 +443,9 @@ fn load_config(target: &Path) -> ProjectConfig {
         }
         if trimmed.starts_with('[') && trimmed.ends_with(']') {
             section = &trimmed[1..trimmed.len() - 1];
-            if !matches!(section, "variables" | "breakpoints" | "build" | "watch") {
+            if !matches!(section, "build" | "watch") {
                 eprintln!(
-                    "warning: {}:{}: unknown section '[{}]' (expected: variables, breakpoints, build, watch)",
+                    "warning: {}:{}: unknown section '[{}]', whose lines are ignored (expected: build, watch)",
                     config_path.display(),
                     line_num + 1,
                     section
@@ -434,13 +456,35 @@ fn load_config(target: &Path) -> ProjectConfig {
         if let Some((key, value)) = trimmed.split_once('=') {
             let key = key.trim();
             let value = value.trim().trim_matches('"');
+            // A value that doesn't read is reported, and the default kept
+            let invalid = |expected: &str| {
+                eprintln!(
+                    "warning: {}:{}: '{}' for '{}' is ignored (expected {})",
+                    config_path.display(),
+                    line_num + 1,
+                    value,
+                    key,
+                    expected
+                );
+            };
+            let flag = |current: Option<bool>| match value {
+                "true" => Some(true),
+                "false" => Some(false),
+                _ => {
+                    invalid("true or false");
+                    current
+                }
+            };
             match section {
                 "" => match key {
                     "output" => config.output = Some(value.to_string()),
-                    "port" => config.port = value.parse().unwrap_or(3000),
+                    "port" => match value.parse() {
+                        Ok(port) => config.port = port,
+                        Err(_) => invalid("a port number"),
+                    },
                     _ => {
                         eprintln!(
-                            "warning: {}:{}: unknown key '{}' (expected: output, port)",
+                            "warning: {}:{}: unknown key '{}' is ignored (expected: output, port)",
                             config_path.display(),
                             line_num + 1,
                             key
@@ -448,12 +492,12 @@ fn load_config(target: &Path) -> ProjectConfig {
                     }
                 },
                 "build" => match key {
-                    "dev" => config.dev = Some(value == "true"),
-                    "minify" => config.minify = Some(value == "true"),
-                    "strict" => config.strict = Some(value == "true"),
+                    "dev" => config.dev = flag(config.dev),
+                    "minify" => config.minify = flag(config.minify),
+                    "strict" => config.strict = flag(config.strict),
                     _ => {
                         eprintln!(
-                            "warning: {}:{}: unknown build key '{}' (expected: dev, minify, strict)",
+                            "warning: {}:{}: unknown build key '{}' is ignored (expected: dev, minify, strict)",
                             config_path.display(),
                             line_num + 1,
                             key
@@ -461,24 +505,19 @@ fn load_config(target: &Path) -> ProjectConfig {
                     }
                 },
                 "watch" => match key {
-                    "debounce_ms" => config.debounce_ms = value.parse().unwrap_or(50),
+                    "debounce_ms" => match value.parse() {
+                        Ok(ms) => config.debounce_ms = ms,
+                        Err(_) => invalid("a number of milliseconds"),
+                    },
                     _ => {
                         eprintln!(
-                            "warning: {}:{}: unknown watch key '{}' (expected: debounce_ms)",
+                            "warning: {}:{}: unknown watch key '{}' is ignored (expected: debounce_ms)",
                             config_path.display(),
                             line_num + 1,
                             key
                         );
                     }
                 },
-                "variables" => {
-                    config.variables.push((key.to_string(), value.to_string()));
-                }
-                "breakpoints" => {
-                    config
-                        .breakpoints
-                        .push((key.to_string(), value.to_string()));
-                }
                 _ => {} // already warned about unknown section
             }
         }
@@ -522,24 +561,26 @@ fn main() {
         return;
     }
 
-    // Handle "fmt" subcommand
-    if args.len() >= 3 && args[1] == "fmt" {
-        let file = &args[2];
-        match fs::read_to_string(file) {
-            Ok(input) => {
-                let formatted = htmlang::fmt::format(&input);
-                match fs::write(file, &formatted) {
-                    Ok(()) => eprintln!("formatted {}", file),
-                    Err(e) => {
-                        eprintln!("error: {}: {}", file, e);
-                        process::exit(1);
-                    }
+    // Handle "fmt" subcommand: each file in place
+    if args.len() >= 2 && args[1] == "fmt" {
+        if args.len() == 2 {
+            eprintln!("usage: htmlang fmt <file.hl>...");
+            process::exit(1);
+        }
+        let mut failed = false;
+        for file in &args[2..] {
+            let result = fs::read_to_string(file)
+                .and_then(|input| fs::write(file, htmlang::fmt::format(&input)));
+            match result {
+                Ok(()) => eprintln!("formatted {}", file),
+                Err(e) => {
+                    eprintln!("error: {}: {}", file, e);
+                    failed = true;
                 }
             }
-            Err(e) => {
-                eprintln!("error: {}: {}", file, e);
-                process::exit(1);
-            }
+        }
+        if failed {
+            process::exit(1);
         }
         return;
     }
@@ -583,6 +624,8 @@ fn main() {
             eprintln!("no .hl files found in {}", src);
             process::exit(1);
         }
+        // Libraries (files of `@let`s only) are for the pages that include them
+        let hl_files: Vec<PathBuf> = hl_files.into_iter().filter(|f| !is_library(f)).collect();
         // Create output dir if needed
         if let Some(out) = out_dir {
             let _ = fs::create_dir_all(out);
@@ -813,7 +856,7 @@ fn main() {
             let out_dir = config.output.as_deref().unwrap_or("out");
             let _ = fs::create_dir_all(out_dir);
             let mut all_included: Vec<PathBuf> = Vec::new();
-            for file in &hl_files {
+            for file in hl_files.iter().filter(|f| !is_library(f)) {
                 let path_str = file.to_string_lossy().to_string();
                 let rel = file.strip_prefix(target_path).unwrap_or(file);
                 let out_p = Path::new(out_dir).join(rel).with_extension("html");
@@ -860,6 +903,7 @@ fn main() {
                 &WatchBuild {
                     out_dirs: Some((target_path.to_path_buf(), serve_dir)),
                     discover_new_files: true,
+                    skip_libraries: true,
                     ..Default::default()
                 },
             );
@@ -940,7 +984,7 @@ fn main() {
                 let _ = fs::create_dir_all(out);
             }
             let mut all_included = Vec::new();
-            for file in &hl_files {
+            for file in hl_files.iter().filter(|f| !is_library(f)) {
                 let path_str = file.to_string_lossy().to_string();
                 let effective_out = effective_output.as_ref().map(|o| {
                     let rel = file.strip_prefix(target_path).unwrap_or(file);
@@ -973,6 +1017,7 @@ fn main() {
                         .as_ref()
                         .map(|o| (target_path.to_path_buf(), PathBuf::from(o))),
                     discover_new_files: true,
+                    skip_libraries: true,
                     ..Default::default()
                 },
             );
@@ -1103,7 +1148,7 @@ fn main() {
         };
         let mut any_errors = false;
         let mut all_included: Vec<PathBuf> = Vec::new();
-        for file in &hl_files {
+        for file in hl_files.iter().filter(|f| check || !is_library(f)) {
             let path_str = file.to_string_lossy().to_string();
             let effective_out = output_path.as_ref().map(|o| {
                 let rel = file.strip_prefix(dir).unwrap_or(file);
@@ -1177,6 +1222,7 @@ fn main() {
                     .as_ref()
                     .map(|o| (dir.to_path_buf(), PathBuf::from(o))),
                 discover_new_files: true,
+                skip_libraries: true,
                 strict,
                 partial,
                 ..Default::default()
@@ -1257,6 +1303,26 @@ fn main() {
 
 // (CLI help, LSP launcher, and shell completions moved to cli.rs)
 
+/// Whether `path` holds only `@let` definitions: a library, such as a
+/// layout, that pages `@include`. Building a directory makes no page of
+/// it (its problems show where a page includes it, or with `check`).
+fn is_library(path: &Path) -> bool {
+    fn library(path: &Path, seen: &mut Vec<PathBuf>) -> bool {
+        if seen.iter().any(|p| p == path) {
+            return false;
+        }
+        seen.push(path.to_path_buf());
+        let Ok(source) = fs::read_to_string(path) else {
+            return false;
+        };
+        let base = path.parent().unwrap_or(Path::new(""));
+        htmlang::syntax::parse(&source).is_library_with(&mut |included| {
+            !included.contains('$') && library(&base.join(included), seen)
+        })
+    }
+    library(path, &mut Vec::new())
+}
+
 fn collect_hl_files(dir: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     if let Ok(entries) = fs::read_dir(dir) {
@@ -1281,6 +1347,9 @@ struct WatchBuild {
     out_file: Option<PathBuf>,
     /// Pick up `.hl` files created in the watch directory (directory mode).
     discover_new_files: bool,
+    /// Write no page for a library (a file of `@let`s only), as building
+    /// a directory doesn't (directory mode).
+    skip_libraries: bool,
     minify: bool,
     strict: bool,
     partial: bool,
@@ -1496,6 +1565,9 @@ fn watch_loop(
 
         let mut recompiled = 0usize;
         for file in &files_to_compile {
+            if build.skip_libraries && is_library(file) {
+                continue;
+            }
             let path_str = file.to_string_lossy().to_string();
             let out_path = build.output_for(file);
             if let Some(parent) = out_path.as_deref().and_then(Path::parent) {
@@ -1556,6 +1628,19 @@ fn watch_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_library_is_not_built_into_a_page() {
+        let dir = env::temp_dir().join(format!("htmlang_library_{}", process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let layout = dir.join("layout.hl");
+        let page = dir.join("index.hl");
+        fs::write(&layout, "@let @layout\n  @page Home\n  @children\n").unwrap();
+        fs::write(&page, "@include layout.hl\n@layout\n  @text hi\n").unwrap();
+        assert!(is_library(&layout));
+        assert!(!is_library(&page));
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn json_escape_handles_control_characters() {

@@ -7,4 +7,4 @@
   Hello mixin world
 
 @el [$card-style, border 1 solid #ccc]
-  Using $define syntax too
+  Using \$define syntax too

@@ -1,6 +1,21 @@
 -- A one-page tour of htmlang. Each section shows one part of the language:
 -- layout, text, CSS styles, functions, expressions, control flow and HTML.
-@page [lang en] htmlang tour
+@page [
+  lang=en,
+  color var(--ink),
+  background var(--page),
+  line-height 1.5,
+  -- A custom property is a style like any other: dark mode redefines the
+  -- tokens here, once, and everything that uses them follows
+  dark:[
+    --ink #e5e7eb,
+    --muted #94a3b8,
+    --line #1f2937,
+    --subtle #1e293b,
+    --page #030712,
+    --surface #111827
+  ]
+] htmlang tour
 @meta description A one-page tour of htmlang.
 @meta og:title htmlang tour
 
@@ -10,6 +25,8 @@
 @let --muted #64748b
 @let --line #e5e7eb
 @let --subtle #f8fafc
+@let --page white
+@let --surface white
 
 -- Computed values: `=` makes the rest an expression
 @let unit 8
@@ -19,16 +36,15 @@
 -- Attribute bundles
 @let card [
   padding $gap,
-  background white,
+  color var(--ink),
+  background var(--surface),
   border 1 solid var(--line),
-  border-radius $unit,
-  dark:background #111827,
-  dark:border-color #1f2937
+  border-radius $unit
 ]
 @let label [font-size 12, font-weight 700, color var(--muted), text-transform uppercase, letter-spacing 1]
 
 -- A section of the tour: a function with a parameter, a default, and children
-@let chapter $title $number=
+@let @chapter [title, number ""]
   @section [spacing $gap, padding-block $gutter, border-top 1 solid var(--line)]
     @row [spacing $unit, align-items baseline]
       @if $number
@@ -43,15 +59,7 @@
     to { opacity: 1; transform: none; }
   }
 
-@el [
-  max-width 960,
-  center-x,
-  padding $gutter,
-  color var(--ink),
-  line-height 1.5,
-  dark:background #030712,
-  dark:color #e5e7eb
-]
+@el [width fill, max-width 960, center-x, padding $gutter]
   @header [spacing $unit, padding-block $gutter, animation rise 0.4s ease]
     @text [$label] A one-page tour
     @h1 [font-size 44, line-height 1.1, letter-spacing -1] Welcome to htmlang
@@ -65,6 +73,9 @@
     @paragraph
       {@code @el} stacks its children in a column and {@code @row} lays them
       out side by side. {@code spacing} is the gap between children.
+      {@code flex-direction row} makes any column a row, also from a width
+      up ({@code md:flex-direction row}), and the children's
+      {@code width fill} follows it.
     @row [spacing $unit, wrap]
       @el [$card, width fill] width fill
       @el [$card, width fill] shares the row
@@ -73,6 +84,9 @@
       @text [font-weight 700] Logo
       @spacer
       @text @spacer pushes this to the end
+    @el [spacing $unit, md:flex-direction row]
+      @el [$card, width fill] Stacked on a phone
+      @el [$card, width fill] side by side from md up
     @row [spacing $unit, height 120]
       @el [$card, align-top] align-top
       @el [$card, center-y] center-y
@@ -82,7 +96,7 @@
         @el [$card, text-align center, if($n == 1, col-span 2)] Cell $n
     @el [$card, height 120, overflow hidden]
       @behind
-        @el [background linear-gradient(135deg, #dbeafe, #fae8ff), height fill, justify-content flex-end, padding $unit] (behind)
+        @el [background linear-gradient(135deg, #dbeafe, #fae8ff), dark:background linear-gradient(135deg, #1e3a8a, #581c87), height fill, justify-content flex-end, padding $unit] (behind)
       @text [font-weight 700] @in-front and @behind layer content
       @in-front
         @text [align-right, align-bottom, padding $unit, font-size 12, color var(--muted)] painted on top
@@ -91,7 +105,7 @@
   @chapter [title Text, number 2]
     @paragraph [max-width 640]
       Lines without an {@code @} are text. Braces put elements inside a line:
-      {@text [font-weight 700] bold}, {@text [font-style italic] italic},
+      {@b bold}, {@i italic}, {@strong important}, H{@sub 2}O,
       {@mark highlighted}, {@link [color var(--brand), text-decoration underline] https://example.com a link},
       and {@kbd [padding 1 6, border 1 solid var(--line), border-radius 4] Ctrl+K}.
     @paragraph
@@ -107,27 +121,40 @@
   @chapter [title Style, number 3]
     @paragraph
       Besides the layout attributes, every attribute is a CSS property with its
-      CSS name and value. A bare number is pixels for lengths.
+      CSS name and value. A bare number in a length, shadows included, is pixels, and \\, keeps a comma in a value.
+      A custom property (--name) is one too: set on an element, it holds for everything inside it.
+      Prefixes stack, and one prefix before a [group] applies to each style in it.
+      A selector prefix is a CSS pseudo-class or pseudo-element under its own name: hover:, first-child:, nth-child(odd):, has(...):, marker:.
+      An element prefix styles every such element inside, at any depth: the table in chapter 6 pads all its cells with {@code @td:padding 8}.
     @row [spacing $unit, wrap]
-      @el [$card, box-shadow 0 1px 3px rgba(0,0,0,0.1), transform rotate(-2deg)] Any CSS property
+      @el [$card, box-shadow 0 1 3 rgba(0,0,0,0.1)\, 0 8 24 rgba(0,0,0,0.08), transform rotate(-2deg)] Any CSS property
       @el [$card, hover:background #eff6ff, hover:border-color var(--brand), transition all 0.15s ease, cursor pointer] hover:
-      @el [$card, md:background #ecfdf5, dark:background #064e3b] md: and dark:
+      @el [$card, md:[background #ecfdf5, border-color #10b981], dark:[background #064e3b, hover:background #065f46]] md:[...] and dark:hover:
+      @el [$card, --tone #a855f7, color var(--tone), border-color var(--tone)] custom properties
       @el [$card, before:content "→ ", before:color var(--brand)] before:
-    @ul [$card, spacing 4, children:padding 4 8]
-      @each $item in first: bolds this one, odd: shades every other row, children: pads them all
-        @li [first:font-weight 700, odd:background var(--subtle), border-radius 4] $item
-    @el [$card, has(input:checked):border-color var(--brand), has(input:checked):background #eff6ff]
+    @ul [$card, spacing 4, list-style disc, padding-inline-start 36, children:display list-item, children:marker:color var(--brand), children:padding 4 8]
+      @each $item in first-child: bolds this one, nth-child(odd): shades every other row, children: pads them all, children:marker: colours the bullets
+        @li [first-child:font-weight 700, nth-child(odd):background var(--subtle), border-radius 4] $item
+    @el [$card, has(input:checked):[border-color var(--brand), background #eff6ff]]
       @label [cursor pointer]
         @input [type=checkbox, margin-inline-end 8]
         Tick the box: has() styles the card around it
+    @paragraph
+      Colour maths is CSS too, so a variant follows its token wherever it is redefined:
+    @row [spacing $unit, wrap]
+      @each $shade in 0, 10, 20, 30
+        @el [padding 16, border-radius $unit, color white, background color-mix(in srgb, var(--brand), black $shade%)]
+          color-mix … black $shade%
+      @el [padding 16, border-radius $unit, background rgb(from var(--brand) r g b / 0.2)] rgb(from …) / 0.2
+      @el [padding 16, border-radius $unit, background color-mix(in srgb, var(--brand), #f43f5e 50%)] color-mix … 50%
 
   -- 4. Functions -----------------------------------------------------------
-  @let stat $value $caption $tone=var(--brand)
+  @let @stat [value, caption, tone var(--brand)]
     @el [$card, spacing 4, flex 1 1 160px]
       @text [font-size 32, font-weight 800, color $tone] $value
       @text [color var(--muted)] $caption
 
-  @let panel $title
+  @let @panel [title]
     @article [$card, spacing $unit]
       @row [align-items center]
         @h3 [font-size 18] $title
@@ -137,21 +164,30 @@
       @slot footer
         @text [font-size 13, color var(--muted)] Default footer
 
-  @let badge $text
+  @let @badge [text, dot false]
     @style
       & { animation: rise 0.3s ease; }
       .dot { color: var(--brand); }
     @row [spacing 6, padding 2 10, border-radius 999, background var(--subtle), font-size 13]
-      @text [class=dot] •
+      @if $dot
+        @text [class=dot] •
       $text
 
-  @let pitch
-    Functions are {@text [font-weight 700] @let} with a body. Their
-    parameters are attributes, and a body can be text like this one.
+  @let @pitch
+    Functions are {@code @let @name} with a body. Their
+    parameters are listed and passed like attributes, a name alone passes
+    true, and a body can be text like this one.
+
+  @let @key
+    @kbd [padding 1 6, border 1 solid var(--line), border-radius 4, font-size 13]
+      @children
 
   @chapter [title Functions, number 4]
     @paragraph
       @pitch
+    @paragraph
+      A call works wherever an element does, even inside a sentence:
+      press {@key Ctrl} {@key K} to search.
     @row [spacing $unit, wrap]
       @stat [value 1, caption output file]
       @stat [value 0, caption lines of JavaScript, tone #10b981]
@@ -160,9 +196,10 @@
       @slot actions
         @link [color var(--brand), font-size 14] /edit Edit
       @paragraph
-        Children fill {@code @children}; {@code @slot} blocks fill slots by name.
+        Children fill {@code @children}; {@code @slot} blocks fill slots by name,
+        and a slot name the panel doesn't have is an error.
     @row [spacing $unit]
-      @badge [text scoped style]
+      @badge [text scoped style, dot]
       @badge [text same function]
 
   -- 5. Expressions ---------------------------------------------------------
@@ -174,16 +211,9 @@
       \$name inserts a value and \${...} any expression: ${uppercase($name)}
       has ${length($name)} letters and ${length($tags)} tags.
     @row [spacing $unit, wrap]
-      @each $shade in 0, 10, 20, 30
-        @el [
-          padding if($compact, 8, 16),
-          border-radius $unit,
-          color white,
-          background ${darken($--brand, $shade)}
-        ]
-          darken $shade%
-      @el [padding 16, border-radius $unit, background ${alpha($--brand, 0.2)}] alpha 0.2
-      @el [padding 16, border-radius $unit, background ${mix($--brand, #f43f5e, 50)}] mix
+      @each $tag in $tags
+        @el [padding ${if($compact, 4, 8)} 12, border-radius $unit, background var(--subtle)]
+          ${capitalize($tag)}: ${length($tag)} letters
     @if contains($tags, css)
       @text [color var(--muted)] contains(\$tags, css) is true
 
@@ -195,20 +225,20 @@
   ]
   @data $nobody []
   @chapter [title Control flow, number 6]
-    @table [border-collapse collapse, width 100%]
+    @table [border-collapse collapse, width 100%, @th:padding 8, @td:padding 8]
       @thead
         @tr [text-align left, color var(--muted), font-size 13]
-          @th [padding 8] #
-          @th [padding 8] Name
-          @th [padding 8] Role
-          @th [padding 8] Status
+          @th #
+          @th Name
+          @th Role
+          @th Status
       @tbody
         @each $person, $i in $team
           @tr [border-top 1 solid var(--line)]
-            @td [padding 8] ${$i + 1}
-            @td [padding 8, font-weight 600] $person.name
-            @td [padding 8] $person.role
-            @td [padding 8, color if($person.active, #10b981, var(--muted))]
+            @td ${$i + 1}
+            @td [font-weight 600] $person.name
+            @td $person.role
+            @td [if($person.active, color #10b981, color var(--muted))]
               @if $person.active
                 Active
               @else
@@ -225,7 +255,9 @@
   @chapter [title HTML, number 7]
     @paragraph
       Every other element has its HTML name, and HTML attributes are written
-      {@code key=value}.
+      {@code key=value}. {@code @page} is the root element: its styles go on
+      {@code <body>}, a column that fills the window, and its {@code key=value}
+      attributes on {@code <html>}, like this page's {@code lang=en}.
     @row [spacing $gutter, wrap, align-items flex-start]
       @form [$card, spacing $unit, flex 1 1 280px, method=post] /subscribe
         @label [for=email, font-weight 600] Email
@@ -245,7 +277,7 @@
         @select [id=topic, name=topic, padding 10, border-radius 6]
           @option [value=news] News
           @option [value=releases] Releases
-        @button [type=submit, padding 10, border 0, border-radius 6, background var(--brand), color white, font-weight 700, cursor pointer, hover:background ${darken($--brand, 10)}] Subscribe
+        @button [type=submit, padding 10, border 0, border-radius 6, background var(--brand), color white, font-weight 700, cursor pointer, hover:background color-mix(in srgb, var(--brand), black 10%)] Subscribe
       @el [spacing $unit, flex 1 1 280px]
         @details [$card]
           @summary [font-weight 600, cursor pointer] What does this compile to?
@@ -263,10 +295,9 @@
           @figcaption [font-size 13, color var(--muted)] @figure and @figcaption
 
   -- Raw HTML is the escape hatch
-  @raw <hr style="border: none; border-top: 1px dashed #cbd5e1">
+  @raw <hr style="width: 100%; border: none; border-top: 1px dashed #cbd5e1">
 
-  @footer [padding-block $gutter, color var(--muted), font-size 14, print:display none]
-    @row [spacing $unit]
-      @text © 2026 htmlang
-      @spacer
-      @link [hover:color var(--brand)] https://github.com/iko-soy/htmlang Source
+  @footer [flex-direction row, spacing $unit, padding-block $gutter, color var(--muted), font-size 14, print:display none]
+    @text © 2026 htmlang
+    @spacer
+    @link [hover:color var(--brand)] https://github.com/iko-soy/htmlang Source

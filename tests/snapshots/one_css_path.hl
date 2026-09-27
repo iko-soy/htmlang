@@ -1,0 +1,14 @@
+@page One CSS path
+@input [type=email, aria-label=Email, focus:outline 2 solid var(--brand)]
+@el [outline 2 red, container card / inline-size, contain content]
+  An outline without a style draws none
+@el [width calc(100% - 2 * 8px), content-visibility auto, line-clamp 2]
+  Values are CSS's
+@h2 Defaults stay on htmlang's elements
+@ul
+  @li No marker
+@link /home Home
+@markdown
+  - keeps its bullet and [its underline](/x)
+@dialog A closed dialog stays hidden
+@el [hidden] So does a hidden element

@@ -1,0 +1,42 @@
+@page HTML elements
+@article [spacing 12]
+  @hgroup
+    @h1 Water
+    @paragraph A {@dfn molecule} of H{@sub 2}O
+  @paragraph
+    {@b Bold}, {@i italic}, {@strong important}, {@em stressed}{@br}
+    {@small fine print}, {@s gone}, {@u marked}, E = mc{@sup 2}
+    {@q quoted}, {@var x}, {@samp output}, {@bdi إيان}, {@bdo [dir=rtl] abc}
+    {@del [datetime=2026-01-01] old}{@ins new}, long{@wbr}word
+    {@ruby 漢{@rp (}{@rt kan}{@rp )}}
+  @paragraph [font-size 14]
+    {@strong [color #b91c1c] Warning:} styles still work.
+  @menu [spacing 4]
+    @li > @button [type=button] Copy
+    @li > @button [type=button] Paste
+  @table
+    @caption Team
+    @colgroup
+      @col [span=2]
+    @thead
+      @tr
+        @th Name
+        @th Role
+    @tbody
+      @tr
+        @td Ada
+        @td Engineer
+    @tfoot
+      @tr
+        @td [colspan=2] One person
+  @select [aria-label=Fruit]
+    @optgroup Citrus
+      @option Lemon
+      @option Lime
+  @video [controls] movie.mp4
+    @track [kind=captions, srclang=en] captions.vtt
+  @embed [type=image/svg+xml] logo.svg
+  @object [type=application/pdf] report.pdf
+    @link report.pdf Download the report
+  @map [name=areas]
+    @area [shape=rect, coords=0\,0\,10\,10, alt=Corner] /corner

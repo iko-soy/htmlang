@@ -14,7 +14,8 @@ Usage: htmlang [options] <file.hl | directory>
 
 Commands:
   build <dir> [-o <out>] [--minify] [--strict]
-                        Compile every .hl file under a directory
+                        Compile every .hl file under a directory, except
+                        libraries (files that hold only @let definitions)
   serve [dir|file] [-p N] [--open]
                         Dev server with live reload
   watch [dir|file] [-o <out>]
@@ -23,7 +24,7 @@ Commands:
                         Report diagnostics without writing output
   lint <file.hl | dir> [--format json]
                         Stricter checks (accessibility, nesting)
-  fmt <file.hl>         Format a file in place
+  fmt <file.hl>...      Format files in place
   lsp                   Start the language server (stdio)
 
 Options:

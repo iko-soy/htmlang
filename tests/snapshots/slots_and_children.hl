@@ -1,0 +1,59 @@
+-- @children and @slot NAME, each with fallback content
+@let @card [title]
+  @article [padding 16, spacing 8]
+    @h3 $title
+    @children
+      @text [color gray] Nothing yet.
+    @slot footer
+      @text [font-size 12] No footer
+
+@card [title Empty]
+@card [title Text] Just a line.
+@card [title Full]
+  The body.
+  @slot footer
+    @text Updated today
+
+-- A @slot block under @if or @each at the call fills the slot too
+@let show true
+@card [title Conditional]
+  @if $show
+    @slot footer
+      @text Shown
+  @each $n in 1..2
+    Line $n
+
+-- A chain ends in the block that fills a slot
+@card [title Chained] > @slot footer
+  @text From a chain
+
+-- A slot declared under @if in the body
+@let @panel [compact false]
+  @section
+    @children
+    @if not $compact
+      @slot actions
+        @text No actions
+
+@panel
+  Wide panel
+@panel [compact]
+  @slot actions
+    @text Hidden, as the body says
+  Compact panel
+
+-- A body passes on what its function got
+@let @frame
+  @card [title Framed]
+    @el [padding 8]
+      @children
+    @slot footer
+      @slot footer
+        @text Frame footer
+
+@frame
+  Framed content
+@frame
+  Framed again
+  @slot footer
+    @text Own footer

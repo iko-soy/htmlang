@@ -1,0 +1,62 @@
+-- Values are typed, and a name holds a whole value
+@let fruits apple, banana, cherry
+@let tagline "Fast, simple"
+@let motto small\, fast
+@let rgb red,green,blue
+@el
+  @text ${length($fruits)} fruits: $fruits
+  @text $tagline (${length($tagline)}), $motto (${length($motto)})
+  @text $rgb prints as written: ${length($rgb)} items
+  @text ${100 / 3} ${0.1 + 0.2} ${7 / 2}
+
+-- Ranges, in @each and inside ${...}
+@row [spacing 4]
+  @each $n in ${reverse(1..5)}
+    @text $n
+@row [spacing 4]
+  @each $n, $i in 0..20 step 10
+    @text $i:$n
+@let from 2
+@let to 4
+@text ${length($from..$to)} numbers: ${$from..$to}
+
+-- Items written with commas: quotes and \, keep one text
+@ul
+  @each $item in "a, b", c\, d, e
+    @li $item
+
+-- A record goes to a parameter whole, whatever its name
+@data $posts [
+  {"title": "First", "tags": ["css", "html"]},
+  {"title": "Second", "tags": []}
+]
+@let @post-card [post]
+  @article [spacing 4]
+    @h3 $post.title
+    @if $post.tags
+      @text ${length($post.tags)} tags: $post.tags
+    @else
+      @text No tags
+@each $p in $posts
+  @post-card [post $p]
+
+-- Rebinding replaces the whole value
+@data $x ["a", "b"]
+@let x hello, world, there
+@text ${length($x)}: $x.2
+
+-- Truthiness is defined once
+@let zero 0.0
+@let flag false
+@let quoted "0"
+@text ${if($zero, yes, no)} ${if($flag, yes, no)} ${if($quoted, yes, no)} ${if(no, yes, no)}
+
+-- Every definition is visible to the end of its block
+@let gap 8
+@el [spacing $gap]
+  @let gap 16
+  @el [padding $gap] Sixteen
+@el [padding $gap] Eight
+@each $i in 1, 2
+  @let square = $i * $i
+  @text $square

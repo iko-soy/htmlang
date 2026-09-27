@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use htmlang::parser::{self, Severity};
+use htmlang::parser;
 
 fn code_blocks(markdown: &str) -> Vec<String> {
     let mut blocks = Vec::new();
@@ -34,26 +34,21 @@ fn code_blocks(markdown: &str) -> Vec<String> {
 fn is_htmlang(block: &str) -> bool {
     let first = block
         .lines()
-        .find(|l| !l.trim().is_empty() && !l.trim_start().starts_with("--"))
+        .find(|l| !l.trim().is_empty() && !htmlang::syntax::is_comment(l.trim()))
         .unwrap_or("");
     !(first.starts_with("htmlang ")
         || first.starts_with("cargo ")
         || first.starts_with("@element "))
 }
 
-/// The diagnostics that make an example wrong rather than just imperfect.
+/// Every diagnostic makes an example wrong: the docs show pages that
+/// compile cleanly. (A file of definitions only, such as a layout, is a
+/// library: the compiler doesn't report its definitions unused.)
 fn problems(result: &parser::ParseResult) -> Vec<String> {
     result
         .diagnostics
         .iter()
-        .filter(|d| {
-            d.severity == Severity::Error
-                || d.message.contains("unknown")
-                || d.message.contains("undefined variable")
-                || d.message.contains("is an HTML attribute")
-                || d.message.contains("no single root")
-        })
-        .map(|d| format!("line {}: {}", d.line, d.message))
+        .map(|d| format!("line {}: {} [{}]", d.line, d.message, d.code))
         .collect()
 }
 
@@ -123,4 +118,81 @@ fn examples_compile() {
         "examples don't compile cleanly:\n\n{}",
         failures.join("\n\n")
     );
+}
+
+/// The table of layouts under DESIGN.md's HTML elements lists every element
+/// once, with the layout the compiler gives it.
+#[test]
+fn design_md_gives_every_element_its_layout() {
+    use htmlang::ast::{ElementKind, Layout};
+    let design =
+        std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("DESIGN.md")).unwrap();
+    let start = design
+        .find("Every element has one [layout]")
+        .expect("DESIGN.md has the table of layouts");
+    let mut listed: Vec<(String, &str)> = Vec::new();
+    for line in design[start..].lines().skip(4) {
+        let Some(row) = line.strip_prefix("| ") else {
+            break;
+        };
+        let (layout, names) = row.split_once(" | ").unwrap();
+        for name in names.trim_end_matches(" |").split(", ") {
+            let name = name.trim_matches('`').trim_start_matches('@');
+            listed.push((name.to_string(), layout));
+        }
+    }
+    let placeholders = ["fragment", "children", "slot"];
+    for name in ElementKind::all_names().filter(|n| !placeholders.contains(n)) {
+        let rows: Vec<&str> = listed
+            .iter()
+            .filter(|(n, _)| n == name)
+            .map(|(_, l)| *l)
+            .collect();
+        let layout: Layout = ElementKind::from_name(name).unwrap().layout();
+        assert_eq!(
+            rows,
+            [layout.name()],
+            "@{} in DESIGN.md's table of layouts",
+            name
+        );
+    }
+    for (name, _) in &listed {
+        assert!(
+            ElementKind::from_name(name).is_some(),
+            "@{} isn't an element",
+            name
+        );
+    }
+}
+
+/// DESIGN.md's paragraph on selector prefixes lists every pseudo-class
+/// and pseudo-element the compiler knows, and nothing else.
+#[test]
+fn design_md_lists_every_selector_prefix() {
+    use htmlang::vocab::{PSEUDOS, Pseudo};
+    let design =
+        std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("DESIGN.md")).unwrap();
+    let start = design
+        .find("The selector prefixes are CSS's own")
+        .expect("DESIGN.md lists the selector prefixes");
+    let end = start + design[start..].find("\n\n").unwrap();
+    let paragraph = design[start..end].replace('\n', " ");
+    let mut listed: Vec<String> = paragraph
+        .split('`')
+        .skip(1)
+        .step_by(2)
+        .map(str::to_string)
+        .take_while(|word| !word.contains(' '))
+        .collect();
+    listed.retain(|word| !word.contains(':'));
+    let mut known: Vec<String> = PSEUDOS
+        .iter()
+        .map(|&(name, kind)| match kind {
+            Pseudo::Function => format!("{}()", name),
+            _ => name.to_string(),
+        })
+        .collect();
+    listed.sort();
+    known.sort();
+    assert_eq!(listed, known);
 }

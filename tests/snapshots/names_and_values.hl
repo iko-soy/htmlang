@@ -1,0 +1,18 @@
+-- Names are checked and values pass through to the CSS as written
+@page Names and values
+@data $post {"title": "Hello", "author": {"name": "Ada"}}
+@el [max-width none, z-index auto, opacity 50%, color rebeccapurple, width fit-content]
+  Values are the browser's to judge
+@el [--gap 12px, gap var(--gap), -webkit-tap-highlight-color transparent, hover:--gap 16px]
+  Custom and vendor-prefixed properties, as written
+@el [width if(media(width > 40em): 50%; else: 100%), background url(data:image/gif;base64,R0lGODlhAQABAAAAACw=)]
+  A `;` inside parentheses is CSS's own
+@el [before:content "a;b{}", padding $post.gap, margin-top ${default($post.gap, 8)}]
+  $post.title by $post.author.name$post.editor.name
+@row
+  @el [width fill] Fills the row
+@el
+  @el [width fill] The full width of a column
+@image [width=800, width 200, alt=A photo] photo.jpg
+@el [hidden] Hidden
+@script [src=app.js, type=module, data-page=home, defer]

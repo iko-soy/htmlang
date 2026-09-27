@@ -7,8 +7,8 @@
 
 @input [type=text, placeholder:color #999]
 
-@el [first:border-top 0, last:border-bottom 0]
+@el [first-child:border-top 0, last-child:border-bottom 0]
 
 @row [spacing 10]
-  @el [odd:background #f5f5f5, even:background white, padding 10]
+  @el [nth-child(odd):background #f5f5f5, nth-child(even):background white, padding 10]
     Item

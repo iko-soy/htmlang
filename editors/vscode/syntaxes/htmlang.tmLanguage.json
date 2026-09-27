@@ -16,16 +16,40 @@
       "include": "#include-directive"
     },
     {
+      "include": "#each-directive"
+    },
+    {
+      "include": "#verbatim-line"
+    },
+    {
+      "include": "#directive"
+    },
+    {
+      "include": "#literal-line"
+    },
+    {
+      "include": "#leading-argument"
+    },
+    {
       "include": "#element"
     },
     {
       "include": "#function-call"
     },
     {
+      "include": "#escape"
+    },
+    {
       "include": "#variable"
     },
     {
+      "include": "#range"
+    },
+    {
       "include": "#attributes"
+    },
+    {
+      "include": "#literal-inline"
     },
     {
       "include": "#inline-element"
@@ -39,27 +63,42 @@
   ],
   "repository": {
     "comment": {
+      "comment": "A line whose first word is --: -- followed by a space or the end of the line (--gap 12px is a custom property)",
       "name": "comment.line.double-dash.htmlang",
-      "match": "^\\s*--.*$"
+      "match": "^\\s*--(?:\\s.*)?$"
     },
     "page-directive": {
-      "match": "(@page)\\s+(.*)",
-      "captures": {
+      "comment": "@page [attributes] Title: the page is the root element, so its attributes are an ordinary list",
+      "begin": "(@page)(?![a-zA-Z0-9_-])",
+      "end": "$",
+      "beginCaptures": {
         "1": {
           "name": "keyword.control.directive.htmlang"
-        },
-        "2": {
-          "name": "string.unquoted.page-title.htmlang"
         }
-      }
+      },
+      "contentName": "string.unquoted.page-title.htmlang",
+      "patterns": [
+        {
+          "include": "#attributes"
+        },
+        {
+          "include": "#escape"
+        },
+        {
+          "include": "#variable"
+        }
+      ]
     },
     "let-definition": {
-      "match": "(@let)\\s+([a-zA-Z_][a-zA-Z0-9_-]*)",
+      "match": "(@let)\\s+(?:(@[a-zA-Z][a-zA-Z0-9_-]*)|(--[a-zA-Z][a-zA-Z0-9_-]*|[a-zA-Z_][a-zA-Z0-9_.-]*))",
       "captures": {
         "1": {
           "name": "keyword.control.directive.htmlang"
         },
         "2": {
+          "name": "entity.name.function.htmlang"
+        },
+        "3": {
           "name": "variable.other.htmlang"
         }
       }
@@ -75,17 +114,106 @@
         }
       }
     },
+    "each-directive": {
+      "match": "^\\s*(@each)\\s+(\\$[a-zA-Z_][a-zA-Z0-9_-]*)(?:\\s*,\\s*(\\$[a-zA-Z_][a-zA-Z0-9_-]*))?\\s+(in)(?![a-zA-Z0-9_-])",
+      "captures": {
+        "1": {
+          "name": "keyword.control.directive.htmlang"
+        },
+        "2": {
+          "name": "variable.other.htmlang"
+        },
+        "3": {
+          "name": "variable.other.htmlang"
+        },
+        "4": {
+          "name": "keyword.control.in.htmlang"
+        }
+      }
+    },
+    "verbatim-line": {
+      "comment": "@raw, @style and @head: the rest of the line is a one-line body, kept as written (no variables, escapes or inline elements)",
+      "begin": "^\\s*(@(?:raw|style|head))(?![a-zA-Z0-9_-])",
+      "end": "$",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.control.directive.htmlang"
+        }
+      },
+      "contentName": "markup.raw.htmlang"
+    },
+    "directive": {
+      "name": "keyword.control.directive.htmlang",
+      "match": "@(?:page|let|include|data|meta|if|else|each|style|head|raw|markdown)(?![a-zA-Z0-9_-])"
+    },
+    "literal-line": {
+      "comment": "@code and @textarea show their text as written: a {@...} in it is text",
+      "begin": "(?:^\\s*|\\s>\\s*)(@(?:code|textarea))(?![a-zA-Z0-9_-])",
+      "end": "$",
+      "beginCaptures": {
+        "1": {
+          "name": "entity.name.tag.htmlang"
+        }
+      },
+      "contentName": "markup.inline.raw.htmlang",
+      "patterns": [
+        {
+          "include": "#attributes"
+        },
+        {
+          "include": "#escape"
+        },
+        {
+          "include": "#variable"
+        }
+      ]
+    },
+    "leading-argument": {
+      "comment": "The first word after the attributes of an element with a leading argument (@link's href, @image's src, ...): one token, which \"...\" and ${...} keep whole",
+      "match": "(?:^\\s*|\\s>\\s*)(@(?:link|image|script|form|video|audio|iframe|source|track|embed|object|area|optgroup))(?![a-zA-Z0-9_-])(\\s*\\[(?:[^\\[\\]]|\\[[^\\[\\]]*\\])*\\])?\\s+(?![\\[>])((?:\"(?:[^\"\\\\]|\\\\.)*\"|\\$\\{[^}]*\\}|\\\\.|[^\\s\"$\\\\]|\\$(?!\\{))+)",
+      "captures": {
+        "1": {
+          "name": "entity.name.tag.htmlang"
+        },
+        "2": {
+          "patterns": [
+            {
+              "include": "#attributes"
+            }
+          ]
+        },
+        "3": {
+          "name": "markup.underline.link.htmlang",
+          "patterns": [
+            {
+              "include": "#escape"
+            },
+            {
+              "include": "#variable"
+            }
+          ]
+        }
+      }
+    },
     "element": {
       "name": "entity.name.tag.htmlang",
-      "match": "@(?:row|el|text|paragraph|image|link|raw|children|slot|fragment|script|nav|header|footer|main|section|article|aside|address|search|form|details|summary|dialog|figure|figcaption|blockquote|cite|fieldset|legend|noscript|datalist|ul|ol|li|dl|dt|dd|table|thead|tbody|tr|td|th|select|picture|progress|meter|output|canvas|button|label|option|textarea|time|mark|abbr|code|kbd|pre|h1|h2|h3|h4|h5|h6|input|hr|source|video|audio|iframe|grid|in-front|behind)(?![a-zA-Z0-9_-])"
+      "match": "@(?:row|el|text|paragraph|image|link|children|slot|fragment|script|nav|header|footer|main|section|article|aside|address|search|form|details|summary|dialog|figure|figcaption|blockquote|cite|fieldset|legend|noscript|datalist|ul|ol|li|dl|dt|dd|table|thead|tbody|tr|td|th|select|picture|progress|meter|output|canvas|button|label|option|textarea|time|mark|abbr|code|kbd|pre|h1|h2|h3|h4|h5|h6|input|hr|source|video|audio|iframe|hgroup|menu|b|i|strong|em|small|s|u|sub|sup|q|var|samp|dfn|bdi|bdo|ins|del|br|wbr|caption|colgroup|col|tfoot|optgroup|ruby|rt|rp|track|embed|object|map|area|grid|in-front|behind)(?![a-zA-Z0-9_-])"
     },
     "function-call": {
       "name": "entity.name.function.htmlang",
       "match": "@[a-zA-Z_][a-zA-Z0-9_-]*"
     },
+    "escape": {
+      "name": "constant.character.escape.htmlang",
+      "match": "\\\\(?:\\\\|\\$|@|\\{|\\}|\\[|\\]|,|\"|--)"
+    },
     "variable": {
       "name": "variable.other.htmlang",
-      "match": "\\$[a-zA-Z_][a-zA-Z0-9_-]*"
+      "match": "\\$[a-zA-Z_][a-zA-Z0-9_]*(?:-+[a-zA-Z0-9_]+)*|\\$\\{[^{}]*\\}"
+    },
+    "range": {
+      "name": "keyword.operator.range.htmlang",
+      "match": "(?<=[0-9a-zA-Z_})])\\.\\.(?=[-$0-9(])"
     },
     "attributes": {
       "name": "meta.attribute-list.htmlang",
@@ -103,6 +231,21 @@
       },
       "patterns": [
         {
+          "include": "#comment"
+        },
+        {
+          "include": "#conditional"
+        },
+        {
+          "include": "#attributes"
+        },
+        {
+          "include": "#escape"
+        },
+        {
+          "include": "#string"
+        },
+        {
           "include": "#variable"
         },
         {
@@ -112,7 +255,13 @@
           "include": "#number"
         },
         {
+          "include": "#element-prefix"
+        },
+        {
           "include": "#state-prefix"
+        },
+        {
+          "include": "#custom-property"
         },
         {
           "include": "#html-attribute"
@@ -126,13 +275,91 @@
         }
       ]
     },
+    "string": {
+      "name": "string.quoted.double.htmlang",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "include": "#escape"
+        },
+        {
+          "include": "#variable"
+        }
+      ]
+    },
+    "element-prefix": {
+      "name": "keyword.other.state.htmlang",
+      "comment": "An element prefix: every such element inside (@td:, @link:). The names are the elements with an HTML tag of their own",
+      "match": "@(?:paragraph|image|link|nav|header|footer|main|section|article|aside|address|search|form|details|summary|dialog|figure|figcaption|blockquote|cite|fieldset|legend|noscript|datalist|ul|ol|li|dl|dt|dd|table|thead|tbody|tr|td|th|select|picture|progress|meter|output|canvas|button|label|option|textarea|time|mark|abbr|code|kbd|pre|h1|h2|h3|h4|h5|h6|input|hr|source|video|audio|iframe|hgroup|menu|b|i|strong|em|small|s|u|sub|sup|q|var|samp|dfn|bdi|bdo|ins|del|br|wbr|caption|colgroup|col|tfoot|optgroup|ruby|rt|rp|track|embed|object|map|area):(?=[a-z\\[$-])"
+    },
     "state-prefix": {
       "name": "keyword.other.state.htmlang",
-      "match": "(?:[a-z0-9-]+|nth:[^:\\s,\\]]+|has\\([^)]*\\)):(?=[a-z])"
+      "comment": "A prefix: a word (hover:, md:, children:) or a CSS pseudo-class with its argument (nth-child(odd):, has(> img):, not(:nth-child(2)):)",
+      "match": "(?:[a-z0-9-]+(?:\\((?:[^()]|\\([^()]*\\))*\\))?):(?=[a-z\\[$@-])(?![a-zA-Z0-9_.:-]*=)"
+    },
+    "custom-property": {
+      "comment": "A custom property's or a vendor-prefixed property's name where an attribute starts: --gap, md:--gap, -webkit-text-stroke",
+      "match": "(?:(?<=[\\[,:])|^)(\\s*)(--[A-Za-z0-9_][A-Za-z0-9_-]*|-[a-z]+-[a-z][a-z0-9-]*)(?=[\\s,\\]]|$)",
+      "captures": {
+        "2": {
+          "name": "support.type.property-name.htmlang"
+        }
+      }
     },
     "attribute-name": {
       "name": "support.type.property-name.htmlang",
       "match": "\\b(?:spacing|center-x|center-y|align-left|align-right|align-top|align-bottom|wrap|grid-cols|grid-rows|col-span|row-span|inline|padding|margin|width|height|min-width|max-width|min-height|max-height|background|color|border|border-radius|font-size|font-weight|font-family|line-height|text-align|display|gap|flex|position|overflow|opacity|cursor|transition|transform|box-shadow|z-index)\\b"
+    },
+    "literal-inline": {
+      "comment": "{@code ...} and {@textarea ...}: their text is shown as written, so a {@...} in it is text",
+      "name": "meta.inline-element.htmlang",
+      "begin": "(\\{)(@(?:code|textarea))(?![a-zA-Z0-9_-])",
+      "end": "(\\})",
+      "beginCaptures": {
+        "1": {
+          "name": "punctuation.section.braces.begin.htmlang"
+        },
+        "2": {
+          "name": "entity.name.tag.htmlang"
+        }
+      },
+      "endCaptures": {
+        "1": {
+          "name": "punctuation.section.braces.end.htmlang"
+        }
+      },
+      "contentName": "markup.inline.raw.htmlang",
+      "patterns": [
+        {
+          "include": "#escape"
+        },
+        {
+          "include": "#attributes"
+        },
+        {
+          "include": "#variable"
+        },
+        {
+          "include": "#literal-braces"
+        }
+      ]
+    },
+    "literal-braces": {
+      "comment": "Braces inside literal text, kept as written and balanced",
+      "begin": "\\{",
+      "end": "\\}",
+      "patterns": [
+        {
+          "include": "#escape"
+        },
+        {
+          "include": "#variable"
+        },
+        {
+          "include": "#literal-braces"
+        }
+      ]
     },
     "inline-element": {
       "name": "meta.inline-element.htmlang",
@@ -149,6 +376,15 @@
         }
       },
       "patterns": [
+        {
+          "include": "#escape"
+        },
+        {
+          "include": "#literal-inline"
+        },
+        {
+          "include": "#inline-element"
+        },
         {
           "include": "#element"
         },
@@ -173,7 +409,16 @@
     },
     "html-attribute": {
       "name": "entity.other.attribute-name.htmlang",
-      "match": "\\b[a-zA-Z][a-zA-Z0-9_.-]*(?==)"
+      "match": "\\b[a-zA-Z][a-zA-Z0-9_.:-]*(?==)"
+    },
+    "conditional": {
+      "comment": "A whole attribute if(CONDITION, A, B); an if( inside a value is CSS's own",
+      "match": "(?:(?<=\\[)|(?<=,)|(?<=:)|^)(\\s*)(if)(?=\\()",
+      "captures": {
+        "2": {
+          "name": "keyword.control.conditional.htmlang"
+        }
+      }
     }
   }
 }
