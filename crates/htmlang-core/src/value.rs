@@ -207,11 +207,11 @@ impl fmt::Display for Value {
             Value::List(list) => match &list.written {
                 Some(written) => f.write_str(written),
                 None => {
-                    // A list of records (or of lists) has no text of its own
+                    // A record in it has no text of its own
                     let items: Vec<String> = list
                         .items
                         .iter()
-                        .filter(|item| !item.has_fields())
+                        .filter(|item| !matches!(item, Value::Record(_)))
                         .map(Value::to_string)
                         .filter(|s| !s.is_empty())
                         .collect();

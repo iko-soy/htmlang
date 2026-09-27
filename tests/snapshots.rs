@@ -3618,7 +3618,7 @@ fn function_with_style_is_scoped() {
         html
     );
     assert!(
-        html.contains(".hl-fn-card {& { padding: 4px; }.t { color: red; }}"),
+        html.contains(".hl-fn-card { & { padding: 4px; } .t { color: red; } }"),
         "{}",
         html
     );
@@ -4326,13 +4326,8 @@ fn svg_directive_with_attrs() {
     let result = htmlang::parser::parse(&input);
     let html = htmlang::codegen::generate(&result.document);
     assert!(
-        html.contains("width=\"24\""),
+        html.contains("style=\"width:24px;fill:red\""),
         "should override width, got: {}",
-        html
-    );
-    assert!(
-        html.contains("fill=\"red\""),
-        "should set fill from color attr, got: {}",
         html
     );
 
@@ -8304,7 +8299,7 @@ fn a_style_an_inline_svg_can_t_take_is_an_error() {
     let html = htmlang::codegen::generate(&result.document);
     assert!(
         html.contains(
-            "<svg viewBox=\"0 0 1 1\" width=\"24\" fill=\"red\" class=\"icon\" aria-label=\"Logo\" role=\"img\">"
+            "<svg viewBox=\"0 0 1 1\" class=\"icon\" aria-label=\"Logo\" role=\"img\" style=\"width:24px;fill:red\">"
         ),
         "{}",
         html
@@ -8338,7 +8333,7 @@ fn a_style_an_inline_svg_can_t_take_is_an_error() {
     );
     let html = htmlang::codegen::generate(&result.document);
     assert!(!html.contains("width=\"fill\""), "{}", html);
-    assert!(html.contains("height=\"2em\""), "{}", html);
+    assert!(html.contains("style=\"height:2em\""), "{}", html);
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -8609,7 +8604,7 @@ fn a_scoped_style_is_written_when_its_function_is_called() {
     let out = compile(&format!("{}@note [padding 2]\n@note\n", function));
     assert_eq!(out.matches(".hl-fn-note {").count(), 1, "{}", out);
     assert!(
-        out.contains("@layer hl-inside{.hl-fn-note {& { padding: 12px; }}}"),
+        out.contains("@layer hl-inside{.hl-fn-note { & { padding: 12px; } }}"),
         "{}",
         out
     );

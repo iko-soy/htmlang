@@ -138,7 +138,7 @@ htmlang build src -o dist    # compile a whole site
 | `watch [dir\|file] [-o out]` | Recompile on change, without a server |
 | `check <file\|dir> [--format json]` | Report diagnostics without writing output |
 | `lint <file\|dir> [--format json]` | Stricter checks (accessibility, nesting) |
-| `fmt <file.hl>` | Format a file in place |
+| `fmt <file.hl>...` | Format files in place |
 | `lsp` | Run the language server over stdio |
 
 Compiling a file directly also takes `-w` / `--watch`, `--dev` (readable

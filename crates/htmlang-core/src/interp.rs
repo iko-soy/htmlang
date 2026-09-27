@@ -100,14 +100,41 @@ pub enum Problem {
 /// The problem with putting `value`, written `written`, where text goes:
 /// a record has no text.
 fn no_text(written: &str, value: &Value, offset: usize) -> Option<Problem> {
-    let Value::Record(fields) = value else {
-        return None;
-    };
     let name = written.strip_prefix('$').map(|name| {
         name.strip_prefix('{')
             .and_then(|n| n.strip_suffix('}'))
             .map_or(name, str::trim)
     });
+    let fields = match value {
+        Value::Record(fields) => fields,
+        // A list of records, which would print only what isn't a record
+        Value::List(list)
+            if list.written.is_none()
+                && list
+                    .items
+                    .iter()
+                    .any(|item| matches!(item, Value::Record(_))) =>
+        {
+            let example = match (name, list.items.first()) {
+                (Some(name), Some(Value::Record(fields))) if is_path(name) => {
+                    match fields.first() {
+                        Some((field, _)) => format!(", such as `${}.0.{}`", name, field),
+                        None => String::new(),
+                    }
+                }
+                _ => String::new(),
+            };
+            return Some(Problem::Record {
+                message: format!(
+                    "'{}' is a list of records, which has no text of its own: loop over it \
+                     with @each, or write a field of one of its items{}",
+                    written, example
+                ),
+                offset,
+            });
+        }
+        _ => return None,
+    };
     let example = match (name, fields.first()) {
         (Some(name), Some((field, _))) if is_path(name) => {
             format!(", such as `${}.{}`", name, field)

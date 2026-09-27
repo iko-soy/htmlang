@@ -378,8 +378,7 @@ impl StyleCollector {
                 inside.push_str(block);
                 inside.push('\n');
             } else {
-                let minified: String = block.lines().map(str::trim).collect();
-                inside.push_str(&minified);
+                inside.push_str(&compact_css(block));
             }
         }
 
@@ -846,7 +845,7 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
     if let Some(path) = &page.favicon {
         meta_html.push_str(&format!(
             "<link rel=\"icon\" href=\"{}\">{}",
-            favicon_href(path),
+            html_escape(path),
             nl
         ));
     }
@@ -895,24 +894,6 @@ fn generate_full_inner(doc: &Document, dev: bool) -> String {
     )
 }
 
-/// A favicon's `href`: the file itself as a `data:` URI when it can be
-/// read, else the path as written.
-fn favicon_href(path: &str) -> String {
-    match std::fs::read(path) {
-        Ok(data) => {
-            let mime = if path.ends_with(".png") {
-                "image/png"
-            } else if path.ends_with(".svg") {
-                "image/svg+xml"
-            } else {
-                "image/x-icon"
-            };
-            format!("data:{};base64,{}", mime, base64_encode(&data))
-        }
-        Err(_) => html_escape(path),
-    }
-}
-
 /// Assemble every CSS block the document needs (font faces, custom
 /// properties, generated class rules, keyframes, and user CSS). Shared by
 /// full-page and partial output so both emit the same styles.
@@ -959,12 +940,23 @@ fn build_element_css(doc: &Document, styles: &StyleCollector, dev: bool) -> Stri
             element_css.push_str(block);
             element_css.push('\n');
         } else {
-            let minified: String = block.lines().map(|l| l.trim()).collect::<Vec<_>>().join("");
-            element_css.push_str(&minified);
+            element_css.push_str(&compact_css(block));
         }
     }
 
     element_css
+}
+
+/// An `@style` body on one line: each line trimmed, and the lines joined with
+/// a space, so a value that goes on over two lines (`margin: 0` then `auto;`)
+/// keeps its words apart.
+fn compact_css(block: &str) -> String {
+    block
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// htmlang's own elements: those with a generated class, or the class of a
@@ -1176,12 +1168,8 @@ fn emit_argument_attr(out: &mut String, elem: &Element, in_picture: bool) {
     else {
         return;
     };
-    let inline =
-        elem.kind == ElementKind::Image && elem.attrs.iter().any(|a| !a.html && a.key == "inline");
-    let value = match inline.then(|| image_data_uri(value)).flatten() {
-        Some(data) => data,
-        None => html_escape(value),
-    };
+    // `@image [inline]`'s file is already a `data:` URI (see the parser)
+    let value = html_escape(value);
     out.push(' ');
     out.push_str(attr);
     out.push_str("=\"");
@@ -1189,27 +1177,24 @@ fn emit_argument_attr(out: &mut String, elem: &Element, in_picture: bool) {
     out.push('"');
 }
 
-/// A raster image's file as a `data:` URI (an SVG is put into the page
-/// as markup by the parser instead); `None` when it can't be read.
-fn image_data_uri(src: &str) -> Option<String> {
-    if src.is_empty() || src.ends_with(".svg") {
-        return None;
-    }
-    let mime = if src.ends_with(".png") {
-        "image/png"
-    } else if src.ends_with(".jpg") || src.ends_with(".jpeg") {
-        "image/jpeg"
-    } else if src.ends_with(".gif") {
-        "image/gif"
-    } else if src.ends_with(".webp") {
-        "image/webp"
-    } else if src.ends_with(".avif") {
-        "image/avif"
-    } else {
-        "application/octet-stream"
+/// A file's bytes as a `data:` URI, its type from its extension.
+pub(crate) fn data_uri(path: &str, data: &[u8]) -> String {
+    let mime = match path
+        .rsplit('.')
+        .next()
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("png") => "image/png",
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("avif") => "image/avif",
+        Some("svg") => "image/svg+xml",
+        Some("ico") => "image/x-icon",
+        _ => "application/octet-stream",
     };
-    let data = std::fs::read(src).ok()?;
-    Some(format!("data:{};base64,{}", mime, base64_encode(&data)))
+    format!("data:{};base64,{}", mime, base64_encode(data))
 }
 
 /// Emit HTML attributes: `key=value` ones (except `id` / `class`, which
@@ -2137,6 +2122,46 @@ fn attrs_to_css(attrs: &[Attribute], condition: &Condition, site: &Site) -> Stri
                 let sizes = Sizes::of(attrs, condition);
                 for &(property, value) in sizing(dim, size, axis) {
                     sizes.push(&mut css, property, value);
+                }
+            }
+
+            // A size of its own under a prefix, where a `fill` or
+            // `shrink` that sets `flex` (along a flex parent's direction)
+            // holds too: the word's `flex` and minimum are put back, so the
+            // size is the one the element gets (`width fill, lg:width 200`
+            // in a row)
+            "width" | "height"
+                if *condition != Condition::default()
+                    && attrs.iter().any(|a| {
+                        let (c, name) = Condition::of(&a.key);
+                        let along = match site.parent.at(&c.at) {
+                            Some(Axis::Row) => name == "width",
+                            Some(Axis::Column) => name == "height",
+                            None => false,
+                        };
+                        !a.html
+                            && name == effective_key
+                            && along
+                            && c != *condition
+                            && c.holds_at(condition)
+                            && a.value
+                                .as_deref()
+                                .is_some_and(|v| !v.trim().is_empty() && Size::of(v) != Size::Set)
+                    }) =>
+            {
+                let dim = if effective_key == "width" {
+                    Dim::Width
+                } else {
+                    Dim::Height
+                };
+                let sizes = Sizes::of(attrs, condition);
+                for (property, value) in sizing_properties(dim) {
+                    if property != effective_key {
+                        sizes.push(&mut css, property, value);
+                    }
+                }
+                if let Some(v) = val {
+                    push_css(&mut css, effective_key, &with_px(effective_key, v));
                 }
             }
 

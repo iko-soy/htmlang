@@ -51,6 +51,11 @@ struct FnDef {
     /// What was visible where it was defined: its body and its defaults
     /// see this, plus its parameters.
     env: Env,
+    /// It is named like a built-in element and its body calls that name
+    /// outside any `@if`, meaning the element (`@let @nav` around `@nav`):
+    /// it would call itself forever, so a call writes nothing (the
+    /// definition's error says so).
+    wraps_itself: bool,
 }
 
 impl FnDef {
@@ -171,6 +176,9 @@ struct ParseContext {
     page_at: Option<String>,
     meta_tags: Vec<(String, String)>,
     head_blocks: Vec<String>,
+    /// The first `@meta` or `@head` that ran, for the warning a file
+    /// without `@page` gets: a fragment has no `<head>` for them.
+    head_at: Option<usize>,
     /// What each name means at the line being evaluated.
     env: Env,
     /// Every function whose definition ran, by name (the last one), for
@@ -245,6 +253,75 @@ struct ParseContext {
 /// How deeply function calls may nest, so that a function that calls
 /// itself without an `@if` that stops it is an error instead of a hang.
 const MAX_CALL_DEPTH: usize = 64;
+
+/// A CSS rule at the top level of a stylesheet that starts with `&`
+/// (outside any `{}`, strings and comments).
+fn has_top_level_ampersand(css: &str) -> bool {
+    let mut depth = 0usize;
+    let mut chars = css.chars().peekable();
+    let mut at_rule_start = true;
+    while let Some(c) = chars.next() {
+        match c {
+            '/' if chars.peek() == Some(&'*') => {
+                chars.next();
+                let mut last = ' ';
+                for c in chars.by_ref() {
+                    if last == '*' && c == '/' {
+                        break;
+                    }
+                    last = c;
+                }
+                continue;
+            }
+            '"' | '\'' => {
+                for d in chars.by_ref() {
+                    if d == c {
+                        break;
+                    }
+                }
+            }
+            '{' => depth += 1,
+            '}' => depth = depth.saturating_sub(1),
+            '&' if depth == 0 && at_rule_start => return true,
+            _ => {}
+        }
+        at_rule_start = match c {
+            '{' | '}' | ';' => true,
+            c if c.is_whitespace() => at_rule_start,
+            _ => false,
+        };
+    }
+    false
+}
+
+/// Whether a file is a library (see [`Tree::is_library`]), with the files
+/// its `@include` lines name read relative to `base`.
+fn is_library_file(
+    tree: &Tree,
+    base: Option<&Path>,
+    ctx: &mut ParseContext,
+    seen: &mut Vec<PathBuf>,
+) -> bool {
+    tree.is_library_with(&mut |path| {
+        if path.contains('$') {
+            return false;
+        }
+        let resolved = base.map_or_else(|| PathBuf::from(path), |base| base.join(path));
+        if seen.contains(&resolved) {
+            return false;
+        }
+        seen.push(resolved.clone());
+        let Ok(text) = ctx.read_file(&resolved) else {
+            return false;
+        };
+        let included = syntax::parse(&text);
+        is_library_file(&included, resolved.parent(), ctx, seen)
+    })
+}
+
+/// The frames around the file's top level: the standard library's and
+/// the file's own (see [`load_prelude`]).
+const FILE_FRAMES: usize = 2;
 
 /// Evaluates a syntax tree (see `syntax.rs`) into the document's nodes.
 struct Evaluator;
@@ -593,6 +670,35 @@ impl ParseContext {
             )
             .subject(name);
         }
+        if self.env.function(name).is_some() {
+            self.used_functions.insert(name.to_string());
+            return Diagnostic::error(
+                code::UNDEFINED_VARIABLE,
+                line,
+                format!(
+                    "'${}' is a function, not a value: it is called as an element, `@{}`",
+                    name, name
+                ),
+            )
+            .subject(name);
+        }
+        // `$i-label` where `$i` is defined: a `-` joins a name
+        if let Some((defined, rest)) = name
+            .match_indices('-')
+            .map(|(i, _)| (&name[..i], &name[i..]))
+            .find(|(before, _)| self.env.value(before).is_some())
+        {
+            return Diagnostic::error(
+                code::UNDEFINED_VARIABLE,
+                line,
+                format!(
+                    "undefined variable '${}': a `-` is part of a name. For '${}' followed \
+                     by '{}', write `${{{}}}{}`",
+                    name, defined, rest, defined, rest
+                ),
+            )
+            .subject(name);
+        }
         let suggestion = suggest_var_name(name, &self.env.value_names());
         let message = match (&suggestion, self.let_lines.get(name)) {
             (Some(closest), _) => format!(
@@ -679,6 +785,7 @@ pub fn parse_with_base(input: &str, base_path: Option<&Path>) -> ParseResult {
         page_at: None,
         meta_tags: Vec::new(),
         head_blocks: Vec::new(),
+        head_at: None,
         env: Env::default(),
         defined_functions: HashMap::new(),
         css_vars: Vec::new(),
@@ -725,7 +832,8 @@ pub fn parse_with_base(input: &str, base_path: Option<&Path>) -> ParseResult {
     check_slot_places(&mut ctx);
     validate_tree(&nodes, None, false, &mut ctx.diagnostics);
     // A library's definitions are for the files that include it
-    let exported: HashSet<String> = if tree.is_library() {
+    let library = is_library_file(&tree, base_path, &mut ctx, &mut Vec::new());
+    let exported: HashSet<String> = if library {
         tree.nodes
             .iter()
             .filter_map(|node| match node.directive().map(|d| &d.args) {
@@ -737,6 +845,17 @@ pub fn parse_with_base(input: &str, base_path: Option<&Path>) -> ParseResult {
         HashSet::new()
     };
     check_unused(&mut ctx, &exported);
+    if let (None, Some(line)) = (&ctx.page, ctx.head_at)
+        && !library
+    {
+        ctx.diagnostics.push(Diagnostic::warning(
+            code::NO_EFFECT,
+            line,
+            "a file without @page is a fragment, which has no <head>: @meta and @head are \
+             left out of it (give the file a @page, or put them in the page that includes it)"
+                .to_string(),
+        ));
+    }
     dedupe(&mut ctx.diagnostics);
     // What the file itself defines at its top level
     let file = ctx.env.frames.last().cloned().unwrap_or_default();
@@ -910,7 +1029,7 @@ fn check_unevaluated_content(
         let Some((name, function)) = call else {
             continue;
         };
-        if function.has_children {
+        if function.has_children || function.wraps_itself {
             continue;
         }
         let content = if i == last {
@@ -936,17 +1055,39 @@ fn check_head(head: &syntax::Head, line: usize, ctx: &mut ParseContext) {
         ctx.namespace.contains(&head.name) || ctx.defined_functions.contains_key(&head.name);
     if is_function {
         ctx.used_functions.insert(head.name.clone());
-        if let Some(function) = ctx.defined_functions.get(&head.name).cloned() {
+        if let Some(function) = ctx.defined_functions.get(&head.name).cloned()
+            && !function.wraps_itself
+        {
             check_call(head, &function, line, ctx);
         }
         return;
     }
-    if let Err(e) = parse_element_kind(&head.name, line, ctx) {
-        ctx.diagnostics.push(e);
-        return;
-    }
+    let kind = match parse_element_kind(&head.name, line, ctx) {
+        Ok(kind) => kind,
+        Err(e) => {
+            ctx.diagnostics.push(e);
+            return;
+        }
+    };
     if let Some(list) = &head.attrs {
         check_attrs(&list.attrs, line, ctx, &[]);
+        // A word for laying out children on an element that doesn't lay
+        // them out, as where the code runs (see `validate_tree`)
+        if !kind.layout().is_container() && !has_no_element(&kind) {
+            for attr in &list.attrs {
+                let base = crate::vocab::base_attribute(&attr.key);
+                if !attr.html
+                    && attr.choice.is_none()
+                    && attr.prefixed.is_none()
+                    && crate::vocab::CONTAINER_ATTRIBUTES.contains(&base)
+                    && !crate::vocab::split_prefixes(&attr.key)
+                        .0
+                        .contains(&"children:")
+                {
+                    ctx.push_once(not_a_container(&kind, line, base).column(attr.span.column));
+                }
+            }
+        }
     }
 }
 
@@ -1364,6 +1505,7 @@ impl Evaluator {
                 if !tags.contains(&tag) {
                     tags.push(tag);
                 }
+                ctx.head_at.get_or_insert(line_num);
                 Ok(None)
             }
 
@@ -1371,6 +1513,7 @@ impl Evaluator {
                 let text = verbatim_content(node);
                 if !text.trim().is_empty() {
                     ctx.head_blocks.push(text.trim().to_string());
+                    ctx.head_at.get_or_insert(line_num);
                 }
                 Ok(None)
             }
@@ -1378,6 +1521,17 @@ impl Evaluator {
             // @style: raw CSS
             ("style", _) => {
                 let text = verbatim_content(node);
+                // Only the @style at the top of a function's body is
+                // scoped; anywhere else `&` is `:scope`, the whole page
+                if has_top_level_ampersand(&text) {
+                    ctx.push_once(Diagnostic::warning(
+                        code::INVALID_VALUE,
+                        node.span.line,
+                        "`&` in this @style is the whole page: only an @style at the top of a \
+                         function's body is scoped to the function, with `&` its root element"
+                            .to_string(),
+                    ));
+                }
                 if !text.trim().is_empty() {
                     ctx.custom_css.push(text.trim().to_string());
                 }
@@ -1507,14 +1661,13 @@ impl Evaluator {
             .collect();
         let included_nodes = self.eval_block(&tree.nodes, ctx);
         ctx.current_file = saved_file;
-        // A library's definitions are there to be picked from: the ones a
-        // page doesn't use aren't reported (their lines aren't this file's)
-        if tree.is_library() {
-            let keep = |name: &String, _: &mut usize| defined_before.contains(name);
-            ctx.let_lines.retain(keep);
-            ctx.define_lines.retain(keep);
-            ctx.fn_lines.retain(keep);
-        }
+        // An included file's definitions aren't reported unused here, where
+        // their lines aren't this file's: a library's are there to be
+        // picked from, and any other file reports its own when checked
+        let keep = |name: &String, _: &mut usize| defined_before.contains(name);
+        ctx.let_lines.retain(keep);
+        ctx.define_lines.retain(keep);
+        ctx.fn_lines.retain(keep);
 
         // Annotate new diagnostics with import chain
         for d in &mut ctx.diagnostics[diag_count_before..] {
@@ -1838,6 +1991,30 @@ impl Evaluator {
             track_var_refs(default, &mut ctx.used_variables);
         }
         ctx.fn_lines.entry(name.to_string()).or_insert(line_num);
+        let wraps_itself = ElementKind::from_name(name).is_some()
+            && body.iter().any(|node| calls_unguarded(node, name));
+        if wraps_itself {
+            ctx.push_once(
+                Diagnostic::error(
+                    code::RECURSIVE_CALL,
+                    line_num,
+                    format!(
+                        "@{0} in the body of `@let @{0}` calls the function itself, not the \
+                         element @{0}, so it would never stop: give the function another name \
+                         (such as @site-{0})",
+                        name
+                    ),
+                )
+                .subject(name),
+            );
+        }
+        for node in &body {
+            node.walk(&mut |node| {
+                if let Some(d) = marker_in_text(node) {
+                    ctx.push_once(d);
+                }
+            });
+        }
         let body: Vec<syntax::Node> = body.into_iter().cloned().collect();
         let (slots, has_children) = declared_slots(&body, ctx);
         let function = Rc::new(FnDef {
@@ -1851,6 +2028,7 @@ impl Evaluator {
             has_children,
             scoped,
             env: ctx.env.clone(),
+            wraps_itself,
         });
         ctx.defined_functions
             .insert(name.to_string(), function.clone());
@@ -1935,6 +2113,7 @@ impl Evaluator {
             values,
             text: trailing_text,
             written_form,
+            written_keys,
             line: line_num,
             name_at,
             source: content,
@@ -1978,6 +2157,9 @@ impl Evaluator {
             ctx.push_once(no_children(name, line_num, column).source(text));
         }
 
+        if fn_def.wraps_itself {
+            return Ok(Vec::new());
+        }
         // Only the body is inside the call, so a function may appear in the
         // content its caller passes it. A function may call itself, under
         // a condition that stops it; one that doesn't stop goes too deep.
@@ -2011,17 +2193,23 @@ impl Evaluator {
                     continue;
                 }
                 consumed[j] = true;
-                if passed.is_some() {
+                // The later one wins, as for any attribute: one written
+                // after a bundle overrides it, and only one written twice
+                // in the call's own list is reported
+                if passed.is_some() && written_keys.iter().filter(|k| **k == param.name).count() > 1
+                {
                     ctx.push_once(
                         Diagnostic::warning(
                             code::DUPLICATE_ATTRIBUTE,
                             line_num,
-                            format!("parameter '{}' of @{} is passed twice", param.name, name),
+                            format!(
+                                "parameter '{}' of @{} is passed twice: the later one wins",
+                                param.name, name
+                            ),
                         )
                         .source(content)
                         .subject(param.name.as_str()),
                     );
-                    continue;
                 }
                 // Written `name=value` in the call's own list is reported
                 // as written; this is one from a bundle
@@ -2112,7 +2300,25 @@ impl Evaluator {
             let mut problems = Vec::new();
             match root {
                 Some(root) => {
-                    root.attrs.extend(forwarded);
+                    // A call's `class=` adds to the root's own classes
+                    for attr in forwarded {
+                        let existing = (attr.html && attr.key == "class")
+                            .then(|| root.attrs.iter_mut().find(|a| a.html && a.key == "class"))
+                            .flatten();
+                        match existing {
+                            Some(class) => {
+                                let mut value = class.value.take().unwrap_or_default();
+                                for name in attr.value.as_deref().unwrap_or("").split_whitespace() {
+                                    if !value.split_whitespace().any(|c| c == name) {
+                                        value.push(' ');
+                                        value.push_str(name);
+                                    }
+                                }
+                                class.value = Some(value.trim().to_string());
+                            }
+                            None => root.attrs.push(attr),
+                        }
+                    }
                     // The scoped `@style` goes into the page once, when the
                     // function is first called
                     if let Some(css) = &fn_def.scoped
@@ -2190,6 +2396,8 @@ struct Call {
     text: Option<syntax::Text>,
     /// Parameters written `name=value`, already reported.
     written_form: Vec<String>,
+    /// The keys written in the call's own list, not from a bundle.
+    written_keys: Vec<String>,
     line: usize,
     /// The column of the call's name and the line it is on, for a missing
     /// parameter.
@@ -2215,6 +2423,7 @@ fn resolve(
     let params: Vec<String> = function.params.iter().map(|p| p.name.clone()).collect();
     let written = head.attrs.as_ref().map_or(&[][..], |list| &list.attrs[..]);
     let written_form = written_parameter_forms(&head.name, &function, written, line, ctx);
+    let written_keys = written.iter().map(|a| a.key.clone()).collect();
     // Parameters are bound by name; every other attribute goes to the
     // root element, and is checked like any attribute
     let (args, values) = parse_attrs(written, line, ctx, true, &params)
@@ -2231,6 +2440,7 @@ fn resolve(
         values,
         text: text.cloned(),
         written_form,
+        written_keys,
         line,
         name_at,
         source: source.to_string(),
@@ -2437,7 +2647,12 @@ fn read_page(
                     .subject("favicon");
                     ctx.diagnostics.push(at_attribute(diagnostic, column, ctx));
                 }
-                page.favicon = value;
+                // The file itself goes into the page when it can be read
+                // (relative to the file); otherwise it is linked
+                page.favicon = value.map(|path| match std::fs::read(ctx.resolve(&path)) {
+                    Ok(data) => crate::codegen::data_uri(&path, &data),
+                    Err(_) => path,
+                });
             } else if attr.html || boolean {
                 page.html_attrs.push(attr);
             } else {
@@ -2568,6 +2783,27 @@ fn set_variable(name: &str, value: Value, line_num: usize, ctx: &mut ParseContex
         let css = value
             .quoted_css()
             .map_or_else(|| value.to_string(), str::to_string);
+        let at_line = |diagnostic: Diagnostic, ctx: &ParseContext| match &ctx.current_source {
+            (current, Some(text)) if *current == line_num => diagnostic.source(text.clone()),
+            _ => diagnostic,
+        };
+        // `:root` is one place for the whole page: a declaration inside a
+        // block (an element, a loop, a function's body) would not be
+        // kept to it, and each run would replace the last
+        if ctx.env.frames.len() > FILE_FRAMES {
+            let diagnostic = Diagnostic::error(
+                code::INVALID_DEFINITION,
+                line_num,
+                format!(
+                    "`@let {name}` declares {name} on :root, for the whole page, so it goes at \
+                     the top level of the file: to set it on an element and what is inside \
+                     it, write `[{name} value]` on that element"
+                ),
+            )
+            .subject(name);
+            ctx.push_once(at_line(diagnostic, ctx));
+            return;
+        }
         match css_breakout(&css) {
             Some(reason) => {
                 let diagnostic = Diagnostic::error(
@@ -2579,14 +2815,25 @@ fn set_variable(name: &str, value: Value, line_num: usize, ctx: &mut ParseContex
                     ),
                 )
                 .subject(css.as_str());
-                ctx.push_once(match &ctx.current_source {
-                    (current, Some(text)) if *current == line_num => {
-                        diagnostic.source(text.clone())
-                    }
-                    _ => diagnostic,
-                });
+                ctx.push_once(at_line(diagnostic, ctx));
             }
-            None => ctx.css_vars.push((name.to_string(), css)),
+            None => match ctx.css_vars.iter_mut().find(|(n, _)| n == name) {
+                Some(declared) => {
+                    let diagnostic = Diagnostic::warning(
+                        code::DUPLICATE_ATTRIBUTE,
+                        line_num,
+                        format!(
+                            "{name} is declared again: :root has one value for the whole page, \
+                             so every element gets this one, also above this line (a theme \
+                             redefines a token on an element: `[dark:{name} {css}]`)"
+                        ),
+                    )
+                    .subject(name);
+                    declared.1 = css;
+                    ctx.push_once(at_line(diagnostic, ctx));
+                }
+                None => ctx.css_vars.push((name.to_string(), css)),
+            },
         }
         return;
     }
@@ -3401,6 +3648,12 @@ fn parse_single_element(
                 if !takes_no_text(&kind) {
                     children.push(Node::Text(text_segments(text, ctx)));
                 }
+            } else if let Some(d) = bad_leading_token(&kind, &token, &text.raw, ctx) {
+                // Nothing is taken as the argument; the line is content
+                ctx.push_once(d);
+                if !takes_no_text(&kind) {
+                    children.push(Node::Text(text_segments(text, ctx)));
+                }
             } else {
                 let column = Some(token.span.column);
                 argument = Some(
@@ -3408,6 +3661,9 @@ fn parse_single_element(
                         .0,
                 );
                 if let Some(rest) = rest {
+                    if let Some(d) = chain_after_argument(&kind, &token.raw, &rest, ctx) {
+                        ctx.push_once(d);
+                    }
                     if takes_no_text(&kind) {
                         let d = after_the_leading_argument(&kind, &token.raw, &rest);
                         let d = at_attribute(d, Some(rest.span.column), ctx);
@@ -3449,6 +3705,153 @@ fn parse_single_element(
         line_num,
         function: None,
     })
+}
+
+/// Whether `node` or a line inside it calls `@name` outside any `@if`
+/// (in a chain, or inline in text).
+fn calls_unguarded(node: &syntax::Node, name: &str) -> bool {
+    if node.is_directive("if") || node.is_directive("else") {
+        return false;
+    }
+    let text_calls = |text: &syntax::Text| {
+        text.segments
+            .iter()
+            .any(|s| matches!(s, Segment::Inline(inline) if inline.head.name == name))
+    };
+    let here = match &node.kind {
+        NodeKind::Element(element) => {
+            element.chain.iter().any(|head| head.name == name)
+                || element.text.as_ref().is_some_and(text_calls)
+        }
+        NodeKind::Text(text) => text_calls(text),
+        _ => false,
+    };
+    here || node
+        .children
+        .iter()
+        .any(|child| calls_unguarded(child, name))
+}
+
+/// `@td [padding 8] @children`: `@children` and `@slot NAME` mark where a
+/// call's content goes only on a line of their own; after an element's
+/// attributes, or in a verbatim body, they are text.
+fn marker_in_text(node: &syntax::Node) -> Option<Diagnostic> {
+    let is_marker = |text: &str| {
+        let text = text.trim();
+        text == "@children" || text == "@slot" || text.starts_with("@slot ")
+    };
+    let mut line = node.span.line;
+    let mut source = written_line(node);
+    let (marker, message) = match &node.kind {
+        NodeKind::Element(element) => {
+            let text = element.text.as_ref()?;
+            if !is_marker(&text.raw) {
+                return None;
+            }
+            let name = &element.chain.last()?.name;
+            let marker = text.raw.trim().to_string();
+            let message = format!(
+                "`{marker}` after @{name}'s attributes is text: it marks where a call's content \
+                 goes only on a line of its own, so write it on the next line, indented under \
+                 @{name}"
+            );
+            (marker, message)
+        }
+        NodeKind::Verbatim(verbatim) if verbatim.escaped => {
+            let (i, written) = verbatim
+                .text
+                .lines()
+                .enumerate()
+                .find(|(_, l)| is_marker(l))?;
+            let marker = written.trim().to_string();
+            line += i;
+            source = written.to_string();
+            let message = format!(
+                "`{marker}` in a verbatim body is text: the body is written as it is, so it can't \
+                 hold a call's content (pass the text as a parameter instead)"
+            );
+            (marker, message)
+        }
+        _ => return None,
+    };
+    Some(
+        Diagnostic::error(code::MISPLACED_SLOT, line, message)
+            .subject(marker)
+            .source(source),
+    )
+}
+
+/// A first word that can't be a leading argument: an inline element
+/// (`@link {@b x} y`), or a quote that isn't closed (`@link "a b`).
+fn bad_leading_token(
+    kind: &ElementKind,
+    token: &syntax::Arg,
+    text: &str,
+    ctx: &ParseContext,
+) -> Option<Diagnostic> {
+    let what = leading_name(kind);
+    let name = kind.name();
+    let message = if token.raw.starts_with("{@") {
+        format!(
+            "@{0} takes its {1} first, before any text: write `@{0} VALUE {2}`, or give it as \
+             `[{1}=VALUE]`",
+            name,
+            what,
+            text.trim()
+        )
+    } else if token.raw.starts_with('"') && syntax::quoted_string(&token.raw).is_none() {
+        format!(
+            "@{}'s {} starts with a `\"` that isn't closed: close it (`\"...\"`), or write \
+             `\\\"` for a quote in the value",
+            name, what
+        )
+    } else {
+        return None;
+    };
+    let d = Diagnostic::error(code::UNEXPECTED_ARGUMENT, token.span.line, message)
+        .subject(token.raw.clone());
+    Some(at_attribute(d, Some(token.span.column), ctx))
+}
+
+/// `@link /a > @image logo.png`: a `>` chains only after an element's
+/// name or its `[attributes]`, so after a leading argument it is text.
+/// Said when what follows names an element or a function.
+fn chain_after_argument(
+    kind: &ElementKind,
+    token: &str,
+    rest: &syntax::Text,
+    ctx: &ParseContext,
+) -> Option<Diagnostic> {
+    let after = rest.raw.strip_prefix('>')?;
+    let name_start = after.trim_start().strip_prefix('@')?;
+    if after.len() == after.trim_start().len() {
+        return None;
+    }
+    let name: String = name_start
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '-')
+        .collect();
+    if ElementKind::from_name(&name).is_none() && ctx.env.function(&name).is_none() {
+        return None;
+    }
+    let attr = leading_name(kind);
+    let d = Diagnostic::warning(
+        code::UNEXPECTED_ARGUMENT,
+        rest.span.line,
+        format!(
+            "`{}` after @{}'s {} is text, not a chain: `>` chains after an element's name or \
+             its [attributes], so write `@{} [{}={}] {}`",
+            rest.raw.trim_end(),
+            kind.name(),
+            attr,
+            kind.name(),
+            attr,
+            token,
+            rest.raw.trim_end()
+        ),
+    )
+    .subject(rest.raw.trim_end());
+    Some(at_attribute(d, Some(rest.span.column), ctx))
 }
 
 /// A leading argument given twice, as the first token and as its
@@ -3568,6 +3971,18 @@ fn parse_element_kind(
              is defined above the function, so define @{} above this line, outside the block \
              it is in",
             name, name, name
+        ))
+    } else if matches!(name, "svg" | "math" | "template") {
+        Some(format!(
+            "unknown element @{}: htmlang doesn't write <{}>; put its markup in the page with \
+             @raw{}",
+            name,
+            name,
+            if name == "svg" {
+                " (or an SVG file with `@image [inline] file.svg`)"
+            } else {
+                ""
+            }
         ))
     } else {
         None
@@ -4681,6 +5096,23 @@ fn unknown_attribute(
         ctx.diagnostics.push(diagnostic);
         return false;
     }
+    // `[card]` where `card` is a bundle: it is used as `$card`
+    if attr.value.is_none() && ctx.env.bundle(base).is_some() && base == attr.key {
+        ctx.used_defines.insert(base.to_string());
+        let diagnostic = Diagnostic::error(
+            code::UNKNOWN_ATTRIBUTE,
+            line,
+            format!(
+                "unknown attribute '{}': '{}' is an attribute bundle, used as `${}`",
+                base, base, base
+            ),
+        )
+        .subject(base)
+        .suggest(Some(format!("${}", base)));
+        let diagnostic = at_attribute(diagnostic, column, ctx);
+        ctx.diagnostics.push(diagnostic);
+        return false;
+    }
     // `hover:title x`: an HTML attribute's name is not a suggestion for
     // itself
     let suggestion =
@@ -4955,7 +5387,7 @@ fn read_attrs(
         // `hover:border` differ, and the form, so `width=800` and
         // `width 200` do too), and the later one wins
         if validate {
-            let seen = (attr.key.clone(), attr.html);
+            let seen = (normal_key(&attr.key), attr.html);
             if out.seen_keys.contains(&seen) {
                 let message = if attr.html {
                     format!("duplicate attribute '{}='", attr.key)
@@ -4979,6 +5411,28 @@ fn read_attrs(
         }
         if validate && attr.html && attr.key == "class" {
             reserved_class(&attr, line, column(0), ctx);
+        }
+        // `padding=4`: a style written as an HTML attribute, which the
+        // browser ignores (`width=` and `height=` are real on some
+        // elements, see `validate_tree`)
+        if validate
+            && attr.html
+            && crate::vocab::is_style_attribute(&attr.key)
+            && !crate::vocab::HTML_ATTRIBUTES.contains(&attr.key.as_str())
+        {
+            let value = token.value.as_deref().unwrap_or("").trim();
+            let diagnostic = Diagnostic::warning(
+                code::HTML_ATTRIBUTE_FORM,
+                line,
+                format!(
+                    "'{0}={1}' is an HTML attribute, but {0} is a style: write `{0} {1}`",
+                    attr.key, value
+                ),
+            )
+            .subject(token.raw.as_str())
+            .suggest(Some(format!("{} {}", attr.key, value)));
+            let diagnostic = at_attribute(diagnostic, column(0), ctx);
+            ctx.diagnostics.push(diagnostic);
         }
 
         // A style or a flag: its name is checked, and what can't be
@@ -5165,6 +5619,28 @@ fn reserved_class(attr: &Attribute, line: usize, column: Option<usize>, ctx: &mu
     }
 }
 
+/// A style's key as the CSS reads it, for finding duplicates: its at-rule
+/// prefixes in one order (`dark:md:` is `md:dark:`), then its selector
+/// prefixes as written, whose order is the selector's.
+fn normal_key(key: &str) -> String {
+    let (prefixes, name) = crate::vocab::split_prefixes(key);
+    let mut at: Vec<(usize, &str)> = prefixes
+        .iter()
+        .filter_map(|p| crate::vocab::at_rule_rank(p).map(|rank| (rank, *p)))
+        .collect();
+    at.sort_unstable();
+    at.dedup();
+    let mut normal: String = at.iter().map(|(_, p)| *p).collect();
+    for prefix in prefixes
+        .iter()
+        .filter(|p| crate::vocab::at_rule_rank(p).is_none())
+    {
+        normal.push_str(prefix);
+    }
+    normal.push_str(name);
+    normal
+}
+
 /// `[$name]` where `$name` isn't an attribute bundle.
 fn not_a_bundle(name: &str, line: usize, column: Option<usize>, ctx: &mut ParseContext) {
     track_var_refs(&format!("${}", name), &mut ctx.used_variables);
@@ -5177,6 +5653,18 @@ fn not_a_bundle(name: &str, line: usize, column: Option<usize>, ctx: &mut ParseC
                 "'${}' is a value, not an attribute: attributes come from a bundle \
                  (`@let name [padding 8]`, used as `[$name]`), and a value fills an \
                  attribute's value (`padding ${}`)",
+                name, name
+            ),
+        )
+        .subject(name)
+    } else if ctx.env.function(name).is_some() {
+        ctx.used_functions.insert(name.to_string());
+        Diagnostic::error(
+            code::UNDEFINED_VARIABLE,
+            line,
+            format!(
+                "'${}' is a function, not an attribute bundle: it is called as an element, \
+                 `@{}`",
                 name, name
             ),
         )
@@ -5300,6 +5788,20 @@ fn text_segments(text: &syntax::Text, ctx: &mut ParseContext) -> Vec<TextSegment
                 let line = ctx.current_line;
                 match resolve(&inline.head, inline.text.as_ref(), line, &text.raw, ctx) {
                     Ok(resolved) => {
+                        if !inline.closed {
+                            let d = Diagnostic::warning(
+                                code::UNCLOSED_BRACKET,
+                                inline.span.line,
+                                format!(
+                                    "unclosed `{{`: the inline @{} runs to the end of the line. \
+                                     An inline element ends with `}}` (a brace that is text is \
+                                     written `\\{{`)",
+                                    inline.head.name
+                                ),
+                            );
+                            let d = at_attribute(d, Some(inline.span.column), ctx);
+                            ctx.push_once(d);
+                        }
                         flush(&mut plain, &mut start, &mut segments, ctx);
                         // A function called inline gets no children: its
                         // content is the text after its attributes
@@ -5668,7 +6170,7 @@ fn validate_tree(
                         .0
                         .contains(&"children:")
                 {
-                    diagnostics.push(not_a_container(elem, base));
+                    diagnostics.push(not_a_container(&elem.kind, elem.line_num, base));
                 }
 
                 // Form-specific: placeholder only on @input/@textarea
@@ -5686,17 +6188,45 @@ fn validate_tree(
                     ));
                 }
 
-                // 'for' only on @label
-                if base == "for" && !elem.kind.is_tag("label") {
+                // 'for' only on @label and @output
+                if base == "for" && !(elem.kind.is_tag("label") || elem.kind.is_tag("output")) {
                     diagnostics.push(Diagnostic::new(
                         code::NO_EFFECT,
                         Severity::Warning,
                         elem.line_num,
                         format!(
-                            "'for' has no effect on {} (only works on @label)",
+                            "'for' has no effect on {} (only works on @label and @output)",
                             element_kind_name(&elem.kind)
                         ),
                     ));
+                }
+
+                // `width=` and `height=` are HTML attributes of media and
+                // embedded content only; elsewhere they are styles
+                if attr.html
+                    && (base == "width" || base == "height")
+                    && !matches!(elem.kind, ElementKind::Image)
+                    && ![
+                        "video", "canvas", "iframe", "embed", "object", "input", "source",
+                    ]
+                    .iter()
+                    .any(|tag| elem.kind.is_tag(tag))
+                {
+                    let value = attr.value.as_deref().unwrap_or("");
+                    diagnostics.push(
+                        Diagnostic::warning(
+                            code::HTML_ATTRIBUTE_FORM,
+                            elem.line_num,
+                            format!(
+                                "'{0}={1}' has no effect on {2}, which has no {0} attribute: \
+                                 the style is written `{0} {1}`",
+                                base,
+                                value,
+                                element_kind_name(&elem.kind)
+                            ),
+                        )
+                        .subject(format!("{}={}", base, value)),
+                    );
                 }
 
                 // 'rows'/'cols' only on @textarea
@@ -6028,9 +6558,9 @@ fn has_no_element(kind: &ElementKind) -> bool {
 /// htmlang's word `word` for laying out children (`spacing`, `wrap`,
 /// `grid-cols`, `grid-rows`) on an element that doesn't lay out its
 /// children: an error, and the word is left out.
-fn not_a_container(elem: &Element, word: &str) -> Diagnostic {
-    let name = element_kind_name(&elem.kind);
-    let (what, instead) = match elem.kind.layout() {
+fn not_a_container(kind: &ElementKind, line: usize, word: &str) -> Diagnostic {
+    let name = element_kind_name(kind);
+    let (what, instead) = match kind.layout() {
         Layout::Text => (
             "is text, whose lines and children flow together with no gap between them",
             "; to space the children out, put them in an @el or @row",
@@ -6043,7 +6573,7 @@ fn not_a_container(elem: &Element, word: &str) -> Diagnostic {
     };
     Diagnostic::error(
         code::NO_EFFECT,
-        elem.line_num,
+        line,
         format!(
             "'{0}' can't go on {1}: {1} {2}. `{0}` works on a row, column or grid \
              (@el, @row, @grid, @section, ...){3}",
@@ -6123,14 +6653,39 @@ fn inline_svg(node: Node, line_num: usize, ctx: &mut ParseContext) -> Node {
     let Node::Element(elem) = &node else {
         return node;
     };
-    let is_inline_svg = elem.kind == ElementKind::Image
+    let inline = elem.kind == ElementKind::Image
         && elem.attrs.iter().any(|a| a.key == "inline" && !a.html)
-        && elem
-            .argument
-            .as_deref()
-            .is_some_and(|src| src.ends_with(".svg"));
-    if !is_inline_svg {
+        && elem.argument.as_deref().is_some_and(|src| !src.is_empty());
+    if !inline {
         return node;
+    }
+    // A raster image: its file, read relative to this one, as a `data:` URI
+    if !elem
+        .argument
+        .as_deref()
+        .is_some_and(|src| src.ends_with(".svg"))
+    {
+        let Node::Element(mut elem) = node else {
+            return node;
+        };
+        let filename = elem.argument.clone().unwrap_or_default();
+        let resolved = ctx.resolve(&filename);
+        match std::fs::read(&resolved) {
+            Ok(data) => {
+                elem.argument = Some(crate::codegen::data_uri(&filename, &data));
+                ctx.included_files.push(resolved);
+            }
+            Err(e) => ctx.diagnostics.push(Diagnostic::new(
+                code::UNREADABLE_FILE,
+                Severity::Error,
+                line_num,
+                format!(
+                    "cannot load image '{}' to put it into the page: {}",
+                    filename, e
+                ),
+            )),
+        }
+        return Node::Element(elem);
     }
     let filename = elem.argument.clone().unwrap_or_default();
     let resolved = match &ctx.base_path {
@@ -6154,6 +6709,9 @@ fn inline_svg(node: Node, line_num: usize, ctx: &mut ParseContext) -> Node {
     // as one of the root's attributes: anything else is reported, never
     // left out silently
     let mut left_out: Vec<String> = Vec::new();
+    // The styles go in the root's `style=`, where a length takes its unit
+    // and `var(--name)` works, as in any CSS
+    let mut style: Vec<String> = Vec::new();
     for attr in &elem.attrs {
         let target = match (attr.key.as_str(), attr.html, &attr.value) {
             ("inline", false, None) | ("src", true, _) => continue,
@@ -6164,8 +6722,19 @@ fn inline_svg(node: Node, line_num: usize, ctx: &mut ParseContext) -> Node {
                 left_out.push(format!("{} {}", attr.key, value));
                 continue;
             }
-            ("width" | "height", false, Some(_)) => attr.key.as_str(),
-            ("color" | "fill", false, Some(_)) => "fill",
+            ("width" | "height", false, Some(value)) => {
+                let value = crate::vocab::with_px(&attr.key, value);
+                style.push(format!("{}:{}", attr.key, value));
+                continue;
+            }
+            ("color" | "fill", false, Some(value)) => {
+                style.push(format!("fill:{}", value));
+                continue;
+            }
+            ("style", true, Some(value)) => {
+                style.insert(0, value.trim().trim_end_matches(';').to_string());
+                continue;
+            }
             ("alt", true, _) => {
                 left_out.push("alt".to_string());
                 continue;
@@ -6179,6 +6748,9 @@ fn inline_svg(node: Node, line_num: usize, ctx: &mut ParseContext) -> Node {
         };
         let value = attr.value.as_deref().unwrap_or("");
         svg = set_svg_attr(&svg, target, &html_escape_md(value));
+    }
+    if !style.is_empty() {
+        svg = set_svg_attr(&svg, "style", &html_escape_md(&style.join(";")));
     }
     if !left_out.is_empty() {
         let alt = left_out.iter().any(|name| name == "alt");

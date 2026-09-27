@@ -222,7 +222,7 @@ fn svg_width_does_not_touch_stroke_width() {
     .unwrap();
     let out = compile_in(&dir, "@image [inline, width 48] icon.svg");
     assert!(out.contains("stroke-width=\"2\""), "{}", out);
-    assert!(out.contains("width=\"48\""), "{}", out);
+    assert!(out.contains("style=\"width:48px\""), "{}", out);
 }
 
 #[test]
@@ -466,7 +466,7 @@ fn inline_svg_resolves_from_the_page_and_keeps_attributes() {
     .unwrap();
     let out = compile_in(&dir, "@image [inline, width 24, class=icon] icons/a.svg");
     assert!(
-        out.contains(r#"<svg viewBox="0 0 24 24" width="24" class="icon">"#),
+        out.contains(r#"<svg viewBox="0 0 24 24" class="icon" style="width:24px">"#),
         "{}",
         out
     );
@@ -1941,4 +1941,360 @@ fn a_caller_s_attributes_win_over_a_function_s_scoped_style() {
         function
     ));
     assert!(!out.contains("hl-fn-box"), "{}", out);
+}
+
+// --- Found in the final review of the whole branch ---
+
+fn diagnostics_of(input: &str) -> Vec<htmlang::diagnostic::Diagnostic> {
+    parser::parse(input).diagnostics
+}
+
+fn coded_in(diags: &[htmlang::diagnostic::Diagnostic], code: &str) -> bool {
+    diags.iter().any(|d| d.code == code)
+}
+
+#[test]
+fn a_style_value_over_two_lines_keeps_its_words_apart() {
+    // Compact output joined the lines of an @style with nothing between
+    // them: `margin: 0` then `auto;` became `0auto`
+    let fn_style = "@let @box\n  @style\n    h2 { margin: 0\n      auto; }\n  @el x\n@box\n";
+    let out = compile(&format!(
+        "@style\n  .a {{ margin: 0\n    auto; }}\n{}",
+        fn_style
+    ));
+    assert!(out.contains(".a { margin: 0 auto; }"), "{}", out);
+    assert!(out.contains("h2 { margin: 0 auto; }"), "{}", out);
+    assert!(!out.contains("0auto"), "{}", out);
+}
+
+#[test]
+fn a_call_s_class_adds_to_the_root_s_classes_and_keeps_the_scope() {
+    let src = "@let @note\n  @style\n    .t { color: red; }\n  @el [class=base]\n    @text [class=t] hi\n@note [class=extra]\n@note\n";
+    let out = compile(src);
+    assert!(
+        out.contains("<div class=\"hl-a base extra hl-fn-note\">"),
+        "{}",
+        out
+    );
+    assert!(
+        out.contains("<div class=\"hl-a base hl-fn-note\">"),
+        "{}",
+        out
+    );
+}
+
+#[test]
+fn a_parameter_passed_again_takes_the_later_value() {
+    // After a bundle, silently; twice in the call's own list, with a warning
+    let out = compile("@let b [t b1]\n@let @f [t]\n  @text $t\n@f [$b, t mine]\n");
+    assert!(out.contains(">mine<"), "{}", out);
+    let result = parser::parse("@let @f [t]\n  @text $t\n@f [t a, t b]\n");
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("passed twice: the later one wins")),
+        "{:?}",
+        result.diagnostics
+    );
+    let out = codegen::generate(&result.document);
+    assert!(out.contains(">b<"), "{}", out);
+    let diags = diagnostics_of("@let b [t b1]\n@let @f [t]\n  @text $t\n@f [$b, t mine]\n");
+    assert!(!coded_in(&diags, "duplicate-attribute"), "{:?}", diags);
+}
+
+#[test]
+fn a_custom_property_is_declared_at_the_top_level_once() {
+    // Inside a function it was hoisted to :root, and calls overwrote each
+    // other
+    let diags = diagnostics_of(
+        "@let @theme [c]\n  @let --c $c\n  @el [color var(--c)] y\n@theme [c green]\n@theme [c pink]\n",
+    );
+    let inside: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == "invalid-definition")
+        .collect();
+    assert_eq!(inside.len(), 1, "{:?}", diags);
+    assert!(
+        inside[0].message.contains("[--c value]"),
+        "{}",
+        inside[0].message
+    );
+    let result = parser::parse("@let --a red\n@el [color var(--a)] x\n@let --a 12\n");
+    assert!(
+        coded_in(&result.diagnostics, "duplicate-attribute"),
+        "{:?}",
+        result.diagnostics
+    );
+    let out = codegen::generate(&result.document);
+    assert!(
+        out.contains("--a:12;") && !out.contains("--a:red"),
+        "{}",
+        out
+    );
+}
+
+#[test]
+fn an_ampersand_in_an_unscoped_style_is_reported() {
+    let diags = diagnostics_of(
+        "@let @note [warn false]\n  @if $warn\n    @style\n      & { border-color: red; }\n  @el x\n@note [warn]\n",
+    );
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("`&` in this @style")),
+        "{:?}",
+        diags
+    );
+    // Nested under a rule, or in a scoped @style, it is fine
+    let diags = diagnostics_of(
+        "@style\n  .a { &:hover { color: red; } }\n@let @n\n  @style\n    & { color: red; }\n  @el x\n@n\n",
+    );
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.message.contains("`&` in this @style")),
+        "{:?}",
+        diags
+    );
+}
+
+#[test]
+fn a_chain_after_a_leading_argument_is_reported() {
+    let result = parser::parse("@link /a > @image logo.png\n");
+    let d = result
+        .diagnostics
+        .iter()
+        .find(|d| d.code == "unexpected-argument")
+        .expect("a warning");
+    assert!(
+        d.message.contains("@link [href=/a] > @image"),
+        "{}",
+        d.message
+    );
+    // Text with a `>` that doesn't name an element is text
+    let diags = diagnostics_of("@link /a Next > more\n");
+    assert!(!coded_in(&diags, "unexpected-argument"), "{:?}", diags);
+}
+
+#[test]
+fn a_layout_word_on_text_is_reported_in_code_that_doesn_t_run() {
+    let diags = diagnostics_of("@let @card\n  @text [spacing 4] x\n@if false\n  @text [wrap] y\n");
+    let lines: Vec<usize> = diags
+        .iter()
+        .filter(|d| d.code == "no-effect")
+        .map(|d| d.line)
+        .collect();
+    assert_eq!(lines, [2, 4], "{:?}", diags);
+}
+
+#[test]
+fn children_after_an_element_s_attributes_is_reported() {
+    let diags = diagnostics_of(
+        "@let @cell [pad 8]\n  @td [padding $pad] @children\n@table > @tr\n  @cell\n",
+    );
+    assert!(coded_in(&diags, "misplaced-slot"), "{:?}", diags);
+    let diags = diagnostics_of("@let @sample\n  @pre > @code\n    @children\n@sample\n");
+    let d = diags
+        .iter()
+        .find(|d| d.code == "misplaced-slot")
+        .expect("an error");
+    assert_eq!(d.line, 3, "{:?}", d);
+}
+
+#[test]
+fn an_unclosed_inline_element_is_reported() {
+    let result = parser::parse("@paragraph Unclosed {@b bold\n");
+    assert!(
+        coded_in(&result.diagnostics, "unclosed-bracket"),
+        "{:?}",
+        result.diagnostics
+    );
+    assert!(codegen::generate(&result.document).contains("<b>bold</b>"));
+}
+
+#[test]
+fn a_size_under_a_prefix_undoes_fill_in_a_row() {
+    let out = compile("@row\n  @el [width fill, lg:width 200] a\n");
+    assert!(
+        out.contains("@media(min-width:1024px){.hl-b{flex:0 1 auto;min-width:auto;width:200px;}}"),
+        "{}",
+        out
+    );
+}
+
+#[test]
+fn name_mistakes_get_the_fix_that_fits() {
+    let d = diagnostics_of("@let card [padding 8]\n@el [card] a\n");
+    assert!(
+        d.iter().any(|d| d.suggestion.as_deref() == Some("$card")),
+        "{:?}",
+        d
+    );
+    let d = diagnostics_of("@let @fn\n  @el x\n@fn\n@text $fn\n");
+    assert!(
+        d.iter().any(|d| d.message.contains("is a function")),
+        "{:?}",
+        d
+    );
+    let d = diagnostics_of("@each $i in 1..2\n  @el [id=item-$i-label] x\n");
+    assert!(
+        d.iter().any(|d| d.message.contains("`${i}-label`")),
+        "{:?}",
+        d
+    );
+    let d = diagnostics_of("@svg x\n");
+    assert!(d.iter().any(|d| d.message.contains("@raw")), "{:?}", d);
+}
+
+#[test]
+fn prefixes_in_another_order_are_the_same_key() {
+    let d = diagnostics_of(
+        "@el [md:dark:padding 1, dark:md:padding 2, md:hover:color red, hover:md:color blue] x\n",
+    );
+    let dups = d.iter().filter(|d| d.code == "duplicate-attribute").count();
+    assert_eq!(dups, 2, "{:?}", d);
+    // The order of selector prefixes is the selector's: not a duplicate
+    let d = diagnostics_of("@table [hover:@td:color red, @td:hover:color blue]\n  @tr > @td x\n");
+    assert!(!coded_in(&d, "duplicate-attribute"), "{:?}", d);
+}
+
+#[test]
+fn a_style_written_as_an_html_attribute_is_reported() {
+    let d =
+        diagnostics_of("@el [padding=4, width=200, title=x] x\n@image [width=20, alt=x] a.png\n");
+    let found: Vec<(usize, bool)> = d
+        .iter()
+        .filter(|d| d.code == "html-attribute-form")
+        .map(|d| (d.line, d.suggestion.is_some()))
+        .collect();
+    assert_eq!(found, [(1, true), (1, false)], "{:?}", d);
+    // `for=` is an attribute of @output too
+    let d = diagnostics_of("@output [for=a] x\n");
+    assert!(!coded_in(&d, "no-effect"), "{:?}", d);
+}
+
+#[test]
+fn a_custom_property_s_messages_don_t_suggest_a_function() {
+    let d = diagnostics_of("@let --empty\n");
+    assert!(
+        d.iter()
+            .any(|d| d.message.contains("custom property") && !d.message.contains("@let @--")),
+        "{:?}",
+        d
+    );
+}
+
+#[test]
+fn a_function_that_wraps_the_element_it_is_named_after_is_one_error() {
+    let d =
+        diagnostics_of("@let @nav [items]\n  @nav [spacing 8]\n    @text $items\n@nav [items a]\n");
+    let errors: Vec<_> = d.iter().filter(|d| d.severity == Severity::Error).collect();
+    assert_eq!(errors.len(), 1, "{:?}", d);
+    assert_eq!(errors[0].code, "recursive-call");
+    // Under an @if it can stop: a tree
+    let d = diagnostics_of("@let @ul [n]\n  @if $n > 0\n    @ul [n ${$n - 1}]\n@ul [n 2]\n");
+    assert!(!coded_in(&d, "recursive-call"), "{:?}", d);
+}
+
+#[test]
+fn inline_svg_styles_go_in_its_style_attribute() {
+    let dir = scratch_dir("svg_style");
+    std::fs::write(dir.join("i.svg"), "<svg viewBox=\"0 0 1 1\"></svg>").unwrap();
+    let out = compile_in(&dir, "@image [inline, fill var(--c), width 24] i.svg\n");
+    assert!(
+        out.contains("<svg viewBox=\"0 0 1 1\" style=\"fill:var(--c);width:24px\">"),
+        "{}",
+        out
+    );
+}
+
+#[test]
+fn an_inlined_raster_is_read_next_to_the_file() {
+    let dir = scratch_dir("raster");
+    std::fs::write(dir.join("p.png"), b"\x89PNGxxxx").unwrap();
+    let out = compile_in(&dir, "@page T\n@image [inline, alt=x] p.png\n");
+    assert!(out.contains("src=\"data:image/png;base64,"), "{}", out);
+    let result = parser::parse_with_base("@image [inline, alt=x] nothere.png\n", Some(&dir));
+    assert!(
+        coded_in(&result.diagnostics, "unreadable-file"),
+        "{:?}",
+        result.diagnostics
+    );
+    let out = compile_in(&dir, "@page [favicon p.png] T\n");
+    assert!(
+        out.contains("rel=\"icon\" href=\"data:image/png;base64,"),
+        "{}",
+        out
+    );
+}
+
+#[test]
+fn meta_in_a_fragment_is_reported() {
+    let d = diagnostics_of("@meta description Hello\n@text hi\n");
+    assert!(coded_in(&d, "no-effect"), "{:?}", d);
+    let d = diagnostics_of("@page T\n@meta description Hello\n@text hi\n");
+    assert!(!coded_in(&d, "no-effect"), "{:?}", d);
+}
+
+#[test]
+fn a_list_of_records_in_text_is_an_error() {
+    let d = diagnostics_of("@data $posts [{\"t\": \"a\"}, {\"t\": \"b\"}]\n@text All: $posts\n");
+    assert!(
+        d.iter()
+            .any(|d| d.message.contains("list of records") && d.message.contains("$posts.0.t")),
+        "{:?}",
+        d
+    );
+    // A list in a list prints its items
+    let out = compile("@let items a, b\n@let more $items, d\n@text $more\n");
+    assert!(out.contains(">a, b, d<"), "{}", out);
+}
+
+#[test]
+fn a_library_may_include_a_library_and_read_data() {
+    let dir = scratch_dir("libraries");
+    std::fs::write(dir.join("base.hl"), "@let gap 8\n").unwrap();
+    std::fs::write(dir.join("theme.hl"), "@include base.hl\n@let accent red\n").unwrap();
+    std::fs::write(dir.join("header.hl"), "@let spare 1\n@text header\n").unwrap();
+    let theme = std::fs::read_to_string(dir.join("theme.hl")).unwrap();
+    let result = parser::parse_with_base(&theme, Some(&dir));
+    assert!(
+        !coded_in(&result.diagnostics, "unused-variable"),
+        "{:?}",
+        result.diagnostics
+    );
+    // An included page's unused names are its own, not the includer's
+    let result = parser::parse_with_base("@page T\n@include header.hl\n", Some(&dir));
+    assert!(
+        !coded_in(&result.diagnostics, "unused-variable"),
+        "{:?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn mixed_tabs_and_spaces_are_reported() {
+    let d = diagnostics_of("@el\n\t@text a\n  @text b\n");
+    let found: Vec<usize> = d
+        .iter()
+        .filter(|d| d.code == "mixed-indentation")
+        .map(|d| d.line)
+        .collect();
+    assert_eq!(found, [3], "{:?}", d);
+    assert!(!coded_in(
+        &diagnostics_of("@el\n\t@text a\n\t\t@text b\n"),
+        "mixed-indentation"
+    ));
+}
+
+#[test]
+fn a_leading_argument_that_can_t_be_one_is_reported() {
+    let d = diagnostics_of("@link {@b x} y\n@link \"unclosed x\n");
+    let lines: Vec<usize> = d
+        .iter()
+        .filter(|d| d.code == "unexpected-argument")
+        .map(|d| d.line)
+        .collect();
+    assert_eq!(lines, [1, 2], "{:?}", d);
 }

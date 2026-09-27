@@ -24,7 +24,7 @@ Commands:
                         Report diagnostics without writing output
   lint <file.hl | dir> [--format json]
                         Stricter checks (accessibility, nesting)
-  fmt <file.hl>         Format a file in place
+  fmt <file.hl>...      Format files in place
   lsp                   Start the language server (stdio)
 
 Options:

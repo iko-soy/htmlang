@@ -84,6 +84,9 @@ pub mod code {
     /// A `@let` whose name, parameters or body don't fit its kind.
     pub const INVALID_DEFINITION: &str = "invalid-definition";
     pub const STRAY_ELSE: &str = "stray-else";
+    /// Indentation with tabs and spaces mixed, which nests lines in ways
+    /// the eye doesn't see.
+    pub const MIXED_INDENTATION: &str = "mixed-indentation";
 
     // Names
     pub const UNKNOWN_ELEMENT: &str = "unknown-element";
@@ -177,6 +180,7 @@ pub mod code {
         INVALID_LOOP,
         INVALID_DEFINITION,
         STRAY_ELSE,
+        MIXED_INDENTATION,
         UNKNOWN_ELEMENT,
         UNKNOWN_ATTRIBUTE,
         UNKNOWN_PREFIX,

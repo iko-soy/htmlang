@@ -67,7 +67,24 @@ fn compile(input_path: &str, cfg: &CompileConfig) -> (bool, Vec<PathBuf>) {
     };
 
     let base = Path::new(input_path).parent();
-    let result = htmlang::parser::parse_with_base(&input, base);
+    let mut result = htmlang::parser::parse_with_base(&input, base);
+    let doc = &result.document;
+    if cfg.partial
+        && (doc.page.is_some()
+            || !doc.meta_tags.is_empty()
+            || !doc.og_tags.is_empty()
+            || !doc.head_blocks.is_empty())
+    {
+        result
+            .diagnostics
+            .push(htmlang::diagnostic::Diagnostic::warning(
+                htmlang::diagnostic::code::NO_EFFECT,
+                1,
+                "--partial writes a fragment: @page's title and attributes, @meta and @head \
+                 have no <head> or <body> to go in, and are left out"
+                    .to_string(),
+            ));
+    }
 
     if cfg.format_json {
         if let Some(collector) = cfg.json_collector {
@@ -544,24 +561,26 @@ fn main() {
         return;
     }
 
-    // Handle "fmt" subcommand
-    if args.len() >= 3 && args[1] == "fmt" {
-        let file = &args[2];
-        match fs::read_to_string(file) {
-            Ok(input) => {
-                let formatted = htmlang::fmt::format(&input);
-                match fs::write(file, &formatted) {
-                    Ok(()) => eprintln!("formatted {}", file),
-                    Err(e) => {
-                        eprintln!("error: {}: {}", file, e);
-                        process::exit(1);
-                    }
+    // Handle "fmt" subcommand: each file in place
+    if args.len() >= 2 && args[1] == "fmt" {
+        if args.len() == 2 {
+            eprintln!("usage: htmlang fmt <file.hl>...");
+            process::exit(1);
+        }
+        let mut failed = false;
+        for file in &args[2..] {
+            let result = fs::read_to_string(file)
+                .and_then(|input| fs::write(file, htmlang::fmt::format(&input)));
+            match result {
+                Ok(()) => eprintln!("formatted {}", file),
+                Err(e) => {
+                    eprintln!("error: {}: {}", file, e);
+                    failed = true;
                 }
             }
-            Err(e) => {
-                eprintln!("error: {}: {}", file, e);
-                process::exit(1);
-            }
+        }
+        if failed {
+            process::exit(1);
         }
         return;
     }
@@ -1288,7 +1307,20 @@ fn main() {
 /// layout, that pages `@include`. Building a directory makes no page of
 /// it (its problems show where a page includes it, or with `check`).
 fn is_library(path: &Path) -> bool {
-    fs::read_to_string(path).is_ok_and(|source| htmlang::syntax::parse(&source).is_library())
+    fn library(path: &Path, seen: &mut Vec<PathBuf>) -> bool {
+        if seen.iter().any(|p| p == path) {
+            return false;
+        }
+        seen.push(path.to_path_buf());
+        let Ok(source) = fs::read_to_string(path) else {
+            return false;
+        };
+        let base = path.parent().unwrap_or(Path::new(""));
+        htmlang::syntax::parse(&source).is_library_with(&mut |included| {
+            !included.contains('$') && library(&base.join(included), seen)
+        })
+    }
+    library(path, &mut Vec::new())
 }
 
 fn collect_hl_files(dir: &Path) -> Vec<PathBuf> {

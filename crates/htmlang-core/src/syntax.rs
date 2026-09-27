@@ -471,11 +471,23 @@ impl Tree {
     /// `@include` it: it isn't built into a page of its own, and its
     /// definitions aren't reported unused.
     pub fn is_library(&self) -> bool {
+        self.is_library_with(&mut |_| false)
+    }
+
+    /// Whether the file is a library (see [`Tree::is_library`]), which may
+    /// also read data (`@data`) and include other libraries: `library`
+    /// says whether the file an `@include` names, as written, is one.
+    pub fn is_library_with(&self, library: &mut dyn FnMut(&str) -> bool) -> bool {
         let mut lets = 0;
         for node in &self.nodes {
             match &node.kind {
                 NodeKind::Blank | NodeKind::Comment => {}
                 _ if node.is_directive("let") => lets += 1,
+                _ if node.is_directive("data") => {}
+                NodeKind::Directive(Directive {
+                    args: DirectiveArgs::Text(Some(path)),
+                    ..
+                }) if node.is_directive("include") && library(path.raw.trim_matches('"')) => {}
                 _ => return false,
             }
         }
@@ -692,6 +704,7 @@ pub(crate) fn parse_from(source: &str, first_id: usize) -> Tree {
         starts: lines.iter().map(|l| l.0).collect(),
     };
     let mut diagnostics = Vec::new();
+    mixed_indentation(&lines, &mut diagnostics);
     let entries = scan(&lines, &index, &mut diagnostics);
     let mut next_id = first_id;
     let mut pos = 0;
@@ -733,6 +746,43 @@ impl LineIndex {
             line,
             column: start - self.starts.get(line - 1).copied().unwrap_or(0),
         }
+    }
+}
+
+/// A tab counts as one column, like a space, so indentation that mixes
+/// them nests lines in ways the eye doesn't see: the first line whose
+/// indentation mixes them, or uses the other one than the lines before
+/// it, is reported.
+fn mixed_indentation(lines: &[(usize, &str)], diagnostics: &mut Vec<Diagnostic>) {
+    let mut first: Option<char> = None;
+    for (number, (_, line)) in lines.iter().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let indent = &line[..leading_whitespace(line)];
+        let (tabs, spaces) = (indent.contains('\t'), indent.contains(' '));
+        let used = match (tabs, spaces) {
+            (false, false) => continue,
+            (true, true) => None,
+            (true, false) => Some('\t'),
+            (false, true) => Some(' '),
+        };
+        if used.is_some() && (first.is_none() || first == used) {
+            first = used;
+            continue;
+        }
+        diagnostics.push(
+            Diagnostic::warning(
+                code::MIXED_INDENTATION,
+                number + 1,
+                "this line's indentation mixes tabs and spaces with the lines before it: a \
+                 tab counts as one space, so the nesting may not be what it looks like. \
+                 Indent with one of them"
+                    .to_string(),
+            )
+            .source(line.to_string()),
+        );
+        return;
     }
 }
 
@@ -1080,14 +1130,19 @@ fn check_body(node: &mut Node, diagnostics: &mut Vec<Diagnostic>) {
                 _ => "a value",
             };
             if let Some(child) = first_child {
-                problem(
-                    child,
+                let message = if def.name.starts_with("--") {
+                    format!(
+                        "`@let {}` declares a custom property, which takes no indented block",
+                        def.name
+                    )
+                } else {
                     format!(
                         "`@let {}` defines {}, which takes no indented block \
                          (a function is `@let @{} [param]` with a body)",
                         def.name, what, def.name
-                    ),
-                );
+                    )
+                };
+                problem(child, message);
             }
         }
         (_, BodyKind::None) => {
@@ -2099,14 +2154,20 @@ impl Reader<'_> {
                     };
                     LetForm::Function(Function { list, params })
                 } else if value.is_empty() {
-                    problems.push(self.error(
-                        code::MISSING_ARGUMENT,
+                    let message = if def_name.starts_with("--") {
+                        format!(
+                            "`@let {}` needs a value: a custom property is declared with one, \
+                             `@let {} 8px`",
+                            def_name, def_name
+                        )
+                    } else {
                         format!(
                             "`@let {}` needs a value: `@let {} VALUE` \
                              (a function is `@let @{}` with an indented body)",
                             def_name, def_name, def_name
-                        ),
-                    ));
+                        )
+                    };
+                    problems.push(self.error(code::MISSING_ARGUMENT, message));
                     return (DirectiveArgs::Invalid, false);
                 } else if let Some(expr) = value.strip_prefix('=') {
                     let expr_at = len - expr.trim_start().len();
@@ -2620,6 +2681,11 @@ mod tests {
         assert!(!library("@let gap 8\n@text $gap\n"));
         assert!(!library("@page Home\n@let gap 8\n"));
         assert!(!library("@include layout.hl\n"));
+        assert!(library("@data $site {\"a\": 1}\n@let gap 8\n"));
+        // An included file counts when it is a library too
+        let with = |src: &str, included: bool| parse(src).is_library_with(&mut |_| included);
+        assert!(with("@include base.hl\n@let accent red\n", true));
+        assert!(!with("@include header.hl\n@let accent red\n", false));
         assert!(!library("-- nothing\n\n"));
         assert!(!library(""));
     }
