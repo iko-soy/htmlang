@@ -1,9 +1,11 @@
 //! Regression tests for bugs found in review. Each test names the behavior
 //! that used to be wrong.
 
+mod common;
+
 use std::path::PathBuf;
 
-use htmlang::codegen;
+use common::codegen;
 use htmlang::parser::{self, Severity};
 
 fn compile(input: &str) -> String {
@@ -478,15 +480,14 @@ fn inline_element_attributes_can_continue_on_the_next_line() {
         "@paragraph\n  Press {@kbd [\n    padding 2 6, border-radius 4\n  ] Ctrl+K} to search.\n",
     );
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
-    let html = htmlang::codegen::generate(&result.document);
+    let html = codegen::generate(&result.document);
     assert!(html.contains(">Ctrl+K</kbd> to search."), "{}", html);
 }
 
 #[test]
 fn lines_under_text_are_its_siblings() {
-    let html = htmlang::codegen::generate(
-        &htmlang::parser::parse("@el\n  Some text\n    more text\n").document,
-    );
+    let html =
+        codegen::generate(&htmlang::parser::parse("@el\n  Some text\n    more text\n").document);
     assert!(
         html.contains("<span>Some text</span><span>more text</span>"),
         "{}",

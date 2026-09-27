@@ -151,6 +151,9 @@ pub mod code {
     // Files
     pub const UNREADABLE_FILE: &str = "unreadable-file";
     pub const CIRCULAR_INCLUDE: &str = "circular-include";
+    /// Two files of one build whose different styles got one class name:
+    /// a name is a hash of its style (`htmlang build` checks).
+    pub const CLASS_COLLISION: &str = "class-collision";
     pub const UNSET_ENVIRONMENT: &str = "unset-environment";
 
     // Context: an attribute or element where it has no effect
@@ -221,6 +224,7 @@ pub mod code {
         INVALID_SLOT_NAME,
         UNREADABLE_FILE,
         CIRCULAR_INCLUDE,
+        CLASS_COLLISION,
         UNSET_ENVIRONMENT,
         NO_EFFECT,
         BLOCK_IN_PARAGRAPH,

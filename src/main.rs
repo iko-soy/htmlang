@@ -42,6 +42,9 @@ struct CompileConfig<'a> {
     minify: bool,
     strict: bool,
     partial: bool,
+    /// The classes of the files built so far: each name, the hash of the
+    /// style it stands for and the file it is from (see `class-collision`)
+    classes: Option<&'a Mutex<HashMap<String, (u64, String)>>>,
 }
 
 fn compile(input_path: &str, cfg: &CompileConfig) -> (bool, Vec<PathBuf>) {
@@ -134,7 +137,7 @@ fn compile(input_path: &str, cfg: &CompileConfig) -> (bool, Vec<PathBuf>) {
                 let _ = fs::write(&out_path, &error_html);
             }
         } else {
-            let html = htmlang::codegen::generate_with(
+            let (html, classes) = htmlang::codegen::generate_with_classes(
                 &result.document,
                 &htmlang::codegen::CodegenOptions {
                     dev: cfg.dev,
@@ -142,6 +145,11 @@ fn compile(input_path: &str, cfg: &CompileConfig) -> (bool, Vec<PathBuf>) {
                     minify: cfg.minify,
                 },
             );
+            if let Some(seen) = cfg.classes
+                && class_collisions(input_path, classes, seen, cfg)
+            {
+                return (true, result.included_files);
+            }
             match fs::write(&out_path, &html) {
                 Ok(()) => eprintln!("wrote {}", out_path.display()),
                 Err(e) => eprintln!("error: {}: {}", out_path.display(), e),
@@ -164,6 +172,49 @@ fn compile(input_path: &str, cfg: &CompileConfig) -> (bool, Vec<PathBuf>) {
     }
 
     (has_errors, result.included_files)
+}
+
+/// Whether a class of `file` has the name of a different style in a file
+/// built before it, which it reports: a class's name is a hash of its
+/// style, so a page and a fragment built together mean the same by one
+/// name, and two styles whose hashes start alike would style each other's
+/// elements where one file's HTML goes into the other's page.
+fn class_collisions(
+    file: &str,
+    classes: Vec<htmlang::codegen::Class>,
+    seen: &Mutex<HashMap<String, (u64, String)>>,
+    cfg: &CompileConfig,
+) -> bool {
+    let mut seen = seen.lock().unwrap();
+    let mut collided = false;
+    for class in classes {
+        let (style, other) = seen
+            .entry(class.name.clone())
+            .or_insert_with(|| (class.style, file.to_string()));
+        if *style == class.style {
+            continue;
+        }
+        collided = true;
+        let message = format!(
+            "{} names two different styles, in {} and in {}: a class's name is a hash of its \
+             style, and these two hash alike. Change either style a little (another value, or \
+             one more attribute) to give it another name",
+            class.name, other, file
+        );
+        let code = htmlang::diagnostic::code::CLASS_COLLISION;
+        match cfg.json_collector.filter(|_| cfg.format_json) {
+            Some(collector) => collector.lock().unwrap().push(DiagnosticJson {
+                file: file.to_string(),
+                line: 0,
+                column: None,
+                code,
+                severity: "error".to_string(),
+                message,
+            }),
+            None => eprintln!("error[{}]: {}: {}", code, file, message),
+        }
+    }
+    collided
 }
 
 fn json_escape_string(s: &str) -> String {
@@ -648,9 +699,11 @@ fn main() {
         // Compile files in parallel
         let build_start = std::time::Instant::now();
         let any_errors = std::sync::atomic::AtomicBool::new(false);
+        let classes = Mutex::new(HashMap::new());
         std::thread::scope(|s| {
             for (file, effective_out) in hl_files.iter().zip(effective_outs.iter()) {
                 let any_errors = &any_errors;
+                let classes = &classes;
                 s.spawn(move || {
                     let path_str = file.to_string_lossy().to_string();
                     let (has_errors, _) = compile(
@@ -659,6 +712,7 @@ fn main() {
                             output_path: effective_out.as_deref(),
                             minify: build_minify,
                             strict: build_strict,
+                            classes: Some(classes),
                             ..Default::default()
                         },
                     );
@@ -1640,6 +1694,24 @@ mod tests {
         assert!(is_library(&layout));
         assert!(!is_library(&page));
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_class_name_that_stands_for_two_styles_fails_the_build() {
+        use htmlang::codegen::Class;
+        let class = |name: &str, style| Class {
+            name: name.to_string(),
+            style,
+        };
+        let seen = Mutex::new(HashMap::new());
+        let cfg = CompileConfig::default();
+        let page = vec![class("hl-2k9xq0m", 1), class("hl-0000000", 2)];
+        assert!(!class_collisions("page.hl", page, &seen, &cfg));
+        // The same style by the same name in another file is fine
+        let fragment = vec![class("hl-2k9xq0m", 1), class("hl-1111111", 3)];
+        assert!(!class_collisions("fragment.hl", fragment, &seen, &cfg));
+        let other = vec![class("hl-0000000", 4)];
+        assert!(class_collisions("other.hl", other, &seen, &cfg));
     }
 
     #[test]

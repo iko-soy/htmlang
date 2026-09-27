@@ -40,8 +40,11 @@ Linux, macOS, and Windows. Your change should pass all three.
     Every CSS property goes through one generic path (its name, its value
     as written, with `vocab::with_px`'s pixels); only htmlang's layout
     words and `line-clamp` have code of their own. Generated classes are
-    `hl-` + a short name; an element's defaults (its layout,
-    `ElementKind::css`) go with its class, as `:where(.hl-a)`, never a
+    `hl-` + 7 base-36 digits of `stable_hash` of the style
+    (`CLASS_DIGITS`), so a style has one name in every file, and
+    `htmlang build` checks no name stands for two styles; an element's
+    defaults (its layout,
+    `ElementKind::css`) go with its class, as `:where(.hl-2k9xq0m)`, never a
     rule on a global element selector, so `@markdown`/`@raw` HTML and a
     page embedding a fragment are untouched. The rules are in cascade
     layers (`LAYERS`): `hl-reset`, `hl-kind` (the defaults), `hl-inside`
@@ -100,6 +103,9 @@ Linux, macOS, and Windows. Your change should pass all three.
   in `docs.rs`.
 - `editors/vscode/` — VS Code extension.
 - `tests/snapshots.rs` — integration / snapshot tests for the compiler.
+  These tests, and `tests/regressions.rs`, read the output with its
+  hashed classes numbered (`hl-a`, `hl-b`, ..., see `tests/common`), so a
+  snapshot changes when a style does, not when a hash does.
 - `tests/regressions.rs` — one test per fixed bug.
 - `tests/docs.rs` — compiles every example in `DESIGN.md` and `README.md`,
   and every page in `examples/`: any diagnostic fails it.

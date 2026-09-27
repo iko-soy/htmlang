@@ -12,7 +12,7 @@ pub struct Document {
     pub css_vars: Vec<(String, String)>,
     pub custom_css: Vec<String>,
     /// The scoped `@style` of each function called, nested under its
-    /// `.hl-fn-NAME` class, for `@layer hl-inside`.
+    /// `.hl-fn-NAME-HASH` class, for `@layer hl-inside`.
     pub scoped_css: Vec<String>,
     pub og_tags: Vec<(String, String)>,
     pub nodes: Vec<Node>,

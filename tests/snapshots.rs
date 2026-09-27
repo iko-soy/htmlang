@@ -1,3 +1,6 @@
+mod common;
+
+use common::codegen;
 use std::fs;
 use std::path::Path;
 
@@ -11,7 +14,7 @@ fn compile(input: &str) -> String {
         "unexpected parse errors: {:?}",
         result.diagnostics
     );
-    htmlang::codegen::generate(&result.document)
+    codegen::generate(&result.document)
 }
 
 fn compile_with_base(input: &str, base: &Path) -> String {
@@ -24,7 +27,7 @@ fn compile_with_base(input: &str, base: &Path) -> String {
         "unexpected parse errors: {:?}",
         result.diagnostics
     );
-    htmlang::codegen::generate(&result.document)
+    codegen::generate(&result.document)
 }
 
 fn parse_diagnostics(input: &str) -> Vec<htmlang::parser::Diagnostic> {
@@ -256,7 +259,7 @@ fn error_unknown_attribute() {
         diags
     );
     assert!(
-        htmlang::codegen::generate(&result.document).contains("bakground:red"),
+        codegen::generate(&result.document).contains("bakground:red"),
         "an unknown property is passed through"
     );
 }
@@ -313,7 +316,7 @@ fn values_pass_through_unchecked() {
                color rebeccapurple, width fit-content, font-weight 450, display blok]\n  x";
     let result = htmlang::parser::parse(src);
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
-    let html = htmlang::codegen::generate(&result.document);
+    let html = codegen::generate(&result.document);
     for css in [
         "padding:abc",
         "opacity:50%",
@@ -2748,7 +2751,7 @@ fn test_variable_filters() {
             .iter()
             .all(|d| d.severity != htmlang::parser::Severity::Error)
     );
-    let html = htmlang::codegen::generate(&result.document);
+    let html = codegen::generate(&result.document);
     assert!(
         html.contains("HELLO"),
         "uppercase filter should work, got: {}",
@@ -2756,7 +2759,7 @@ fn test_variable_filters() {
     );
 
     let result = htmlang::parser::parse("@let name HELLO\n@text ${lowercase($name)}");
-    let html = htmlang::codegen::generate(&result.document);
+    let html = codegen::generate(&result.document);
     assert!(
         html.contains("hello"),
         "lowercase filter should work, got: {}",
@@ -2764,7 +2767,7 @@ fn test_variable_filters() {
     );
 
     let result = htmlang::parser::parse("@let name hello\n@text ${capitalize($name)}");
-    let html = htmlang::codegen::generate(&result.document);
+    let html = codegen::generate(&result.document);
     assert!(
         html.contains("Hello"),
         "capitalize filter should work, got: {}",
@@ -2772,7 +2775,7 @@ fn test_variable_filters() {
     );
 
     let result = htmlang::parser::parse("@let name hello\n@text ${length($name)}");
-    let html = htmlang::codegen::generate(&result.document);
+    let html = codegen::generate(&result.document);
     assert!(
         html.contains("5"),
         "length filter should work, got: {}",
@@ -2780,7 +2783,7 @@ fn test_variable_filters() {
     );
 
     let result = htmlang::parser::parse("@let name hello\n@text ${reverse($name)}");
-    let html = htmlang::codegen::generate(&result.document);
+    let html = codegen::generate(&result.document);
     assert!(
         html.contains("olleh"),
         "reverse filter should work, got: {}",
@@ -2788,7 +2791,7 @@ fn test_variable_filters() {
     );
 
     let result = htmlang::parser::parse("@let name hello world\n@text ${truncate($name, 5)}");
-    let html = htmlang::codegen::generate(&result.document);
+    let html = codegen::generate(&result.document);
     assert!(
         html.contains("hello..."),
         "truncate filter should work, got: {}",
@@ -2799,7 +2802,7 @@ fn test_variable_filters() {
 #[test]
 fn test_css_shorthands_output() {
     let result = htmlang::parser::parse("@text [$truncate] Hello");
-    let html = htmlang::codegen::generate(&result.document);
+    let html = codegen::generate(&result.document);
     assert!(
         html.contains("text-overflow:ellipsis"),
         "truncate should add ellipsis, got: {}",
@@ -2811,7 +2814,7 @@ fn test_css_shorthands_output() {
     );
 
     let result = htmlang::parser::parse("@paragraph [line-clamp 3] Text");
-    let html = htmlang::codegen::generate(&result.document);
+    let html = codegen::generate(&result.document);
     assert!(
         html.contains("-webkit-line-clamp:3"),
         "line-clamp should work, got: {}",
@@ -2819,7 +2822,7 @@ fn test_css_shorthands_output() {
     );
 
     let result = htmlang::parser::parse("@el [filter blur(4px)] Content");
-    let html = htmlang::codegen::generate(&result.document);
+    let html = codegen::generate(&result.document);
     assert!(
         html.contains("filter:blur(4px)"),
         "blur should work, got: {}",
@@ -2827,7 +2830,7 @@ fn test_css_shorthands_output() {
     );
 
     let result = htmlang::parser::parse("@el [backdrop-filter blur(10px)] Content");
-    let html = htmlang::codegen::generate(&result.document);
+    let html = codegen::generate(&result.document);
     assert!(
         html.contains("backdrop-filter:blur(10px)"),
         "backdrop-blur should work, got: {}",
@@ -2865,7 +2868,7 @@ fn test_theme_directive() {
         "theme should not cause errors: {:?}",
         errors
     );
-    let html = htmlang::codegen::generate(&result.document);
+    let html = codegen::generate(&result.document);
     assert!(
         html.contains("--primary:#3b82f6"),
         "theme should emit CSS vars, got: {}",
@@ -2991,7 +2994,7 @@ fn a_token_is_named_like_a_custom_property_on_an_element() {
 #[test]
 fn test_autofocus_attribute() {
     let result = htmlang::parser::parse("@input [type=text, autofocus]");
-    let html = htmlang::codegen::generate(&result.document);
+    let html = codegen::generate(&result.document);
     assert!(
         html.contains("autofocus"),
         "autofocus should be in output, got: {}",
@@ -3681,8 +3684,8 @@ fn switch_with_attrs() {
 fn minified_output_is_smaller() {
     let input = "@page Test\n@el [padding 20]\n  @text [font-weight bold] Hello World\n  @paragraph\n    Some text here\n";
     let result = htmlang::parser::parse(input);
-    let normal = htmlang::codegen::generate(&result.document);
-    let minified = htmlang::codegen::generate_minified(&result.document);
+    let normal = codegen::generate(&result.document);
+    let minified = codegen::generate_minified(&result.document);
     assert!(
         minified.len() <= normal.len(),
         "minified ({}) should be <= normal ({})",
@@ -3696,8 +3699,8 @@ fn minified_output_is_smaller() {
 fn minified_strips_comments() {
     let input = "@page Test\n@el\n  @text Hello\n";
     let result = htmlang::parser::parse(input);
-    let dev = htmlang::codegen::generate_dev(&result.document);
-    let minified = htmlang::codegen::generate_minified(&result.document);
+    let dev = codegen::generate_dev(&result.document);
+    let minified = codegen::generate_minified(&result.document);
     // Dev mode has comments, minified should not
     assert!(dev.contains("<!--"));
     assert!(!minified.contains("<!--"));
@@ -4201,7 +4204,7 @@ fn snapshot_responsive_images() {
 fn source_map_generation() {
     let input = "@page Test\n@text [font-weight bold] Hello";
     let result = htmlang::parser::parse(input);
-    let map = htmlang::codegen::generate_source_map(&result.document, "test.hl");
+    let map = codegen::generate_source_map(&result.document, "test.hl");
     assert!(
         map.contains("\"version\":3"),
         "source map should have version 3"
@@ -4293,7 +4296,7 @@ fn svg_directive_inline() {
         "should parse without errors: {:?}",
         result.diagnostics
     );
-    let html = htmlang::codegen::generate(&result.document);
+    let html = codegen::generate(&result.document);
     assert!(
         html.contains("<svg"),
         "should inline SVG content, got: {}",
@@ -4324,7 +4327,7 @@ fn svg_directive_with_attrs() {
         svg_path.display()
     );
     let result = htmlang::parser::parse(&input);
-    let html = htmlang::codegen::generate(&result.document);
+    let html = codegen::generate(&result.document);
     assert!(
         html.contains("style=\"width:24px;fill:red\""),
         "should override width, got: {}",
@@ -4363,7 +4366,7 @@ fn css_property_directive() {
         "should parse without errors: {:?}",
         result.diagnostics
     );
-    let html = htmlang::codegen::generate(&result.document);
+    let html = codegen::generate(&result.document);
     assert!(
         html.contains("@property --my-color"),
         "@property rule should be emitted, got: {}",
@@ -4389,7 +4392,7 @@ fn css_property_directive() {
 #[test]
 fn partial_output() {
     let result = htmlang::parser::parse("@page Test\n@el [padding 20]\n  Hello");
-    let html = htmlang::codegen::generate_partial(&result.document);
+    let html = codegen::generate_partial(&result.document);
     assert!(
         !html.contains("<!DOCTYPE"),
         "partial should not have doctype, got: {}",
@@ -4425,7 +4428,7 @@ fn partial_output() {
 #[test]
 fn partial_output_dev() {
     let result = htmlang::parser::parse("@page Test\n@el [padding 20]\n  Hello");
-    let html = htmlang::codegen::generate_partial_dev(&result.document);
+    let html = codegen::generate_partial_dev(&result.document);
     assert!(
         !html.contains("<!DOCTYPE"),
         "partial dev should not have doctype"
@@ -4466,7 +4469,7 @@ fn auto_image_dimensions_respects_explicit() {
         png_path.display()
     );
     let result = htmlang::parser::parse(&input);
-    let html = htmlang::codegen::generate(&result.document);
+    let html = codegen::generate(&result.document);
     // When width/height are set as CSS attrs, auto-dimensions should not add HTML width/height
     assert!(
         html.contains("width:100px"),
@@ -4503,7 +4506,7 @@ fn perf_large_document() {
     let input = std::fs::read_to_string(dir.join("stress_large.hl")).unwrap();
     let start = std::time::Instant::now();
     let result = htmlang::parser::parse(&input);
-    let _ = htmlang::codegen::generate(&result.document);
+    let _ = codegen::generate(&result.document);
     let elapsed = start.elapsed();
     assert!(
         elapsed.as_millis() < 5000,
@@ -4576,7 +4579,7 @@ fn markdown_file_renders_content() {
 
     let input = "@markdown article.md\n";
     let result = htmlang::parser::parse_with_base(input, Some(&dir));
-    let html = htmlang::codegen::generate(&result.document);
+    let html = codegen::generate(&result.document);
     let _ = std::fs::remove_dir_all(&dir);
 
     assert!(
@@ -4609,7 +4612,7 @@ fn markdown_file_with_variable_path() {
 
     let input = "@let file post.md\n@markdown $file\n";
     let result = htmlang::parser::parse_with_base(input, Some(&dir));
-    let html = htmlang::codegen::generate(&result.document);
+    let html = codegen::generate(&result.document);
     let _ = std::fs::remove_dir_all(&dir);
 
     assert!(
@@ -4746,7 +4749,7 @@ fn only_a_function_takes_a_body() {
         assert_eq!(found[0].0, 3);
         assert!(found[0].1.contains("`@let @card"), "{}", found[0].1);
         let result = htmlang::parser::parse(&input);
-        let html = htmlang::codegen::generate(&result.document);
+        let html = codegen::generate(&result.document);
         assert!(!html.contains("Body"), "{}: {}", head, html);
     }
 }
@@ -4780,7 +4783,7 @@ fn a_let_needs_a_bare_name_and_a_value() {
     }
     // The body of a `@let` without a value isn't rendered either
     let result = htmlang::parser::parse("@let card\n  @el Body\n");
-    assert!(!htmlang::codegen::generate(&result.document).contains("Body"));
+    assert!(!codegen::generate(&result.document).contains("Body"));
 
     for name in ["1x", "a!b", "true"] {
         let input = format!("@let {} = 1\n", name);
@@ -5054,7 +5057,7 @@ fn a_parameter_passed_with_equals_is_an_error() {
     // Not also reported as missing, and not forwarded as an HTML attribute
     assert!(coded(&diags, "missing-parameter").is_empty(), "{:?}", diags);
     let result = htmlang::parser::parse("@let @card [title]\n  @el $title\n@card [title=Hi]\n");
-    let out = htmlang::codegen::generate(&result.document);
+    let out = codegen::generate(&result.document);
     assert!(out.contains("Hi"), "{}", out);
     assert!(!out.contains("title=\"Hi\""), "{}", out);
 }
@@ -5311,7 +5314,7 @@ fn a_function_in_its_own_callers_content_is_not_recursion() {
     let src = "@let @box\n  @el [padding 4]\n    @children\n@box\n  @box\n    Inner\n  {@box x}\n@box {@box y}\n";
     let result = htmlang::parser::parse(src);
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
-    let out = htmlang::codegen::generate(&result.document);
+    let out = codegen::generate(&result.document);
     // The two calls inside text are inline-flex spans
     assert_eq!(out.matches("<div").count(), 3, "{}", out);
     assert_eq!(out.matches("<span class=").count(), 2, "{}", out);
@@ -5705,7 +5708,7 @@ fn an_included_file_s_slots_are_where_its_include_is() {
         Some(&dir),
     );
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
-    let html = htmlang::codegen::generate(&result.document);
+    let html = codegen::generate(&result.document);
     for text in ["Hello", "Foot", "From fillers", "Plain"] {
         assert!(html.contains(text), "{}: {}", text, html);
     }
@@ -5866,7 +5869,7 @@ fn css_if_in_a_value_is_css() {
         "@el [width if(media(width > 40em): 50%; else: 100%), color if(style(--dark: 1): white; else: black)]\n  x\n",
     );
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
-    let html = htmlang::codegen::generate(&result.document);
+    let html = codegen::generate(&result.document);
     assert!(
         html.contains("width:if(media(width > 40em): 50%; else: 100%);"),
         "{}",
@@ -5978,7 +5981,7 @@ fn the_after_snippet_of_names_not_values() {
     let unknown = coded(&result.diagnostics, "unknown-attribute");
     assert_eq!(unknown.len(), 1, "{:?}", result.diagnostics);
     assert_eq!(unknown[0].severity, htmlang::parser::Severity::Warning);
-    assert!(htmlang::codegen::generate(&result.document).contains("text-grow:per-line"));
+    assert!(codegen::generate(&result.document).contains("text-grow:per-line"));
 
     let d = parse_diagnostics("@let name Ada\n@text Hello $nmae\n");
     let undefined = coded(&d, "undefined-variable");
@@ -6011,7 +6014,7 @@ fn unknown_css_properties_pass_through_with_a_warning() {
     assert_eq!(unknown[0].subject.as_deref(), Some("colr"));
     assert_eq!(unknown[0].suggestion.as_deref(), Some("color"));
     assert_eq!(unknown[0].column, Some(5));
-    let html = htmlang::codegen::generate(&result.document);
+    let html = codegen::generate(&result.document);
     for css in [
         "colr:red",
         "--gap:12px",
@@ -6045,7 +6048,7 @@ fn what_cannot_be_css_is_an_error_and_left_out() {
             src,
             result.diagnostics
         );
-        let html = htmlang::codegen::generate(&result.document);
+        let html = codegen::generate(&result.document);
         assert!(
             !html.contains("center-z") && !html.contains("email"),
             "{}",
@@ -6103,7 +6106,7 @@ fn selector_prefixes_are_css_pseudo_classes_and_elements() {
                @el [not([title=\") x\"]):color blue] x\n";
     let result = htmlang::parser::parse(src);
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
-    let html = htmlang::codegen::generate(&result.document);
+    let html = codegen::generate(&result.document);
     for css in [
         ":first-child{font-weight:700;}",
         ":nth-child(odd){background:var(--subtle);}",
@@ -6170,7 +6173,7 @@ fn values_that_would_break_out_of_the_css_rule_are_errors() {
             result.diagnostics
         );
         // The value is left out of the page
-        let html = htmlang::codegen::generate(&result.document);
+        let html = codegen::generate(&result.document);
         assert!(
             !html.contains("background blue") && !html.contains("{3}"),
             "{}",
@@ -6220,7 +6223,7 @@ fn a_style_whose_value_comes_out_empty_is_left_out() {
         "@data $p {\"title\": \"Hi\"}\n@let on false\n@el [padding $p.gap, margin ${if($on, 4)}, color red]\n  $p.title\n",
     );
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
-    let html = htmlang::codegen::generate(&result.document);
+    let html = codegen::generate(&result.document);
     assert!(
         !html.contains("padding:") && !html.contains("margin:"),
         "{}",
@@ -6330,7 +6333,7 @@ fn a_warning_in_a_loop_or_a_function_is_reported_once() {
 fn hidden_is_a_boolean_attribute() {
     let result = htmlang::parser::parse("@el [hidden] x\n");
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
-    assert!(htmlang::codegen::generate(&result.document).contains("<div class=\"hl-a\" hidden>"));
+    assert!(codegen::generate(&result.document).contains("<div class=\"hl-a\" hidden>"));
 }
 
 #[test]
@@ -6527,7 +6530,7 @@ fn spacing_goes_only_on_a_row_column_or_grid() {
         );
         assert!(errors[0].message.contains(name), "{}: {:?}", src, errors);
         // Left out of the page
-        let out = htmlang::codegen::generate(&result.document);
+        let out = codegen::generate(&result.document);
         assert!(!out.contains("gap:"), "{}: {}", src, out);
         assert!(!out.contains("flex-wrap"), "{}: {}", src, out);
         assert!(!out.contains("grid-template"), "{}: {}", src, out);
@@ -6575,7 +6578,7 @@ fn fill_and_center_compile_against_the_parent_s_layout() {
         "{:?}",
         result.diagnostics
     );
-    assert!(!htmlang::codegen::generate(&result.document).contains("flex:1"));
+    assert!(!codegen::generate(&result.document).contains("flex:1"));
 }
 
 #[test]
@@ -7385,7 +7388,7 @@ fn an_element_inside_text_is_not_a_child_of_the_row_around_it() {
 /// Output with the errors allowed, for tests of what an error leaves.
 fn compile_anyway(input: &str) -> (String, Vec<htmlang::parser::Diagnostic>) {
     let result = htmlang::parser::parse(input);
-    let html = htmlang::codegen::generate_partial(&result.document);
+    let html = codegen::generate_partial(&result.document);
     (html, result.diagnostics)
 }
 
@@ -7740,7 +7743,7 @@ fn readable_output_adds_no_whitespace_inside_pre_and_textarea() {
         "@el\n  @pre > @code\n    a\n      b\n  @textarea [aria-label=x]\n    c\n",
     )
     .document;
-    let out = htmlang::codegen::generate_dev(&doc);
+    let out = codegen::generate_dev(&doc);
     assert!(
         out.contains("><code class=\"hl-c\">a\n  b</code></pre>\n"),
         "{}",
@@ -8198,7 +8201,7 @@ fn a_custom_property_is_a_style_on_any_element_under_any_prefix() {
         "@el [--a 1, hover:--b 2, md:--c 3, dark:--d 4, children:--e 5, nth-child(2n):--f 6, has(.x):--g 7, print:--h 8, cq-md:--i 9]\n  x\n@image [alt=x, --w 20px] a.png\n@paragraph {@em [--j 1] y}\n",
     );
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
-    let html = htmlang::codegen::generate(&result.document);
+    let html = codegen::generate(&result.document);
     for declaration in [
         "--a:1;",
         "--b:2;",
@@ -8228,7 +8231,7 @@ fn a_vendor_prefixed_property_is_a_style_under_any_prefix() {
         "@el [-webkit-text-stroke 1px red, hover:-webkit-text-stroke 2px red, dark:-webkit-tap-highlight-color transparent, -moz-osx-font-smoothing grayscale, -ms-overflow-style none]\n  x\n",
     );
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
-    let html = htmlang::codegen::generate(&result.document);
+    let html = codegen::generate(&result.document);
     for declaration in [
         "-webkit-text-stroke:1px red;",
         ":hover{-webkit-text-stroke:2px red;}",
@@ -8264,7 +8267,7 @@ fn a_custom_property_on_a_line_of_a_list_is_a_declaration() {
         "@el [\n  padding 4,\n  --surface white,\n  -- a comment\n  --\n  color red\n]\n  x\n",
     );
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
-    let html = htmlang::codegen::generate(&result.document);
+    let html = codegen::generate(&result.document);
     assert!(
         html.contains("padding:4px;--surface:white;color:red;"),
         "{}",
@@ -8296,7 +8299,7 @@ fn a_style_an_inline_svg_can_t_take_is_an_error() {
         "@image [inline, width 24, color red, class=icon, aria-label=Logo, role=img] i.svg\n@image [inline, --w 2px, hover:color blue, alt=x] i.svg\n",
         Some(&dir),
     );
-    let html = htmlang::codegen::generate(&result.document);
+    let html = codegen::generate(&result.document);
     assert!(
         html.contains(
             "<svg viewBox=\"0 0 1 1\" class=\"icon\" aria-label=\"Logo\" role=\"img\" style=\"width:24px;fill:red\">"
@@ -8331,7 +8334,7 @@ fn a_style_an_inline_svg_can_t_take_is_an_error() {
         "{}",
         errors[0].message
     );
-    let html = htmlang::codegen::generate(&result.document);
+    let html = codegen::generate(&result.document);
     assert!(!html.contains("width=\"fill\""), "{}", html);
     assert!(html.contains("style=\"height:2em\""), "{}", html);
     let _ = fs::remove_dir_all(&dir);

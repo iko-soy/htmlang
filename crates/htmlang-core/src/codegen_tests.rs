@@ -1,6 +1,8 @@
 #[cfg(test)]
 mod tests {
-    use crate::codegen::{generate, generate_dev, generate_partial, short_class_name};
+    use crate::codegen::{
+        CodegenOptions, generate, generate_dev, generate_partial, generate_with_classes,
+    };
     use crate::parser::parse;
 
     fn compile(src: &str) -> String {
@@ -54,13 +56,35 @@ mod tests {
         assert_eq!(generate_dev(&r1.document), generate_dev(&r2.document));
     }
 
+    /// The classes of `src`, compiled as a fragment
+    fn classes(src: &str) -> Vec<crate::codegen::Class> {
+        let options = CodegenOptions {
+            partial: true,
+            ..Default::default()
+        };
+        generate_with_classes(&parse(src).document, &options).1
+    }
+
     #[test]
-    fn short_class_name_is_stable() {
-        assert_eq!(short_class_name(0), "a");
-        assert_eq!(short_class_name(25), "z");
-        // Higher indexes must produce unique, stable names.
-        let names: std::collections::HashSet<_> = (0..50_000).map(short_class_name).collect();
-        assert_eq!(names.len(), 50_000, "short_class_name collisions");
+    fn a_style_has_one_name_in_every_file() {
+        // A fragment's classes mean in a page what they mean in the
+        // fragment, whatever else either holds
+        let page = classes("@el [padding 10, background red] a\n@el [gap 4] b\n");
+        let fragment = classes("@row [margin 2] x\n@el [padding 10, background red] y\n");
+        assert_eq!(page[0], fragment[1]);
+        assert_ne!(page[1].style, fragment[0].style);
+        assert_ne!(page[1].name, fragment[0].name);
+        for class in page.iter().chain(&fragment) {
+            let digits = class.name.strip_prefix("hl-").expect("hl-");
+            assert_eq!(digits.len(), crate::codegen::CLASS_DIGITS, "{}", class.name);
+            assert!(
+                digits
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || b.is_ascii_lowercase()),
+                "{}",
+                class.name
+            );
+        }
     }
 
     #[test]

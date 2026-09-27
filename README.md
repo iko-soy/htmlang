@@ -89,11 +89,13 @@ unless you write some, and nothing is added that you didn't ask for.
   written (`outline 2 solid red` is `outline: 2px solid red`, nothing
   added). Nothing you write is left out of the page without an error.
 - **The generated CSS stays on htmlang's elements.** Its classes are
-  `hl-a`, `hl-b`, ..., in cascade layers (`hl-reset`, `hl-kind`,
-  `hl-inside`, `htmlang`), so your own CSS wins. An element's defaults (no
-  heading margins, no list markers, links in the text colour) go with its
-  own class, so `@markdown` and `@raw` HTML, and a page that embeds
-  `--partial` output, keep theirs.
+  named by their styles (`hl-2k9xq0m`), in cascade layers (`hl-reset`,
+  `hl-kind`, `hl-inside`, `htmlang`), so your own CSS wins. An element's
+  defaults (no heading margins, no list markers, links in the text colour)
+  go with its own class, so `@markdown` and `@raw` HTML, and a page that
+  embeds `--partial` output, keep theirs. One style has one name in every
+  file, so a fragment a server swaps into a page (with htmx, say) means
+  the same there and restyles nothing of the page's.
 - **HTML stays HTML.** An element that isn't about layout or text has its
   HTML name (`@nav`, `@ul`, `@form`, `@details`, `@strong`, `@em`, `@br`,
   `@caption`), from a fixed list, so a typo is an error rather than a new
@@ -134,7 +136,7 @@ htmlang build src -o dist    # compile a whole site
 
 | Command | Purpose |
 |---|---|
-| `build <dir> [-o out] [--minify] [--strict]` | Compile every `.hl` file under a directory (into `out/` by default), except libraries: files that hold only `@let`s |
+| `build <dir> [-o out] [--minify] [--strict]` | Compile every `.hl` file under a directory (into `out/` by default), except libraries: files that hold only `@let`s. Two files whose different styles got one class name are an error (`class-collision`) |
 | `serve [dir\|file] [-p PORT] [--open]` | Dev server with live reload. It serves files, so it answers GET and HEAD (other methods get 405), and reloads pages, not fragments |
 | `watch [dir\|file] [-o out]` | Recompile on change, without a server |
 | `check <file\|dir> [--format json]` | Report diagnostics without writing output |

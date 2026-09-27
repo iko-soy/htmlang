@@ -44,10 +44,10 @@ struct FnDef {
     slots: Vec<String>,
     /// Whether its body has a `@children` for the content of a call.
     has_children: bool,
-    /// Its scoped `@style`, nested under its `.hl-fn-NAME` class: written
-    /// into the page once the function is called (see
-    /// `Document::scoped_css`).
-    scoped: Option<String>,
+    /// Its scoped `@style`: its class (`hl-fn-NAME-HASH`), and the
+    /// stylesheet nested under it, written into the page once the function
+    /// is called (see `Document::scoped_css`).
+    scoped: Option<(String, String)>,
     /// What was visible where it was defined: its body and its defaults
     /// see this, plus its parameters.
     env: Env,
@@ -1963,9 +1963,12 @@ impl Evaluator {
         let line_num = node.span.line;
         let body = &node.children;
         // An @style block at the top of the body is scoped to the
-        // function: its rules apply inside a `.hl-fn-NAME` wrapper (a
+        // function: its rules apply inside a `.hl-fn-NAME-HASH` wrapper (a
         // generated class never has a second `-`, so the two can't meet).
-        // It is written into the page when the function is called.
+        // The hash is the stylesheet's, so two functions of one name with
+        // two stylesheets, in two files, don't style each other's elements
+        // in a page that has both. It is written into the page when the
+        // function is called.
         let (style, body): (Vec<&syntax::Node>, Vec<&syntax::Node>) =
             body.iter().partition(|node| node.is_directive("style"));
         let scoped = (!style.is_empty()).then(|| {
@@ -1976,13 +1979,17 @@ impl Evaluator {
                     verbatim_content(node)
                 })
                 .collect();
+            let digits = crate::codegen::CLASS_DIGITS;
+            let hash = crate::codegen::hash_digits(crate::codegen::stable_hash(&css), digits);
+            let class = format!("hl-fn-{}-{}", name, hash);
             // Nested under the scope class, so any CSS works (multi-line
             // rules, at-rules)
-            if css.trim().is_empty() {
+            let css = if css.trim().is_empty() {
                 String::new()
             } else {
-                format!(".hl-fn-{} {{\n{}}}", name, css)
-            }
+                format!(".{} {{\n{}}}", class, css)
+            };
+            (class, css)
         });
 
         // A default is filled in only when a call leaves its parameter
@@ -2287,7 +2294,7 @@ impl Evaluator {
 
         // Attributes that aren't parameters style the function's root
         // element, and a scoped @style's class goes on it too.
-        let scope_class = fn_def.scoped.is_some().then(|| format!("hl-fn-{}", name));
+        let scope_class = fn_def.scoped.as_ref().map(|(class, _)| class.clone());
         if !forwarded.is_empty() || scope_class.is_some() {
             let mut roots = result_nodes.iter_mut().filter_map(|n| match n {
                 Node::Element(e) => Some(e),
@@ -2321,7 +2328,7 @@ impl Evaluator {
                     }
                     // The scoped `@style` goes into the page once, when the
                     // function is first called
-                    if let Some(css) = &fn_def.scoped
+                    if let Some((_, css)) = &fn_def.scoped
                         && !css.is_empty()
                         && !ctx.scoped_css.contains(css)
                     {
